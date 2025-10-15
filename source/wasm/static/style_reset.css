@@ -1,0 +1,102 @@
+/*
+Baseline un-styling.
+*/
+
+@layer reset;
+
+@layer reset {
+  *,
+  *:before,
+  *:after {
+    padding: 0;
+    margin: 0;
+    font-size: 12pt;
+    font-weight: 400;
+    box-sizing: border-box;
+    pointer-events: none;
+    text-decoration: none;
+    border: none;
+    background: none;
+    outline: none;
+    text-align: left;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    flex-shrink: 0;
+  }
+
+  html {
+    min-height: 100dvh;
+    width: 100dvw;
+    max-width: 100dvw;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 1fr;
+
+    &>* {
+      grid-column: 1;
+      grid-row: 1;
+    }
+  }
+
+  a,
+  input,
+  label,
+  select,
+  button,
+  *[contenteditable],
+  summary {
+    pointer-events: initial;
+  }
+
+  video:host::cue {
+    font-size: max(3dvh, 12pt);
+  }
+}
+
+.group {
+  display: contents;
+}
+
+.vbox {
+    display: flex;
+    flex-direction: column;
+    justify-content: stretch;
+}
+
+.hbox {
+    display : flex;
+    flex-direction: row;
+    justify-content: stretch;
+}
+
+.hbox > input {
+  flex-grow: 1;
+}
+
+.stack {
+  display: grid;
+  grid-template-columns: 1fr;
+  &>* {
+    grid-column: 1;
+    grid-row: 1;
+  }
+}
+
+/** Basic stuff */
+@font-face {
+  font-family: "I";
+  src: url("MaterialSymbolsRounded.woff2");
+}
+
+@font-face {
+  font-family: "X";
+  src: url("MaterialSymbolsRounded.woff2");
+  unicode-range: U+E000-F8FF;
+  /* Combining fonts messes with the icon metrics, use I for pure icons */
+}
+
+@font-face {
+  font-family: "X";
+  src: url("Quicksand-VariableFont_wght.ttf");
+}
