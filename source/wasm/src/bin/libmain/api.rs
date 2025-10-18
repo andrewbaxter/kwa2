@@ -1,10 +1,8 @@
 use {
-    super::{
-        ministate::{
-            Ministate,
-            SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
-        },
-        state::state,
+    super::state::state,
+    crate::libmain::state::{
+        Ministate,
+        SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
     },
     gloo::{
         storage::{
@@ -14,21 +12,11 @@ use {
         },
         utils::window,
     },
-    js_sys::Uint8Array,
     reqwasm::http::{
         Request,
         Response,
     },
-    shared::interface::{
-        triple::{
-            FileHash,
-        },
-        wire::{
-            C2SReq,
-            C2SReqTrait,
-            HEADER_OFFSET,
-        },
-    },
+    shared::interface::wire::c2s,
     wasm::js::LogJsErr,
     wasm_bindgen::UnwrapThrowExt,
     web_sys::Url,
@@ -107,11 +95,11 @@ async fn post(base_url: &str, req: Request) -> Result<Vec<u8>, String> {
     return read_resp(base_url, resp).await;
 }
 
-pub async fn req_post_json<T: C2SReqTrait>(base_url: &str, req: T) -> Result<T::Resp, String> {
+pub async fn req_post_json<T: c2s::proto::ReqTrait>(base_url: &str, req: T) -> Result<T::Resp, String> {
     let req =
         Request::post(&format!("{}api", base_url))
             .header("Content-type", "application/json")
-            .body(serde_json::to_string(&C2SReq::from(req.into())).unwrap_throw());
+            .body(serde_json::to_string(&req.to_enum()).unwrap_throw());
     let body = post(base_url, req).await?;
     return Ok(
         serde_json::from_slice::<T::Resp>(
@@ -120,15 +108,6 @@ pub async fn req_post_json<T: C2SReqTrait>(base_url: &str, req: T) -> Result<T::
             |e| format!("Error parsing JSON response from server: {}\nBody: {}", e, String::from_utf8_lossy(&body)),
         )?,
     );
-}
-
-pub async fn file_post_json(base_url: &str, hash: &FileHash, chunk_start: u64, body: &[u8]) -> Result<(), String> {
-    let req =
-        Request::post(&format!("{}file/{}", base_url, hash.to_string()))
-            .header(HEADER_OFFSET, &chunk_start.to_string())
-            .body(Uint8Array::from(body));
-    post(base_url, req).await?;
-    return Ok(());
 }
 
 pub async fn req_file(base_url: &str, url: &str) -> Result<Vec<u8>, String> {

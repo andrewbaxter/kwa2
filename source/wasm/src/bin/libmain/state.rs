@@ -1,7 +1,13 @@
 use {
-    crate::libmain::page_top::build_page_top,
+    crate::libmain::{
+        page_identities::build_page_identities,
+        page_top::build_page_top,
+    },
     gloo::{
-        storage::LocalStorage,
+        storage::{
+            LocalStorage,
+            Storage,
+        },
         utils::{
             document,
             window,
@@ -18,6 +24,12 @@ use {
         Deserialize,
         Serialize,
     },
+    shared::interface::wire::shared::{
+        ChannelId,
+        InternalChannelGroupId,
+        InternalChannelId,
+    },
+    spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
         collections::HashMap,
@@ -30,6 +42,7 @@ use {
             style_export,
             Env,
             Log,
+            LogJsErr,
             VecLog,
         },
     },
@@ -41,19 +54,23 @@ pub const SESSIONSTORAGE_POST_REDIRECT_MINISTATE: &str = "post_redirect";
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateChannel {
+    pub identity: Identity,
+    pub channel: ChannelId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Ministate {
     Top,
     Identities,
+    Identity(Identity),
+    Channel(MinistateChannel),
+    ChannelGroup(InternalChannelGroupId),
 }
 
 pub fn ministate_octothorpe(s: &Ministate) -> String {
     return format!("#{}", serde_json::to_string(&s).unwrap());
-}
-
-pub fn ministate_title(s: &Ministate) -> String {
-    match s {
-        Ministate::Top => return s.title.clone(),
-    }
 }
 
 /// Replaces current state in history, no page change
@@ -68,7 +85,7 @@ pub fn record_replace_ministate(log: &Rc<dyn Log>, s: &Ministate) {
 
 pub fn read_ministate(log: &Rc<dyn Log>) -> Ministate {
     let Some(s) = get_dom_octothorpe(log) else {
-        return Ministate::Home;
+        return Ministate::Top;
     };
     match serde_json::from_str::<Ministate>(s.as_ref()) {
         Ok(s) => return s,
@@ -102,8 +119,7 @@ pub fn state() -> Rc<State_> {
     return STATE.with(|x| x.borrow().clone()).unwrap();
 }
 
-fn set_page(pc: &mut ProcessingContext, title: &str, body: El) {
-    document().set_title(title);
+fn set_page(pc: &mut ProcessingContext, body: El) {
     let r = &state().root;
     r.ref_clear();
     r.ref_push(body);
@@ -112,7 +128,22 @@ fn set_page(pc: &mut ProcessingContext, title: &str, body: El) {
 pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
     match s {
         Ministate::Top => {
-            set_page(pc, "Home", build_page_top(pc));
+            let body = build_page_top(pc);
+            set_page(pc, body);
+        },
+        Ministate::Identities => {
+            let body = build_page_identities(pc);
+            set_page(pc, body);
+        },
+        Ministate::Identity(id) => {
+            let body = build_page_identity(pc, id);
+            set_page(pc, body);
+        },
+        Ministate::Channel(id) => {
+            //. set_page(pc, build_page_channel(id));
+        },
+        Ministate::ChannelGroup(id) => {
+            //. set_page(pc, build_page_channel_group(id));
         },
     }
 }

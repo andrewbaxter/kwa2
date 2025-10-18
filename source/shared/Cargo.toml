@@ -11,3 +11,5 @@ schemars = { version = "0.8", features = ["chrono"] }
 sha2 = "0.10"
 hex = "0.4"
 ts-rs = { version = "11", features = ["serde-json-impl"] }
+glove = "0.4"
+spaghettinuum = { path = "../spaghettinuum/source/shared" }

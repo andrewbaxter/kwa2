@@ -23,10 +23,23 @@ rust-embed = { version = "8", features = [
 serde_json = "1"
 hex = "0.4"
 rand = "0.9"
-spaghettinuum = { path = "../spaghettinuum/source" }
+spaghettinuum = { path = "../spaghettinuum/source/shared" }
+spaghettinuum_native = { path = "../spaghettinuum/source/native" }
 chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.30", features = ["array", "bundled"] }
 deadpool-sqlite = "0.7"
+shared = { path = "../shared" }
+openidconnect = { version = "3", default-features = false }
+oauth2 = { version = "4", default-features = false }
+cookie = { version = "0.18" }
+ts-rs = { version = "11", features = ["serde-json-impl"] }
+moka = { version = "0.12", features = ["future"] }
+http-serde = "2"
+serde_urlencoded = "0.7"
+hyper-tungstenite = { version = "0.17" }
+hyper-util = "0.1"
+hyper = "1"
+http-body-util = "0.1"
 
 [build-dependencies]
 good-ormning = { version = "0.3", features = ["chrono", "sqlite"] }
