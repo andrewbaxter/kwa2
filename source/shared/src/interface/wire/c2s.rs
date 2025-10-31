@@ -1,20 +1,17 @@
 use {
-    super::shared::ChannelId,
     crate::interface::wire::shared::{
-        ChannelInvitationToken,
-        IdentityInvitationToken,
-        InternalChannelGroupId,
-        InternalChannelId,
-        InternalIdentityId,
+        ChannelGroupId,
+        ChannelInviteId,
+        IdentityInviteId,
         Message,
         MessageBody,
         MessageId,
-    },
-    chrono::{
-        DateTime,
-        Utc,
+        QualifiedChannelId,
+        QualifiedChannelInviteToken,
+        QualifiedIdentityInviteToken,
     },
     glove::reqresp,
+    jiff::Timestamp,
     schemars::JsonSchema,
     serde::{
         Deserialize,
@@ -42,10 +39,9 @@ pub struct IdentityCreate {
     pub memo_long: String,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct IdentityRes {
-    pub internal_id: InternalIdentityId,
     pub id: Identity,
     pub idem: Option<String>,
     pub memo_short: String,
@@ -59,7 +55,7 @@ pub struct IdentityModify {
     #[serde(default)]
     pub memo_short: Option<String>,
     #[serde(default)]
-    pub memo_long: String,
+    pub memo_long: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -86,96 +82,106 @@ pub struct ChannelGroupCreate {
     pub memo_long: String,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelGroupRes {
-    pub internal_id: InternalChannelGroupId,
+    pub id: ChannelGroupId,
     pub idem: Option<String>,
     pub memo_short: String,
     pub memo_long: String,
 }
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelGroupList;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelGroupModify {
-    pub internal_id: InternalChannelGroupId,
+    pub id: ChannelGroupId,
     #[serde(default)]
     pub memo_short: Option<String>,
     #[serde(default)]
-    pub memo_long: String,
+    pub memo_long: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelGroupDelete {
-    pub internal_id: InternalChannelGroupId,
+    pub id: ChannelGroupId,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelGroupGet {
-    pub internal_id: InternalChannelGroupId,
+    pub id: ChannelGroupId,
 }
 
 // # Channel
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelCreate {
+    pub identity: Identity,
     pub idem: Option<String>,
-    pub id: Identity,
-    pub group: Option<InternalChannelGroupId>,
+    pub group: Option<ChannelGroupId>,
     pub memo_short: String,
     pub memo_long: String,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelRes {
-    pub identity: Identity,
-    pub id: ChannelId,
+    pub id: QualifiedChannelId,
     pub idem: Option<String>,
-    pub group: Option<InternalChannelGroupId>,
+    pub group: Option<ChannelGroupId>,
     pub memo_short: String,
     pub memo_long: String,
 }
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelList;
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelJoin;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelModify {
-    pub internal_id: InternalChannelId,
+    pub id: QualifiedChannelId,
     #[serde(default)]
-    pub group: Option<ModifyOption<InternalChannelGroupId>>,
+    pub group: Option<ModifyOption<ChannelGroupId>>,
     #[serde(default)]
     pub memo_short: Option<String>,
     #[serde(default)]
-    pub memo_long: String,
+    pub memo_long: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelDelete {
-    pub internal_id: InternalChannelId,
+    pub id: QualifiedChannelId,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelGet {
-    pub internal_id: InternalChannelId,
+    pub id: QualifiedChannelId,
 }
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelOrChannelGroupTree;
+pub struct ChannelJoinChannel {
+    pub channel: QualifiedChannelId,
+    pub code: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelJoinIdentity {
+    pub identity: Identity,
+    pub code: String,
+}
 
 // # Identity invitation
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInvitationCreate {
+pub struct IdentityInviteCreate {
     #[serde(default)]
     pub idem: Option<String>,
     pub memo_short: String,
@@ -184,49 +190,48 @@ pub struct IdentityInvitationCreate {
     #[serde(default)]
     pub single_use: bool,
     #[serde(default)]
-    pub expiry: Option<DateTime<Utc>>,
+    pub expiry: Option<Timestamp>,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInvitationRes {
-    pub id: ChannelId,
+pub struct IdentityInviteRes {
+    pub id: IdentityInviteId,
+    pub token: QualifiedIdentityInviteToken,
     pub memo_short: String,
     pub memo_long: String,
-    pub identity: Identity,
     pub single_use: bool,
-    pub expiry: DateTime<Utc>,
-    pub token: IdentityInvitationToken,
+    pub expiry: Option<Timestamp>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInvitationModify {
-    pub id: IdentityInvitationToken,
+pub struct IdentityInviteModify {
+    pub id: IdentityInviteId,
     #[serde(default)]
     pub memo_short: Option<String>,
     #[serde(default)]
-    pub memo_long: String,
+    pub memo_long: Option<String>,
     #[serde(default)]
     pub single_use: Option<bool>,
     #[serde(default)]
-    pub expiry: Option<DateTime<Utc>>,
+    pub expiry: Option<ModifyOption<Timestamp>>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInvitationDelete {
-    pub id: IdentityInvitationToken,
+pub struct IdentityInviteDelete {
+    pub id: IdentityInviteId,
 }
-
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInvitationList {}
+pub struct IdentityInviteList;
 
 // # Channel invitation
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelInvitationCreate {
+pub struct ChannelInviteCreate {
+    pub channel: QualifiedChannelId,
     #[serde(default)]
     pub idem: Option<String>,
     pub memo_short: String,
@@ -234,53 +239,55 @@ pub struct ChannelInvitationCreate {
     #[serde(default)]
     pub single_use: bool,
     #[serde(default)]
-    pub expiry: Option<ModifyOption<DateTime<Utc>>>,
+    pub expiry: Option<Timestamp>,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelInvitationRes {
-    pub id: ChannelId,
+pub struct ChannelInviteRes {
+    pub id: ChannelInviteId,
+    pub token: QualifiedChannelInviteToken,
     pub memo_short: String,
     pub memo_long: String,
-    pub token: ChannelInvitationToken,
+    pub single_use: bool,
+    pub expiry: Option<Timestamp>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelInvitationModify {
-    pub id: ChannelInvitationToken,
+pub struct ChannelInviteModify {
+    pub id: ChannelInviteId,
     #[serde(default)]
     pub memo_short: Option<String>,
     #[serde(default)]
-    pub memo_long: String,
+    pub memo_long: Option<String>,
     #[serde(default)]
     pub single_use: Option<bool>,
     #[serde(default)]
-    pub expiry: Option<ModifyOption<DateTime<Utc>>>,
+    pub expiry: Option<ModifyOption<Timestamp>>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelInvitationDelete {
-    pub id: ChannelInvitationToken,
+pub struct ChannelInviteDelete {
+    pub id: ChannelInviteId,
 }
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelInvitationList;
+pub struct ChannelInviteList;
 
 // Channel member
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MemberAdd {
-    pub channel: ChannelId,
+    pub channel: QualifiedChannelId,
     pub identity: Identity,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MemberDelete {
-    pub channel: ChannelId,
+    pub channel: QualifiedChannelId,
     pub identity: Identity,
 }
 
@@ -292,7 +299,7 @@ pub struct MemberList {}
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessagePush {
     pub idem: Option<String>,
-    pub channel: ChannelId,
+    pub channel: QualifiedChannelId,
     pub identity: Identity,
     pub body: MessageBody,
 }
@@ -300,11 +307,11 @@ pub struct MessagePush {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageLastPage {
-    pub channel: ChannelId,
+    pub channel: QualifiedChannelId,
     pub identity: Identity,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageLastPageRes {
     pub page: usize,
@@ -313,12 +320,12 @@ pub struct MessageLastPageRes {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessagePageContaining {
-    pub channel: ChannelId,
+    pub channel: QualifiedChannelId,
     pub identity: Identity,
     pub message: MessageId,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessagePageContainingRes {
     pub page: usize,
@@ -327,12 +334,12 @@ pub struct MessagePageContainingRes {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageGetPage {
-    pub channel: ChannelId,
+    pub channel: QualifiedChannelId,
     pub identity: Identity,
     pub page: usize,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageGetPageRes {
     pub messages: Vec<Message>,
@@ -341,7 +348,7 @@ pub struct MessageGetPageRes {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageDelete {
-    pub channel: ChannelId,
+    pub channel: QualifiedChannelId,
     pub identity: Identity,
     pub message_id: MessageId,
 }
@@ -363,30 +370,31 @@ pub enum ChannelOrChannelGroup {
 
 reqresp!(pub proto {
         Logout(Logout) =>(),
-        //.    IdentityCreate(IdentityCreate) => IdentityRes,
-        //.    IdentityModify(IdentityModify) =>(),
-        //.    IdentityDelete(IdentityDelete) =>(),
+        IdentityCreate(IdentityCreate) => IdentityRes,
+        IdentityModify(IdentityModify) => IdentityRes,
+        IdentityDelete(IdentityDelete) =>(),
         //.    IdentityGet(IdentityGet) => IdentityRes,
         IdentityList(IdentityList) => Vec < IdentityRes >,
-        //.    ChannelCreate(ChannelCreate) => ChannelId,
-        //.    ChannelJoin(ChannelJoin) =>(),
-        //.    ChannelModify(ChannelModify) =>(),
-        //.    ChannelDelete(ChannelDelete) =>(),
+        ChannelGroupCreate(ChannelGroupCreate) => ChannelGroupRes,
+        ChannelGroupModify(ChannelGroupModify) => ChannelGroupRes,
+        ChannelGroupDelete(ChannelGroupDelete) =>(),
+        //.    ChannelGroupGet(ChannelGroupGet) => ChannelGroupRes,
+        ChannelGroupList(ChannelGroupList) => Vec < ChannelGroupRes >,
+        ChannelCreate(ChannelCreate) => ChannelRes,
+        ChannelJoinChannel(ChannelJoinChannel) => ChannelRes,
+        ChannelJoinIdentity(ChannelJoinIdentity) => ChannelRes,
+        ChannelModify(ChannelModify) => ChannelRes,
+        ChannelDelete(ChannelDelete) =>(),
         ChannelList(ChannelList) => Vec < ChannelRes >,
         //.    ChannelGet(ChannelGet) => ChannelRes,
-        //.    ChannelGroupCreate(ChannelGroupCreate) => ChannelGroupRes,
-        //.    ChannelGroupModify(ChannelGroupModify) =>(),
-        //.    ChannelGroupDelete(ChannelGroupDelete) =>(),
-        //.    ChannelGroupGet(ChannelGroupGet) => ChannelGroupRes,
-        ChannelOrChannelGroupTree(ChannelOrChannelGroupTree) => Vec < ChannelOrChannelGroup >,
-    //.    IdentityInvitationCreate(IdentityInvitationCreate) => IdentityInvitationRes,
-    //.    IdentityInvitationModify(IdentityInvitationModify) =>(),
-    //.    IdentityInvitationDelete(IdentityInvitationDelete) =>(),
-    //.    IdentityInvitationList(IdentityInvitationList) => Vec < IdentityInvitationRes >,
-    //.    ChannelInvitationCreate(ChannelInvitationCreate) => ChannelInvitationRes,
-    //.    ChannelInvitationModify(ChannelInvitationModify) =>(),
-    //.    ChannelInvitationDelete(ChannelInvitationDelete) =>(),
-    //.    ChannelInvitationList(ChannelInvitationList) => Vec < ChannelInvitationRes >,
+        IdentityInviteCreate(IdentityInviteCreate) => IdentityInviteRes,
+        IdentityInviteModify(IdentityInviteModify) => IdentityInviteRes,
+        IdentityInviteDelete(IdentityInviteDelete) =>(),
+        IdentityInviteList(IdentityInviteList) => Vec < IdentityInviteRes >,
+        ChannelInviteCreate(ChannelInviteCreate) => ChannelInviteRes,
+        ChannelInviteModify(ChannelInviteModify) => ChannelInviteRes,
+        ChannelInviteDelete(ChannelInviteDelete) =>(),
+        ChannelInviteList(ChannelInviteList) => Vec < ChannelInviteRes >,
     //.    MemberAdd(MemberAdd) =>(),
     //.    MemberDelete(MemberDelete) =>(),
     //.    MemberList(MemberList) => Vec < Identity >,

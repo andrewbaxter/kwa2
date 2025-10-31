@@ -191,11 +191,16 @@ fn main() {
             args: vec![("text", &string_), ("link", &string_), ("children", &arrel_)],
             returns: vec![("root", &el_), ("groupEl", &el_)],
         },
+        Func {
+            name: "leafMenuCode",
+            args: vec![("text", &string_)],
+            returns: vec![("root", &el_)],
+        },
         // /////////////////////////////////////////////////////////////////////////////
         // xx Components, styles: top
         Func {
             name: "contPageTop",
-            args: vec![("body", &el_), ("identitiesLink", &string_)],
+            args: vec![("body", &el_), ("identitiesLink", &string_), ("addLink", &string_)],
             returns: vec![("root", &el_)],
         },
         // /////////////////////////////////////////////////////////////////////////////
@@ -207,12 +212,39 @@ fn main() {
         },
         Func {
             name: "contMenuBar",
-            args: vec![("text", &string_)],
-            returns: vec![("root", &el_), ("titleButton", &el_), ("backButton", &el_)],
+            args: vec![
+                ("backLink", &string_),
+                ("text", &string_),
+                ("centerLink", &optstring_),
+                ("right", &optel_)
+            ],
+            returns: vec![("root", &el_)],
         },
         Func {
-            name: "contMenuEditBar",
-            args: vec![("children", &arrel_)],
+            name: "leafMenuBarAdd",
+            args: vec![("link", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        // /////////////////////////////////////////////////////////////////////////////
+        // xx Components, styles: form
+        Func {
+            name: "contPageForm",
+            args: vec![("editBarChildren", &arrel_), ("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contPageFormErrors",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafPageFormButtonSubmit",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafFormText",
+            args: vec![("text", &string_)],
             returns: vec![("root", &el_)],
         },
         // /////////////////////////////////////////////////////////////////////////////
@@ -222,107 +254,15 @@ fn main() {
             args: vec![("children", &arrel_)],
             returns: vec![("root", &el_)],
         },
-        // /////////////////////////////////////////////////////////////////////////////
-        // xx Components, styles: page, form + edit
         Func {
-            name: "leafInputText",
-            args: vec![("id", &optstring_), ("title", &string_), ("value", &string_)],
+            name: "contChatBar",
+            args: vec![
+                ("backLink", &string_),
+                ("text", &string_),
+                ("centerLink", &optstring_),
+                ("right", &optel_)
+            ],
             returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "leafInputNumber",
-            args: vec![("id", &optstring_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "leafInputBool",
-            args: vec![("id", &optstring_), ("title", &string_), ("value", &bool_)],
-            returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "leafInputDate",
-            args: vec![("id", &optstring_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "leafInputTime",
-            args: vec![("id", &optstring_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "leafInputDatetime",
-            args: vec![("id", &optstring_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "leafInputColor",
-            args: vec![("id", &optstring_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "leafInputEnum",
-            args: vec![("id", &optstring_), ("title", &string_), ("options", &strmap), ("value", &string_)],
-            returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "leafInputTextMedia",
-            args: vec![("id", &optstring_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_), ("input", &el_), ("media", &el_)],
-        },
-        Func {
-            name: "leafInputFile",
-            args: vec![("id", &optstring_), ("title", &string_)],
-            returns: vec![("root", &el_), ("input", &el_)],
-        },
-        Func {
-            name: "leafInputPair",
-            args: vec![("label", &string_), ("inputId", &string_), ("input", &el_)],
-            returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "leafInputPairText",
-            args: vec![("id", &string_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_), ("input", &el_)],
-        },
-        Func {
-            name: "leafInputPairNumber",
-            args: vec![("id", &string_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_), ("input", &el_)],
-        },
-        Func {
-            name: "leafInputPairBool",
-            args: vec![("id", &string_), ("title", &string_), ("value", &bool_)],
-            returns: vec![("root", &el_), ("input", &el_)],
-        },
-        Func {
-            name: "leafInputPairDate",
-            args: vec![("id", &string_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_), ("input", &el_)],
-        },
-        Func {
-            name: "leafInputPairTime",
-            args: vec![("id", &string_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_), ("input", &el_)],
-        },
-        Func {
-            name: "leafInputPairDatetime",
-            args: vec![("id", &string_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_), ("input", &el_)],
-        },
-        Func {
-            name: "leafInputPairColor",
-            args: vec![("id", &string_), ("title", &string_), ("value", &string_)],
-            returns: vec![("root", &el_), ("input", &el_)],
-        },
-        Func {
-            name: "leafInputPairEnum",
-            args: vec![("id", &string_), ("title", &string_), ("value", &string_), ("options", &strmap)],
-            returns: vec![("root", &el_), ("input", &el_)],
-        },
-        Func {
-            name: "leafInputPairFile",
-            args: vec![("id", &string_), ("title", &string_)],
-            returns: vec![("root", &el_), ("input", &el_)],
         },
     ] {
         let method_ts_name = method.name;

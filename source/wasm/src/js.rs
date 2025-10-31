@@ -1,8 +1,4 @@
 use {
-    chrono::{
-        DateTime,
-        Utc,
-    },
     flowcontrol::shed,
     futures::channel::oneshot::channel,
     gloo::{
@@ -14,6 +10,7 @@ use {
             window,
         },
     },
+    jiff::Timestamp,
     js_sys::{
         Array,
         Object,
@@ -138,10 +135,10 @@ pub trait Log {
 }
 
 pub struct VecLog {
-    pub log: RefCell<Vec<(DateTime<Utc>, String)>>,
+    pub log: RefCell<Vec<(Timestamp, String)>>,
 }
 
-fn trim_vec_log(log: &mut Vec<(DateTime<Utc>, String)>) {
+fn trim_vec_log(log: &mut Vec<(Timestamp, String)>) {
     if log.len() > 250 {
         *log = log.split_off(log.len() - 200);
     }
@@ -150,14 +147,14 @@ fn trim_vec_log(log: &mut Vec<(DateTime<Utc>, String)>) {
 impl Log for VecLog {
     fn log(&self, x: &str) {
         let mut log = self.log.borrow_mut();
-        log.push((Utc::now(), x.to_string()));
+        log.push((Timestamp::now(), x.to_string()));
         trim_vec_log(&mut log);
         web_sys::console::log_1(&JsValue::from(x));
     }
 
     fn log_js(&self, x: &str, v: &JsValue) {
         let mut log = self.log.borrow_mut();
-        log.push((Utc::now(), format!("{}: {}", x, JSON::stringify(v).unwrap())));
+        log.push((Timestamp::now(), format!("{}: {}", x, JSON::stringify(v).unwrap())));
         trim_vec_log(&mut log);
         web_sys::console::log_2(&JsValue::from(x), v);
     }
@@ -165,7 +162,7 @@ impl Log for VecLog {
     fn log_js2(&self, x: &str, v: &JsValue, v2: &JsValue) {
         let mut log = self.log.borrow_mut();
         log.push(
-            (Utc::now(), format!("{}: {}, {}", x, JSON::stringify(v).unwrap(), JSON::stringify(v2).unwrap())),
+            (Timestamp::now(), format!("{}: {}, {}", x, JSON::stringify(v).unwrap(), JSON::stringify(v2).unwrap())),
         );
         trim_vec_log(&mut log);
         web_sys::console::log_3(&JsValue::from(x), v, v2);
@@ -542,11 +539,11 @@ pub fn lazy_el_async<E: ToString, F: 'static + AsyncFnOnce() -> Result<Vec<El>, 
 }
 
 pub trait LogJsErr {
-    fn log(self, log: &Rc<dyn Log>, msg: &str);
+    fn log(self, log: &Rc<dyn Log>, msg: &dyn std::fmt::Display);
 }
 
 impl<T> LogJsErr for Result<T, JsValue> {
-    fn log(self, log: &Rc<dyn Log>, msg: &str) {
+    fn log(self, log: &Rc<dyn Log>, msg: &dyn std::fmt::Display) {
         match self {
             Ok(_) => { },
             Err(e) => {
@@ -557,7 +554,7 @@ impl<T> LogJsErr for Result<T, JsValue> {
 }
 
 impl<T> LogJsErr for Result<T, StorageError> {
-    fn log(self, log: &Rc<dyn Log>, msg: &str) {
+    fn log(self, log: &Rc<dyn Log>, msg: &dyn std::fmt::Display) {
         match self {
             Ok(_) => { },
             Err(e) => {
@@ -605,7 +602,7 @@ pub fn copy(log: &Rc<dyn Log>, data: impl serde::Serialize) {
     spawn_local({
         let log = log.clone();
         async move {
-            JsFuture::from(a).await.log(&log, "Error copying");
+            JsFuture::from(a).await.log(&log, &"Error copying");
         }
     });
 }

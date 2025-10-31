@@ -1,20 +1,21 @@
 use {
-    super::api::req_post_json,
-    crate::libmain::state::{
-        ministate_octothorpe,
-        state,
-        Ministate,
-        MinistateChannel,
-    },
-    chrono::{
-        DateTime,
-        Utc,
+    crate::libmain::{
+        localdata::{
+            get_stored_api_channelgroups,
+            get_stored_api_channels,
+            req_api_channelgroups,
+            req_api_channels,
+            LocalChannel,
+            LocalChannelGroup,
+        },
+        state::{
+            ministate_octothorpe,
+            state,
+            Ministate,
+        },
     },
     flowcontrol::ta_return,
-    gloo::storage::{
-        LocalStorage,
-        Storage,
-    },
+    futures::join,
     lunk::ProcessingContext,
     rooting::{
         spawn_rooted,
@@ -24,114 +25,99 @@ use {
         Deserialize,
         Serialize,
     },
-    shared::interface::wire::{
-        c2s::{
-            self,
-            ChannelOrChannelGroup,
-        },
-        shared::{
-            ChannelId,
-            InternalChannelGroupId,
-        },
-    },
-    spaghettinuum::interface::identity::Identity,
+    shared::interface::wire::shared::ChannelGroupId,
     std::{
         cell::RefCell,
-        collections::HashMap,
+        collections::{
+            HashMap,
+            HashSet,
+        },
         rc::Rc,
     },
     wasm::js::{
         el_async,
         style_export,
-        LogJsErr,
     },
 };
 
-const LOCALSTORAGE_CHANNELS: &str = "channels";
-
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct LocalChannel {
-    pub identity: Identity,
-    pub id: ChannelId,
-    pub memo_short: String,
-    pub last_used: DateTime<Utc>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct LocalChannelGroup {
-    id: InternalChannelGroupId,
-    memo_short: String,
-    last_used: DateTime<Utc>,
+struct LocalChannelGroup1 {
+    v: LocalChannelGroup,
     children: Vec<LocalChannel>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-enum LocalChannelOrGroup {
+enum LocalCocg {
     Channel(LocalChannel),
-    Group(LocalChannelGroup),
+    ChannelGroup(LocalChannelGroup1),
 }
 
-pub fn build_page_top(_pc: &mut ProcessingContext) -> El {
+fn combine_local_cocgs(
+    local_channels: Vec<LocalChannel>,
+    local_channelgroups: Vec<LocalChannelGroup>,
+) -> Vec<LocalCocg> {
+    let mut out = vec![];
+    let mut lookup_children = HashMap::<ChannelGroupId, Vec<LocalChannel>>::new();
+    for channel in local_channels {
+        if let Some(g) = &channel.res.group {
+            lookup_children.entry(*g).or_default().push(channel);
+        } else {
+            out.push(LocalCocg::Channel(channel));
+        }
+    }
+    for group in local_channelgroups {
+        let mut children = lookup_children.remove(&group.res.id).unwrap_or_default();
+        children.sort_by_cached_key(|x| (std::cmp::Reverse(x.last_used), x.res.memo_short.clone()));
+        out.push(LocalCocg::ChannelGroup(LocalChannelGroup1 {
+            children: children,
+            v: group,
+        }));
+    }
+    out.sort_by_cached_key(|x| match x {
+        LocalCocg::Channel(x) => (std::cmp::Reverse(x.last_used), x.res.memo_short.clone()),
+        LocalCocg::ChannelGroup(x) => (std::cmp::Reverse(x.v.last_used), x.v.res.memo_short.clone()),
+    });
+    return out;
+}
+
+pub fn build(_pc: &mut ProcessingContext) -> El {
     let channel_elements = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
-    let local_cocgs = match LocalStorage::get::<Vec<LocalChannelOrGroup>>(LOCALSTORAGE_CHANNELS) {
-        Ok(local_channels) => local_channels,
-        Err(e) => {
-            match e {
-                gloo::storage::errors::StorageError::SerdeError(e) => {
-                    state().log.log(&format!("Error loading [{}] from local storage: {}", LOCALSTORAGE_CHANNELS, e));
-                },
-                gloo::storage::errors::StorageError::KeyNotFound(_) => {
-                    // nop
-                },
-                gloo::storage::errors::StorageError::JsError(e) => {
-                    state().log.log(&format!("Error loading [{}] from local storage: {}", LOCALSTORAGE_CHANNELS, e));
-                },
-            }
-            Default::default()
-        },
-    };
+    let old_cocgs = combine_local_cocgs(get_stored_api_channels(None), get_stored_api_channelgroups(None));
     let lookup_el_menu_groups = Rc::new(RefCell::new(HashMap::new()));
     let lookup_el_menu_group_children = Rc::new(RefCell::new(HashMap::new()));
     let lookup_el_menu_channels = Rc::new(RefCell::new(HashMap::new()));
 
     // Build the immediately available options
-    for local_cocg1 in local_cocgs.clone() {
-        let el1 = match local_cocg1 {
-            LocalChannelOrGroup::Channel(c) => {
+    for old_cocg1 in old_cocgs.clone() {
+        let el1 = match old_cocg1 {
+            LocalCocg::Channel(old_c) => {
                 let out = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                    text: c.memo_short,
-                    link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                        identity: c.identity.clone(),
-                        channel: c.id.clone(),
-                    })),
+                    text: old_c.res.memo_short,
+                    link: ministate_octothorpe(&Ministate::Channel(old_c.res.id.clone())),
                 }).root;
-                lookup_el_menu_channels.borrow_mut().insert((c.identity.clone(), c.id), out.clone());
+                lookup_el_menu_channels.borrow_mut().insert(old_c.res.id, out.clone());
                 out
             },
-            LocalChannelOrGroup::Group(cg) => {
+            LocalCocg::ChannelGroup(old_cg) => {
                 let mut children = vec![];
-                for local_c2 in cg.children {
+                for local_c2 in old_cg.children {
                     let el2 = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                        text: local_c2.memo_short,
-                        link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                            identity: local_c2.identity.clone(),
-                            channel: local_c2.id.clone(),
-                        })),
+                        text: local_c2.res.memo_short,
+                        link: ministate_octothorpe(&Ministate::Channel(local_c2.res.id.clone())),
                     }).root;
-                    lookup_el_menu_channels.borrow_mut().insert((local_c2.identity, local_c2.id), el2.clone());
+                    lookup_el_menu_channels.borrow_mut().insert(local_c2.res.id, el2.clone());
                     children.push(el2);
                 }
                 let out = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
-                    text: cg.memo_short.clone(),
-                    link: ministate_octothorpe(&Ministate::ChannelGroup(cg.id)),
+                    text: old_cg.v.res.memo_short.clone(),
+                    link: ministate_octothorpe(&Ministate::ChannelGroup(old_cg.v.res.id)),
                     children: vec![],
                 });
                 out.group_el.ref_splice(0, 0, children);
-                lookup_el_menu_group_children.borrow_mut().insert(cg.id.clone(), out.group_el);
-                lookup_el_menu_groups.borrow_mut().insert(cg.id, out.root.clone());
+                lookup_el_menu_group_children.borrow_mut().insert(old_cg.v.res.id.clone(), out.group_el);
+                lookup_el_menu_groups.borrow_mut().insert(old_cg.v.res.id, out.root.clone());
                 out.root
             },
         };
@@ -139,169 +125,112 @@ pub fn build_page_top(_pc: &mut ProcessingContext) -> El {
     }
 
     // Pull new elements in the background
-    let start_empty = local_cocgs.is_empty();
+    let start_empty = old_cocgs.is_empty();
     let bg_refresh = {
-        let local_cocgs1 = local_cocgs;
+        let old_cocgs1 = old_cocgs;
         let lookup_el_menu_groups = lookup_el_menu_groups.clone();
         let lookup_el_menu_group_children = lookup_el_menu_group_children.clone();
         let lookup_el_menu_channels = lookup_el_menu_channels.clone();
         async move {
             ta_return!(Vec < El >, String);
-            let cocgs1 = req_post_json(&state().env.base_url, c2s::ChannelOrChannelGroupTree).await?;
+            let new_cocgs1 = {
+                let (c, cg) = join!(req_api_channels(None), req_api_channelgroups(None));
+                combine_local_cocgs(c?, cg?)
+            };
 
             // Diff level 1 channels/groups
             let mut new_els1 = vec![];
-            let mut changed1 = false;
-            let mut new_local_cocgs1 = vec![];
             {
-                let mut lookup_local_channels1 = HashMap::new();
-                let mut lookup_local_channel_groups1 = HashMap::new();
-                for local_cocg1 in local_cocgs1 {
-                    match local_cocg1 {
-                        LocalChannelOrGroup::Channel(c) => {
-                            lookup_local_channels1.insert((c.identity.clone(), c.id.clone()), c);
+                let mut old_cs = HashSet::new();
+                let mut old_cgs = HashMap::new();
+                for old_cocg1 in old_cocgs1 {
+                    match old_cocg1 {
+                        LocalCocg::Channel(c) => {
+                            old_cs.insert(c.res.id);
                         },
-                        LocalChannelOrGroup::Group(cg) => {
-                            lookup_local_channel_groups1.insert(cg.id.clone(), cg);
+                        LocalCocg::ChannelGroup(cg) => {
+                            old_cgs.insert(cg.v.res.id, cg);
                         },
                     }
                 }
-                for cocg1 in cocgs1 {
-                    let new_local_cocg;
+                for cocg1 in new_cocgs1 {
                     match cocg1 {
-                        ChannelOrChannelGroup::Channel(c) => {
-                            let new_local_channel;
-                            if let Some(local_channel) =
-                                lookup_local_channels1.remove(&(c.identity.clone(), c.id.clone())) {
-                                new_local_channel = local_channel;
+                        LocalCocg::Channel(new_c) => {
+                            if old_cs.remove(&new_c.res.id) {
+                                // nop
                             } else {
-                                changed1 = true;
-                                new_local_channel = LocalChannel {
-                                    identity: c.identity.clone(),
-                                    id: c.id.clone(),
-                                    memo_short: c.memo_short.clone(),
-                                    last_used: Utc::now(),
-                                };
                                 new_els1.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                                    text: c.memo_short,
-                                    link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                                        identity: c.identity,
-                                        channel: c.id,
-                                    })),
+                                    text: new_c.res.memo_short,
+                                    link: ministate_octothorpe(&Ministate::Channel(new_c.res.id)),
                                 }).root);
                             }
-                            new_local_cocg = LocalChannelOrGroup::Channel(new_local_channel);
                         },
-                        ChannelOrChannelGroup::ChannelGroup(g) => {
-                            let mut new_local_channel_group;
-                            let new_group_children_el;
-                            if let Some(local_channel_group) =
-                                lookup_local_channel_groups1.remove(&g.group.internal_id) {
-                                new_local_channel_group = local_channel_group;
-                                new_group_children_el =
+                        LocalCocg::ChannelGroup(new_cg) => {
+                            let new_children_el;
+                            let old_cs2;
+                            if let Some(old_cg) = old_cgs.remove(&new_cg.v.res.id) {
+                                new_children_el =
                                     lookup_el_menu_group_children
                                         .borrow_mut()
-                                        .remove(&g.group.internal_id)
+                                        .remove(&new_cg.v.res.id)
                                         .expect("Existing group but no corresponding element in lookup")
                                         .clone();
+                                old_cs2 = old_cg.children;
                             } else {
-                                changed1 = true;
-                                new_local_channel_group = LocalChannelGroup {
-                                    id: g.group.internal_id,
-                                    memo_short: g.group.memo_short.clone(),
-                                    last_used: Utc::now(),
-                                    children: vec![],
-                                };
                                 let next_el1 = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
-                                    text: g.group.memo_short,
-                                    link: ministate_octothorpe(&Ministate::ChannelGroup(g.group.internal_id)),
+                                    text: new_cg.v.res.memo_short,
+                                    link: ministate_octothorpe(&Ministate::ChannelGroup(new_cg.v.res.id)),
                                     children: vec![],
                                 });
                                 new_els1.push(next_el1.root);
-                                new_group_children_el = next_el1.group_el;
+                                new_children_el = next_el1.group_el;
+                                old_cs2 = vec![];
                             }
 
                             // Diff level 2 channels in this group
                             let mut new_out_els2 = vec![];
-                            let mut changed2 = false;
-                            let mut new_local_cocgs2 = vec![];
                             {
-                                let mut lookup_local_channels2 = HashMap::new();
-                                for local_c2 in new_local_channel_group.children {
-                                    lookup_local_channels2.insert(
-                                        (local_c2.identity.clone(), local_c2.id.clone()),
-                                        local_c2,
-                                    );
+                                let mut lookup_old_cs2 = HashSet::new();
+                                for old_c2 in old_cs2 {
+                                    lookup_old_cs2.insert(old_c2.res.id.clone());
                                 }
-                                for c2 in g.children {
-                                    let new_local_channel;
-                                    if let Some(local_channel) =
-                                        lookup_local_channels2.remove(&(c2.identity.clone(), c2.id.clone())) {
-                                        new_local_channel = local_channel;
+                                for new_c2 in new_cg.children {
+                                    if lookup_old_cs2.remove(&new_c2.res.id) {
+                                        // nop
                                     } else {
-                                        changed2 = true;
-                                        new_local_channel = LocalChannel {
-                                            identity: c2.identity.clone(),
-                                            id: c2.id.clone(),
-                                            memo_short: c2.memo_short.clone(),
-                                            last_used: Utc::now(),
-                                        };
-                                        new_out_els2.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                                            text: c2.memo_short,
-                                            link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                                                identity: c2.identity,
-                                                channel: c2.id,
-                                            })),
-                                        }).root);
+                                        new_out_els2.push(
+                                            style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                                                text: new_c2.res.memo_short,
+                                                link: ministate_octothorpe(&Ministate::Channel(new_c2.res.id)),
+                                            }).root,
+                                        );
                                     }
-                                    new_local_cocgs2.push(new_local_channel);
                                 }
-                                for (id, _) in lookup_local_channels2 {
+                                for id in lookup_old_cs2 {
                                     let Some(channel_el) = lookup_el_menu_channels.borrow_mut().remove(&id) else {
                                         continue;
                                     };
                                     channel_el.ref_replace(vec![]);
-                                    changed2 = true;
                                 }
                             }
 
                             // Flush
-                            new_group_children_el.ref_splice(0, 0, new_out_els2);
-                            new_local_cocgs2.sort_by_cached_key(|c| (c.last_used, c.memo_short.clone()));
-                            new_local_channel_group.children = new_local_cocgs2;
-                            if changed2 {
-                                new_local_channel_group.last_used = Utc::now();
-                                changed1 = true;
-                            }
-                            new_local_cocg = LocalChannelOrGroup::Group(new_local_channel_group);
+                            new_children_el.ref_splice(0, 0, new_out_els2);
                         },
                     }
-                    new_local_cocgs1.push(new_local_cocg);
                 }
-                for (id, _) in lookup_local_channels1 {
+                for id in old_cs {
                     let Some(channel_el) = lookup_el_menu_channels.borrow_mut().remove(&id) else {
                         continue;
                     };
                     channel_el.ref_replace(vec![]);
-                    changed1 = true;
                 }
-                for (id, _) in lookup_local_channel_groups1 {
+                for (id, _) in old_cgs {
                     let Some(channel_el) = lookup_el_menu_groups.borrow_mut().remove(&id) else {
                         continue;
                     };
                     channel_el.ref_replace(vec![]);
-                    changed1 = true;
                 }
-            }
-            if changed1 {
-                new_local_cocgs1.sort_by_cached_key(|c| match c {
-                    LocalChannelOrGroup::Channel(c) => (c.last_used, c.memo_short.clone()),
-                    LocalChannelOrGroup::Group(cg) => (cg.last_used, cg.memo_short.clone()),
-                });
-                LocalStorage::set(
-                    LOCALSTORAGE_CHANNELS,
-                    new_local_cocgs1,
-                ).log(&state().log, "Error storing channels");
             }
             return Ok(new_els1);
         }
@@ -319,6 +248,7 @@ pub fn build_page_top(_pc: &mut ProcessingContext) -> El {
     // Other widgets, assemble and return
     let out = style_export::cont_page_top(style_export::ContPageTopArgs {
         identities_link: ministate_octothorpe(&Ministate::Identities),
+        add_link: ministate_octothorpe(&Ministate::TopAdd),
         body: channel_elements,
     });
 

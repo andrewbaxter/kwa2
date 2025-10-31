@@ -25,7 +25,7 @@ use {
             field::{
                 field_i64,
                 field_str,
-                field_utctime_s,
+                field_utctime_s_jiff,
                 FieldType,
             },
         },
@@ -74,7 +74,8 @@ fn main() {
         let id = t.field(&mut latest_version, "zSZVNBP0E", "external_id", field_str().build());
 
         // Internal
-        let soft_deleted_at = t.field(&mut latest_version, "zAFX0RY7Y", "soft_deleted_at", field_utctime_s().opt().build());
+        let soft_deleted_at =
+            t.field(&mut latest_version, "zAFX0RY7Y", "soft_deleted_at", field_utctime_s_jiff().opt().build());
         t.index("zF2FTSZMJ", "account_external_id", &[&id]).unique().build(&mut latest_version);
 
         // Queries
@@ -132,7 +133,7 @@ fn main() {
         let memo_short = t.field(&mut latest_version, "zSZVNBP0E", "memo_short", field_str().build());
         let memo_long = t.field(&mut latest_version, "z2N4TX4BZ", "memo_long", field_str().build());
         let soft_deleted_at =
-            t.field(&mut latest_version, "zAFX0RY7Y", "soft_deleted_at", field_utctime_s().opt().build());
+            t.field(&mut latest_version, "zAFX0RY7Y", "soft_deleted_at", field_utctime_s_jiff().opt().build());
         let secret =
             t.field(
                 &mut latest_version,
@@ -272,7 +273,8 @@ fn main() {
             );
         let memo_short = t.field(&mut latest_version, "zSZVNBP0E", "memo_short", field_str().build());
         let memo_long = t.field(&mut latest_version, "z2N4TX4BZ", "memo_long", field_str().build());
-        let soft_deleted_at = t.field(&mut latest_version, "zAFX0RY7Y", "deleted", field_utctime_s().opt().build());
+        let soft_deleted_at =
+            t.field(&mut latest_version, "zAFX0RY7Y", "deleted", field_utctime_s_jiff().opt().build());
 
         // Indexes
         t.constraint(
@@ -291,7 +293,7 @@ fn main() {
             new_insert(
                 &t,
                 vec![
-                    set_field("identity", &account_id),
+                    set_field("account", &account_id),
                     set_field("identity", &identity),
                     set_field("idem", &idem),
                     set_field("id", &id),
@@ -356,7 +358,7 @@ fn main() {
     //.        let memo_long = t.field(&mut latest_version, "z2N4TX4BZ", "memo_long", field_str().build());
     //.        let allow_identity = t.field(&mut latest_version, "zII52SWQB", "allow_identity", identity_id_opt_t.clone());
     //.        let single_use = t.field(&mut latest_version, "zGBXXPVPA", "single_use", field_bool().build());
-    //.        let expires = t.field(&mut latest_version, "zZ7H60J92", "expires", field_utctime_ms().opt().build());
+    //.        let expires = t.field(&mut latest_version, "zZ7H60J92", "expires", field_utctime_ms_jiff().opt().build());
     //.    }
     //. 
     //.    // Channel invitations
@@ -369,7 +371,7 @@ fn main() {
     //.        let memo_long = t.field(&mut latest_version, "z2N4TX4BZ", "memo_long", field_str().build());
     //.        let allow_identity = t.field(&mut latest_version, "zII52SWQB", "allow_identity", identity_id_opt_t.clone());
     //.        let single_use = t.field(&mut latest_version, "zHC8M7R34", "single_use", field_bool().build());
-    //.        let expires = t.field(&mut latest_version, "zZ7H60J92", "expires", field_utctime_ms().opt().build());
+    //.        let expires = t.field(&mut latest_version, "zZ7H60J92", "expires", field_utctime_ms_jiff().opt().build());
     //.    }
     //. 
     //.    // Messages
@@ -388,7 +390,7 @@ fn main() {
     //.                "message",
     //.                field_str().custom("crate::interface::shared::Message").build(),
     //.            );
-    //.        let deleted = t.field(&mut latest_version, "zAFX0RY7Y", "deleted", field_utctime_s().opt().build());
+    //.        let deleted = t.field(&mut latest_version, "zAFX0RY7Y", "deleted", field_utctime_s_jiff().opt().build());
     //.    }
     // Generate
     match good_ormning::sqlite::generate(&root.join("src/db.rs"), vec![

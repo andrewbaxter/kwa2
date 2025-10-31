@@ -1,23 +1,21 @@
 use {
-    super::api::req_post_json,
     crate::libmain::{
-        page_top::LocalChannel,
+        localdata::{
+            get_stored_api_channels,
+            get_stored_api_identities,
+            req_api_channels,
+            req_api_identities,
+            LocalChannel,
+            LocalIdentity,
+        },
         state::{
             ministate_octothorpe,
             state,
             Ministate,
-            MinistateChannel,
         },
     },
-    chrono::{
-        DateTime,
-        Utc,
-    },
     flowcontrol::ta_return,
-    gloo::storage::{
-        LocalStorage,
-        Storage,
-    },
+    futures::join,
     lunk::ProcessingContext,
     rooting::{
         spawn_rooted,
@@ -27,207 +25,155 @@ use {
         Deserialize,
         Serialize,
     },
-    shared::interface::wire::{
-        c2s::{
-            self,
-            ChannelRes,
-        },
-    },
     spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
-        collections::HashMap,
+        collections::{
+            HashMap,
+            HashSet,
+        },
         rc::Rc,
     },
     wasm::js::{
         el_async,
         style_export,
-        LogJsErr,
     },
 };
 
-const LOCALSTORAGE_IDENTITIES: &str = "identities";
-
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct LocalIdentity {
-    id: Identity,
-    memo_short: String,
-    last_used: DateTime<Utc>,
+struct LocalIdentity1 {
+    v: LocalIdentity,
     children: Vec<LocalChannel>,
 }
 
-pub fn build_page_identities(_pc: &mut ProcessingContext) -> El {
+fn combine_local_values(
+    local_identities: Vec<LocalIdentity>,
+    local_channels: Vec<LocalChannel>,
+) -> Vec<LocalIdentity1> {
+    let mut lookup_children = HashMap::<Identity, Vec<LocalChannel>>::new();
+    for channel in local_channels {
+        lookup_children.entry(channel.res.id.identity.clone()).or_default().push(channel);
+    }
+    let mut out = vec![];
+    for identity in local_identities {
+        let mut children = lookup_children.remove(&identity.res.id).unwrap_or_default();
+        children.sort_by_cached_key(|x| (std::cmp::Reverse(x.last_used), x.res.memo_short.clone()));
+        out.push(LocalIdentity1 {
+            children: children,
+            v: identity,
+        });
+    }
+    out.sort_by_cached_key(|x| (std::cmp::Reverse(x.v.last_used), x.v.res.memo_short.clone()));
+    return out;
+}
+
+pub fn build(_pc: &mut ProcessingContext) -> El {
     let identity_elements = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
-    let local_identities = match LocalStorage::get::<Vec<LocalIdentity>>(LOCALSTORAGE_IDENTITIES) {
-        Ok(local_identities) => local_identities,
-        Err(e) => {
-            match e {
-                gloo::storage::errors::StorageError::SerdeError(e) => {
-                    state()
-                        .log
-                        .log(&format!("Error loading [{}] from local storage: {}", LOCALSTORAGE_IDENTITIES, e));
-                },
-                gloo::storage::errors::StorageError::KeyNotFound(_) => {
-                    // nop
-                },
-                gloo::storage::errors::StorageError::JsError(e) => {
-                    state()
-                        .log
-                        .log(&format!("Error loading [{}] from local storage: {}", LOCALSTORAGE_IDENTITIES, e));
-                },
-            }
-            Default::default()
-        },
-    };
-    let lookup_el_menu_identities = Rc::new(RefCell::new(HashMap::new()));
-    let lookup_el_menu_identity_children = Rc::new(RefCell::new(HashMap::new()));
-    let lookup_el_menu_channels = Rc::new(RefCell::new(HashMap::new()));
+    let old_identities = combine_local_values(get_stored_api_identities(None), get_stored_api_channels(None));
+    let lookup_el_identities = Rc::new(RefCell::new(HashMap::new()));
+    let lookup_el_identity_children = Rc::new(RefCell::new(HashMap::new()));
+    let lookup_el_channels = Rc::new(RefCell::new(HashMap::new()));
 
     // Build the immediately available options
-    for local_identity in local_identities.clone() {
+    for old_identity in old_identities.clone() {
         let mut children = vec![];
-        for local_channel in local_identity.children {
-            let el2 = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                text: local_channel.memo_short,
-                link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                    identity: local_channel.identity.clone(),
-                    channel: local_channel.id.clone(),
-                })),
+        for old_channel in old_identity.children {
+            let channel_el = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                text: old_channel.res.memo_short,
+                link: ministate_octothorpe(&Ministate::Channel(old_channel.res.id.clone())),
             }).root;
-            lookup_el_menu_channels.borrow_mut().insert((local_channel.identity, local_channel.id), el2.clone());
-            children.push(el2);
+            lookup_el_channels.borrow_mut().insert(old_channel.res.id, channel_el.clone());
+            children.push(channel_el);
         }
         let out = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
-            text: local_identity.memo_short.clone(),
-            link: ministate_octothorpe(&Ministate::Identity(local_identity.id)),
-            children: children,
+            text: old_identity.v.res.memo_short.clone(),
+            link: ministate_octothorpe(&Ministate::Identity(old_identity.v.res.id)),
+            children: vec![],
         });
-        lookup_el_menu_identity_children.borrow_mut().insert(local_identity.id.clone(), out.group_el);
-        lookup_el_menu_identities.borrow_mut().insert(local_identity.id, out.root.clone());
+        out.group_el.ref_splice(0, 0, children);
+        lookup_el_identity_children.borrow_mut().insert(old_identity.v.res.id.clone(), out.group_el);
+        lookup_el_identities.borrow_mut().insert(old_identity.v.res.id, out.root.clone());
         identity_elements.ref_push(out.root);
     }
 
     // Pull new elements in the background
-    let start_empty = local_identities.is_empty();
+    let start_empty = old_identities.is_empty();
     let bg_refresh = {
-        let local_identities = local_identities;
-        let lookup_el_menu_identities = lookup_el_menu_identities.clone();
-        let lookup_el_menu_identity_children = lookup_el_menu_identity_children.clone();
+        let old_identities1 = old_identities;
+        let lookup_el_identities = lookup_el_identities.clone();
+        let lookup_el_identity_children = lookup_el_identity_children.clone();
+        let lookup_el_channels = lookup_el_channels.clone();
         async move {
             ta_return!(Vec < El >, String);
-            let identities = req_post_json(&state().env.base_url, c2s::IdentityList).await?;
-            let channels = req_post_json(&state().env.base_url, c2s::ChannelList).await?;
-            let mut lookup_channels = HashMap::<Identity, Vec<ChannelRes>>::new();
-            for channel in channels {
-                lookup_channels.entry(channel.identity.clone()).or_default().push(channel);
-            }
+            let new_identities = {
+                let (c, cg) = join!(req_api_identities(None), req_api_channels(None));
+                combine_local_values(c?, cg?)
+            };
 
-            // Diff level 1 identities
+            // Diff level 1 channels/groups
             let mut new_els1 = vec![];
-            let mut changed1 = false;
-            let mut new_local_identities = vec![];
             {
-                let mut lookup_local_identities = HashMap::new();
-                for local_identity in local_identities {
-                    lookup_local_identities.insert(local_identity.id.clone(), local_identity);
+                let mut old_identities = HashMap::new();
+                for old_identity in old_identities1 {
+                    old_identities.insert(old_identity.v.res.id, old_identity);
                 }
-                for identity in identities {
-                    let mut new_local_identity;
-                    let new_group_children_el;
-                    if let Some(local_identity) = lookup_local_identities.remove(&identity.id) {
-                        new_local_identity = local_identity;
-                        new_group_children_el =
-                            lookup_el_menu_identity_children
+                for new_identity in new_identities {
+                    let new_children_el;
+                    let old_channels1;
+                    if let Some(old_cg) = old_identities.remove(&new_identity.v.res.id) {
+                        new_children_el =
+                            lookup_el_identity_children
                                 .borrow_mut()
-                                .remove(&identity.id)
+                                .remove(&new_identity.v.res.id)
                                 .expect("Existing group but no corresponding element in lookup")
                                 .clone();
+                        old_channels1 = old_cg.children;
                     } else {
-                        changed1 = true;
-                        new_local_identity = LocalIdentity {
-                            id: identity.id,
-                            memo_short: identity.memo_short.clone(),
-                            last_used: Utc::now(),
-                            children: vec![],
-                        };
                         let next_el1 = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
-                            text: identity.memo_short,
-                            link: ministate_octothorpe(&Ministate::Identity(identity.id)),
+                            text: new_identity.v.res.memo_short,
+                            link: ministate_octothorpe(&Ministate::Identity(new_identity.v.res.id)),
                             children: vec![],
                         });
                         new_els1.push(next_el1.root);
-                        new_group_children_el = next_el1.group_el;
+                        new_children_el = next_el1.group_el;
+                        old_channels1 = vec![];
                     }
 
                     // Diff level 2 channels in this group
                     let mut new_out_els2 = vec![];
-                    let mut changed2 = false;
-                    let mut new_local_channels = vec![];
                     {
-                        let mut lookup_local_channels = HashMap::new();
-                        for local_channel in new_local_identity.children {
-                            lookup_local_channels.insert(
-                                (local_channel.identity.clone(), local_channel.id.clone()),
-                                local_channel,
-                            );
+                        let mut old_channels = HashSet::new();
+                        for old_channel in old_channels1 {
+                            old_channels.insert(old_channel.res.id.clone());
                         }
-                        for channel in lookup_channels.remove(&identity.id).unwrap_or_default() {
-                            let new_local_channel;
-                            if let Some(local_channel) =
-                                lookup_local_channels.remove(&(channel.identity.clone(), channel.id.clone())) {
-                                new_local_channel = local_channel;
+                        for new_channel in new_identity.children {
+                            if old_channels.remove(&new_channel.res.id) {
+                                // nop
                             } else {
-                                changed2 = true;
-                                new_local_channel = LocalChannel {
-                                    identity: channel.identity.clone(),
-                                    id: channel.id.clone(),
-                                    memo_short: channel.memo_short.clone(),
-                                    last_used: Utc::now(),
-                                };
                                 new_out_els2.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                                    text: channel.memo_short,
-                                    link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                                        identity: channel.identity,
-                                        channel: channel.id,
-                                    })),
+                                    text: new_channel.res.memo_short,
+                                    link: ministate_octothorpe(&Ministate::Channel(new_channel.res.id)),
                                 }).root);
                             }
-                            new_local_channels.push(new_local_channel);
                         }
-                        for (id, _) in lookup_local_channels {
-                            let Some(channel_el) = lookup_el_menu_channels.borrow_mut().remove(&id) else {
+                        for id in old_channels {
+                            let Some(channel_el) = lookup_el_channels.borrow_mut().remove(&id) else {
                                 continue;
                             };
                             channel_el.ref_replace(vec![]);
-                            changed2 = true;
                         }
                     }
 
                     // Flush
-                    new_group_children_el.ref_splice(0, 0, new_out_els2);
-                    new_local_channels.sort_by_cached_key(|c| (c.last_used, c.memo_short.clone()));
-                    new_local_identity.children = new_local_channels;
-                    if changed2 {
-                        new_local_identity.last_used = Utc::now();
-                        changed1 = true;
-                    }
-                    new_local_identities.push(new_local_identity);
+                    new_children_el.ref_splice(0, 0, new_out_els2);
                 }
-                for (id, _) in lookup_local_identities {
-                    let Some(channel_el) = lookup_el_menu_identities.borrow_mut().remove(&id) else {
+                for (id, _) in old_identities {
+                    let Some(channel_el) = lookup_el_identities.borrow_mut().remove(&id) else {
                         continue;
                     };
                     channel_el.ref_replace(vec![]);
-                    changed1 = true;
                 }
-            }
-            if changed1 {
-                new_local_identities.sort_by_cached_key(|c| (c.last_used, c.memo_short.clone()));
-                LocalStorage::set(
-                    LOCALSTORAGE_IDENTITIES,
-                    new_local_identities,
-                ).log(&state().log, "Error storing identities");
             }
             return Ok(new_els1);
         }
@@ -237,16 +183,26 @@ pub fn build_page_identities(_pc: &mut ProcessingContext) -> El {
     } else {
         identity_elements.ref_own(move |_| spawn_rooted(async move {
             if let Err(e) = bg_refresh.await {
-                state().log.log(&format!("Refreshing channels failed: {}", e));
+                state().log.log(&format!("Refreshing identities failed: {}", e));
             }
         }));
     }
 
     // Other widgets, assemble and return
-    let out = style_export::cont_page_top(style_export::ContPageTopArgs {
-        identities_link: ministate_octothorpe(&Ministate::Identities),
-        body: identity_elements,
-    });
+    let out = style_export::cont_page_menu(style_export::ContPageMenuArgs { children: vec![
+        //. .
+        style_export::cont_menu_bar(style_export::ContMenuBarArgs {
+            back_link: ministate_octothorpe(&Ministate::Top),
+            text: format!("Identities"),
+            center_link: None,
+            right: Some(
+                style_export::leaf_menu_bar_add(
+                    style_export::LeafMenuBarAddArgs { link: ministate_octothorpe(&Ministate::IdentitiesNew) },
+                ).root,
+            ),
+        }).root,
+        identity_elements
+    ] });
 
     // Assemble and return
     return out.root;

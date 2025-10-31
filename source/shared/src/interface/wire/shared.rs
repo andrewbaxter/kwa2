@@ -8,62 +8,74 @@ use {
         identity::Identity,
         signature::Signature,
     },
-    std::str::FromStr,
 };
 
-#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct InternalChannelId(pub i64);
-
-impl FromStr for InternalChannelId {
-    type Err = std::io::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        return Ok(InternalChannelId(str::parse::<i64>(s).map_err(|e| std::io::Error::other(e))?));
-    }
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct InternalChannelGroupId(pub i64);
-
-#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct InternalIdentityId(pub i64);
+pub struct ChannelGroupId(pub u64);
 
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInvitationToken(String);
+pub struct IdentityInviteToken(pub String);
 
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelInvitationToken(String);
-
-#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelId {
+pub struct QualifiedIdentityInviteToken {
     pub identity: Identity,
-    pub channel: u64,
+    pub token: IdentityInviteToken,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct InvitationToken(pub String);
+pub struct IdentityInviteId(pub u64);
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelInviteToken(pub String);
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct QualifiedChannelInviteToken {
+    pub channel: QualifiedChannelId,
+    pub token: ChannelInviteToken,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelInviteId(pub u64);
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelId(pub u64);
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct QualifiedChannelId {
+    pub identity: Identity,
+    pub channel: ChannelId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageId {
     pub identity: Identity,
     pub unique: u64,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct QualifiedMessageId {
+    pub channel: QualifiedChannelId,
+    pub message: MessageId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum MessageBlock {
     Text(String),
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageBody {
     pub id: MessageId,
@@ -71,6 +83,6 @@ pub struct MessageBody {
     pub blocks: Vec<MessageBlock>,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct Message(pub Signature<MessageBody>);

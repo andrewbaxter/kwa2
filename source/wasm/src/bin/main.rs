@@ -131,7 +131,7 @@ pub fn main() {
                 LocalStorage::set(
                     LOCALSTORAGE_PWA_MINISTATE,
                     &ministate,
-                ).log(&state().log, "Error storing PWA state");
+                ).log(&state().log, &"Error storing PWA state");
                 build_ministate(pc, &ministate);
             }).unwrap()
         }).forget();
@@ -164,7 +164,7 @@ pub fn main() {
                         window()
                             .location()
                             .reload()
-                            .log(&state().log, "Error executing reload triggered by web worker.");
+                            .log(&state().log, &"Error executing reload triggered by web worker.");
                     },
                 }
             }),

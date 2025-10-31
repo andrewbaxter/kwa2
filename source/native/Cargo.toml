@@ -6,12 +6,12 @@ edition = "2024"
 [dependencies]
 aargvark = { version = "0.8", features = ["serde_json"] }
 flowcontrol = "0.2"
-glove = "0.4"
-good-ormning-runtime = { version = "0.3", features = ["chrono", "sqlite"] }
+glove = "0.5"
+good-ormning-runtime = { version = "0.4", features = ["jiff", "sqlite"] }
 http = "1"
 htwrap = "0.13"
 loga = "0.5"
-schemars = { version = "0.8", features = ["chrono"] }
+schemars = { version = "1", features = ["jiff02"] }
 serde = { version = "1", features = ["derive"] }
 taskmanager = "0.6"
 tokio = { version = "1", features = ["rt", "sync", "macros"] }
@@ -26,8 +26,8 @@ rand = "0.9"
 spaghettinuum = { path = "../spaghettinuum/source/shared" }
 spaghettinuum_native = { path = "../spaghettinuum/source/native" }
 chrono = { version = "0.4", features = ["serde"] }
-rusqlite = { version = "0.30", features = ["array", "bundled"] }
-deadpool-sqlite = "0.7"
+rusqlite = { version = "0.37", features = ["array", "bundled"] }
+deadpool-sqlite = "0.12"
 shared = { path = "../shared" }
 openidconnect = { version = "3", default-features = false }
 oauth2 = { version = "4", default-features = false }
@@ -42,4 +42,4 @@ hyper = "1"
 http-body-util = "0.1"
 
 [build-dependencies]
-good-ormning = { version = "0.3", features = ["chrono", "sqlite"] }
+good-ormning = { version = "0.4", features = ["jiff", "sqlite"] }

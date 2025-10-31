@@ -327,7 +327,7 @@ async fn handle_req(state: &Arc<State>, mut req: Request<Incoming>) -> Response<
                                         for cg in channelgroups.err_internal()? {
                                             out.push(ChannelOrChannelGroup::ChannelGroup(ChannelOrChannelGroupGroup {
                                                 group: ChannelGroupRes {
-                                                    internal_id: cg.rowid,
+                                                    id: cg.rowid,
                                                     idem: cg.idem,
                                                     memo_short: cg.memo_short,
                                                     memo_long: cg.memo_long,

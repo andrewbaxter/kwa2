@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-chrono = { version = "0.4", features = ["serde"] }
 console_error_panic_hook = "0.1"
 ezing = "0.2"
 gloo = { version = "0.9", features = ["futures"] }
@@ -70,6 +69,8 @@ by_address = "1"
 tokio-stream = { version = "0.1", features = ["sync"] }
 mime2ext = "0.1"
 spaghettinuum = { path = "../spaghettinuum/source/shared" }
+rooting-forms = { version = "0.2", features = ["jiff"] }
+jiff = { version = "0.2", features = ["serde"] }
 
 [build-dependencies]
 convert_case = "0.8"

@@ -1,22 +1,90 @@
 use {
     crate::libmain::{
-        page_identities::build_page_identities,
-        page_top::build_page_top,
+        page_channel::{
+            self,
+        },
+        page_channel_delete,
+        page_channel_edit::{
+            self,
+        },
+        page_channel_join_url::{
+            self,
+        },
+        page_channel_menu::{
+            self,
+        },
+        page_channel_new::{
+            self,
+        },
+        page_channelgroup::{
+            self,
+        },
+        page_channelgroup_delete,
+        page_channelgroup_edit::{
+            self,
+        },
+        page_channelgroup_menu::{
+            self,
+        },
+        page_channelgroup_new::{
+            self,
+        },
+        page_channelinvite::{
+            self,
+        },
+        page_channelinvite_delete,
+        page_channelinvite_edit::{
+            self,
+        },
+        page_channelinvite_new::{
+            self,
+        },
+        page_channelinvites::{
+            self,
+        },
+        page_identities::{
+            self,
+        },
+        page_identity::{
+            self,
+        },
+        page_identity_delete,
+        page_identity_edit::{
+            self,
+        },
+        page_identity_new::{
+            self,
+        },
+        page_identityinvite::{
+            self,
+        },
+        page_identityinvite_delete,
+        page_identityinvite_edit::{
+            self,
+        },
+        page_identityinvite_new::{
+            self,
+        },
+        page_identityinvites::{
+            self,
+        },
+        page_top::{
+            self,
+        },
+        page_top_add::{
+            self,
+        },
     },
     gloo::{
         storage::{
             LocalStorage,
             Storage,
         },
-        utils::{
-            document,
-            window,
-        },
+        utils::window,
     },
     js_sys::decode_uri,
     lunk::{
         EventGraph,
-        Prim,
         ProcessingContext,
     },
     rooting::El,
@@ -25,26 +93,22 @@ use {
         Serialize,
     },
     shared::interface::wire::shared::{
-        ChannelId,
-        InternalChannelGroupId,
-        InternalChannelId,
+        ChannelGroupId,
+        ChannelInviteId,
+        IdentityInviteId,
+        QualifiedChannelId,
     },
     spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
-        collections::HashMap,
         rc::Rc,
     },
-    wasm::{
-        async_::BgVal,
-        js::{
-            get_dom_octothorpe,
-            style_export,
-            Env,
-            Log,
-            LogJsErr,
-            VecLog,
-        },
+    wasm::js::{
+        get_dom_octothorpe,
+        Env,
+        Log,
+        LogJsErr,
+        VecLog,
     },
     wasm_bindgen::JsValue,
 };
@@ -54,19 +118,35 @@ pub const SESSIONSTORAGE_POST_REDIRECT_MINISTATE: &str = "post_redirect";
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MinistateChannel {
-    pub identity: Identity,
-    pub channel: ChannelId,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Ministate {
     Top,
+    TopAdd,
+    ChannelJoinUrl,
+    ChannelNew,
+    ChannelGroupNew,
     Identities,
+    IdentitiesNew,
     Identity(Identity),
-    Channel(MinistateChannel),
-    ChannelGroup(InternalChannelGroupId),
+    IdentityEdit(Identity),
+    IdentityDelete(Identity),
+    IdentityInvites(Identity),
+    IdentityInviteNew(Identity),
+    IdentityInvite(IdentityInviteId),
+    IdentityInviteEdit(IdentityInviteId),
+    IdentityInviteDelete(IdentityInviteId),
+    Channel(QualifiedChannelId),
+    ChannelMenu(QualifiedChannelId),
+    ChannelEdit(QualifiedChannelId),
+    ChannelDelete(QualifiedChannelId),
+    ChannelInvites(QualifiedChannelId),
+    ChannelInviteNew(QualifiedChannelId),
+    ChannelInvite(ChannelInviteId),
+    ChannelInviteEdit(ChannelInviteId),
+    ChannelInviteDelete(ChannelInviteId),
+    ChannelGroup(ChannelGroupId),
+    ChannelGroupMenu(ChannelGroupId),
+    ChannelGroupEdit(ChannelGroupId),
+    ChannelGroupDelete(ChannelGroupId),
 }
 
 pub fn ministate_octothorpe(s: &Ministate) -> String {
@@ -79,8 +159,18 @@ pub fn record_replace_ministate(log: &Rc<dyn Log>, s: &Ministate) {
         .history()
         .unwrap()
         .replace_state_with_url(&JsValue::null(), "", Some(&ministate_octothorpe(s)))
-        .unwrap();
-    LocalStorage::set(LOCALSTORAGE_PWA_MINISTATE, s).log(log, "Error storing PWA ministate");
+        .log(log, &"Error replacing last history entry");
+    LocalStorage::set(LOCALSTORAGE_PWA_MINISTATE, s).log(log, &"Error storing PWA ministate");
+}
+
+pub fn goto_replace_ministate(pc: &mut ProcessingContext, log: &Rc<dyn Log>, s: &Ministate) {
+    window()
+        .history()
+        .unwrap()
+        .push_state_with_url(&JsValue::null(), "", Some(&ministate_octothorpe(s)))
+        .log(log, &"Error pushing history");
+    LocalStorage::set(LOCALSTORAGE_PWA_MINISTATE, s).log(log, &"Error storing PWA ministate");
+    build_ministate(pc, s);
 }
 
 pub fn read_ministate(log: &Rc<dyn Log>) -> Ministate {
@@ -119,31 +209,99 @@ pub fn state() -> Rc<State_> {
     return STATE.with(|x| x.borrow().clone()).unwrap();
 }
 
-fn set_page(pc: &mut ProcessingContext, body: El) {
+fn set_page(body: El) {
     let r = &state().root;
     r.ref_clear();
     r.ref_push(body);
 }
 
 pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
+    let body;
     match s {
         Ministate::Top => {
-            let body = build_page_top(pc);
-            set_page(pc, body);
+            body = page_top::build(pc);
+        },
+        Ministate::TopAdd => {
+            body = page_top_add::build();
         },
         Ministate::Identities => {
-            let body = build_page_identities(pc);
-            set_page(pc, body);
+            body = page_identities::build(pc);
+        },
+        Ministate::IdentitiesNew => {
+            body = page_identity_new::build(pc);
         },
         Ministate::Identity(id) => {
-            let body = build_page_identity(pc, id);
-            set_page(pc, body);
+            body = page_identity::build(id);
+        },
+        Ministate::IdentityEdit(id) => {
+            body = page_identity_edit::build(pc, id);
+        },
+        Ministate::IdentityDelete(id) => {
+            body = page_identity_delete::build(pc, id);
+        },
+        Ministate::IdentityInvites(id) => {
+            body = page_identityinvites::build(pc, id);
+        },
+        Ministate::IdentityInviteNew(id) => {
+            body = page_identityinvite_new::build(pc, id);
+        },
+        Ministate::IdentityInvite(id) => {
+            body = page_identityinvite::build(id);
+        },
+        Ministate::IdentityInviteEdit(id) => {
+            body = page_identityinvite_edit::build(pc, id);
+        },
+        Ministate::IdentityInviteDelete(id) => {
+            body = page_identityinvite_delete::build(pc, id);
+        },
+        Ministate::ChannelNew => {
+            body = page_channel_new::build(pc);
+        },
+        Ministate::ChannelJoinUrl => {
+            body = page_channel_join_url::build(pc);
         },
         Ministate::Channel(id) => {
-            //. set_page(pc, build_page_channel(id));
+            body = page_channel::build(id);
+        },
+        Ministate::ChannelMenu(id) => {
+            body = page_channel_menu::build(id);
+        },
+        Ministate::ChannelEdit(id) => {
+            body = page_channel_edit::build(pc, id);
+        },
+        Ministate::ChannelDelete(id) => {
+            body = page_channel_delete::build(pc, id);
+        },
+        Ministate::ChannelInvites(id) => {
+            body = page_channelinvites::build(id);
+        },
+        Ministate::ChannelInviteNew(id) => {
+            body = page_channelinvite_new::build(pc, id);
+        },
+        Ministate::ChannelInvite(id) => {
+            body = page_channelinvite::build(id);
+        },
+        Ministate::ChannelInviteEdit(id) => {
+            body = page_channelinvite_edit::build(pc, id);
+        },
+        Ministate::ChannelInviteDelete(id) => {
+            body = page_channelinvite_delete::build(pc, id);
+        },
+        Ministate::ChannelGroupNew => {
+            body = page_channelgroup_new::build(pc);
         },
         Ministate::ChannelGroup(id) => {
-            //. set_page(pc, build_page_channel_group(id));
+            body = page_channelgroup::build(id);
+        },
+        Ministate::ChannelGroupMenu(id) => {
+            body = page_channelgroup_menu::build(id);
+        },
+        Ministate::ChannelGroupEdit(id) => {
+            body = page_channelgroup_edit::build(pc, id);
+        },
+        Ministate::ChannelGroupDelete(id) => {
+            body = page_channelgroup_delete::build(pc, id);
         },
     }
+    set_page(body);
 }
