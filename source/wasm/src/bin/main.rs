@@ -1,3 +1,4 @@
+
 use {
     flowcontrol::{
         shed,
@@ -39,7 +40,7 @@ use {
         panic,
         rc::Rc,
     },
-    wasm::{
+    crate::{
         js::{
             scan_env,
             style_export::{
