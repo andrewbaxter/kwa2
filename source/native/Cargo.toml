@@ -25,7 +25,7 @@ hex = "0.4"
 rand = "0.9"
 spaghettinuum = { path = "../spaghettinuum/source/shared" }
 spaghettinuum_native = { path = "../spaghettinuum/source/native" }
-chrono = { version = "0.4", features = ["serde"] }
+jiff = { version = "0.2", features = ["serde"] }
 rusqlite = { version = "0.37", features = ["array", "bundled"] }
 deadpool-sqlite = "0.12"
 shared = { path = "../shared" }

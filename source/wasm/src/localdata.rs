@@ -1,21 +1,32 @@
 use {
     crate::{
         api::req_post_json,
+        js::{
+            LogJsErr,
+        },
         state::state,
     },
     flowcontrol::shed,
+    futures::channel::oneshot,
     gloo::storage::{
         LocalStorage,
         Storage,
     },
     jiff::Timestamp,
+    rooting::spawn_rooted,
     serde::{
         de::DeserializeOwned,
         Deserialize,
         Serialize,
     },
-    shared::interface::wire::{
-        c2s::{
+    shared::interface::{
+        shared::{
+            ChannelGroupId,
+            ChannelInviteId,
+            IdentityInviteId,
+            QualifiedChannelId,
+        },
+        wire::c2s::{
             self,
             ChannelGroupRes,
             ChannelInviteRes,
@@ -23,19 +34,13 @@ use {
             IdentityInviteRes,
             IdentityRes,
         },
-        shared::{
-            ChannelGroupId,
-            ChannelInviteId,
-            IdentityInviteId,
-            QualifiedChannelId,
-        },
     },
     spaghettinuum::interface::identity::Identity,
     std::{
         collections::HashMap,
         hash::Hash,
     },
-    crate::js::LogJsErr,
+    wasm_bindgen_futures::spawn_local,
 };
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -111,6 +116,67 @@ async fn req_api_values<
     return Ok(out);
 }
 
+pub enum NowOrLater<T> {
+    Now(T),
+    Later(futures::channel::oneshot::Receiver<Result<Option<T>, String>>),
+}
+
+impl<T: 'static> NowOrLater<T> {
+    pub fn map<U: 'static>(self, f: impl 'static + FnOnce(T) -> U) -> NowOrLater<U> {
+        match self {
+            NowOrLater::Now(v) => return NowOrLater::Now(f(v)),
+            NowOrLater::Later(t_rx) => {
+                let (tx, rx) = oneshot::channel();
+                spawn_local(async {
+                    let v = match t_rx.await {
+                        Ok(Ok(Some(v))) => Ok(Some(f(v))),
+                        Ok(Ok(None)) => Ok(None),
+                        Ok(Err(e)) => Err(e),
+                        Err(e) => Err(e.to_string()),
+                    };
+                    _ = tx.send(v);
+                });
+                return NowOrLater::Later(rx);
+            },
+        }
+    }
+}
+
+fn get_or_req_api_value<
+    'de,
+    V: 'static + Serialize + DeserializeOwned,
+    R: 'static + c2s::proto::ReqTrait<Resp = Vec<V>>,
+    K: 'static + Eq + Hash,
+>(cat_key: &'static str, r: R, access_id: fn(&V) -> K, id: K, touch: bool) -> NowOrLater<LocalValue<V>> {
+    match get_stored_values(cat_key, access_id, if touch {
+        Some(&id)
+    } else {
+        None
+    }).into_iter().find(|x| access_id(&x.res) == id) {
+        Some(local) => {
+            return NowOrLater::Now(local);
+        },
+        None => {
+            return NowOrLater::Later(spawn_rooted(async move {
+                let local = match req_api_values(cat_key, r, access_id, if touch {
+                    Some(&id)
+                } else {
+                    None
+                }).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return Err(e);
+                    },
+                };
+                let Some(local) = local.into_iter().find(|x| access_id(&x.res) == id) else {
+                    return Ok(None);
+                };
+                return Ok(Some(local));
+            }));
+        },
+    }
+}
+
 async fn ensure_api_value<
     'de,
     V: Serialize + DeserializeOwned,
@@ -156,6 +222,10 @@ pub async fn req_api_identities(touch: Option<&Identity>) -> Result<Vec<LocalIde
     return req_api_values(LOCALSTORAGE_IDENTITIES, c2s::IdentityList, |x| x.id, touch).await;
 }
 
+pub fn get_or_req_api_identity(id: &Identity, touch: bool) -> NowOrLater<LocalIdentity> {
+    return get_or_req_api_value(LOCALSTORAGE_IDENTITIES, c2s::IdentityList, |x| x.id.clone(), id.clone(), touch);
+}
+
 pub async fn ensure_identity(v: IdentityRes) {
     ensure_api_value(LOCALSTORAGE_IDENTITIES, |x| x.id, v).await;
 }
@@ -174,6 +244,16 @@ pub fn get_stored_api_identityinvites(touch: Option<&IdentityInviteId>) -> Vec<L
 
 pub async fn req_api_identityinvites(touch: Option<&IdentityInviteId>) -> Result<Vec<LocalIdentityInvite>, String> {
     return req_api_values(LOCALSTORAGE_IDENTITY_INVITES, c2s::IdentityInviteList, |x| x.id, touch).await;
+}
+
+pub fn greq_api_identityinvites(id: &IdentityInviteId, touch: bool) -> NowOrLater<LocalIdentityInvite> {
+    return get_or_req_api_value(
+        LOCALSTORAGE_IDENTITY_INVITES,
+        c2s::IdentityInviteList,
+        |x| x.id.clone(),
+        id.clone(),
+        touch,
+    );
 }
 
 pub async fn ensure_identityinvite(v: IdentityInviteRes) {
@@ -196,6 +276,16 @@ pub async fn req_api_channelgroups(touch: Option<&ChannelGroupId>) -> Result<Vec
     return req_api_values(LOCALSTORAGE_CHANNELGROUPS, c2s::ChannelGroupList, |x| x.id.clone(), touch).await;
 }
 
+pub fn get_or_req_api_channelgroup(id: &ChannelGroupId, touch: bool) -> NowOrLater<LocalChannelGroup> {
+    return get_or_req_api_value(
+        LOCALSTORAGE_CHANNELGROUPS,
+        c2s::ChannelGroupList,
+        |x| x.id.clone(),
+        id.clone(),
+        touch,
+    );
+}
+
 pub async fn ensure_channelgroup(v: ChannelGroupRes) {
     ensure_api_value(LOCALSTORAGE_CHANNELGROUPS, |x| x.id, v).await;
 }
@@ -216,6 +306,10 @@ pub async fn req_api_channels(touch: Option<&QualifiedChannelId>) -> Result<Vec<
     return req_api_values(LOCALSTORAGE_IDENTITIES, c2s::ChannelList, |x| x.id.clone(), touch).await;
 }
 
+pub fn get_or_req_api_channel(id: &QualifiedChannelId, touch: bool) -> NowOrLater<LocalChannel> {
+    return get_or_req_api_value(LOCALSTORAGE_IDENTITIES, c2s::ChannelList, |x| x.id.clone(), id.clone(), touch);
+}
+
 pub async fn ensure_channel(v: ChannelRes) {
     ensure_api_value(LOCALSTORAGE_CHANNELS, |x| x.id.clone(), v).await;
 }
@@ -234,6 +328,16 @@ pub fn get_stored_api_channelinvites(touch: Option<&ChannelInviteId>) -> Vec<Loc
 
 pub async fn req_api_channelinvites(touch: Option<&ChannelInviteId>) -> Result<Vec<LocalChannelInvite>, String> {
     return req_api_values(LOCALSTORAGE_CHANNEL_INVITES, c2s::ChannelInviteList, |x| x.id, touch).await;
+}
+
+pub fn get_or_req_api_channelinvite(id: &ChannelInviteId, touch: bool) -> NowOrLater<LocalChannelInvite> {
+    return get_or_req_api_value(
+        LOCALSTORAGE_CHANNEL_INVITES,
+        c2s::ChannelInviteList,
+        |x| x.id.clone(),
+        id.clone(),
+        touch,
+    );
 }
 
 pub async fn ensure_channelinvite(v: ChannelInviteRes) {

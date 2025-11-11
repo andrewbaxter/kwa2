@@ -12,8 +12,10 @@ pub fn build() -> El {
         //. .
         style_export::cont_menu_bar(style_export::ContMenuBarArgs {
             back_link: ministate_octothorpe(&Ministate::Top),
-            text: format!("Add channel"),
-            center_link: None,
+            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+                text: format!("Add channel"),
+                link: None,
+            }).root,
             right: None,
         }).root,
         style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {

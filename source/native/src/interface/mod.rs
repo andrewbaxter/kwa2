@@ -1,5 +1,6 @@
 pub mod s2s;
 pub mod config;
+pub mod db;
 
 use {
     schemars::JsonSchema,

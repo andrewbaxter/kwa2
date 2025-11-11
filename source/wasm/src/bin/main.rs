@@ -1,8 +1,5 @@
-
 use {
-    flowcontrol::{
-        shed,
-    },
+    flowcontrol::shed,
     gloo::{
         events::EventListener,
         storage::{
@@ -11,36 +8,21 @@ use {
             Storage,
         },
         utils::{
+            document,
             format::JsValueSerdeExt,
             window,
         },
     },
-    libmain::{
-        state::{
-            read_ministate,
-            record_replace_ministate,
-            Ministate,
-            LOCALSTORAGE_PWA_MINISTATE,
-            SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
-            build_ministate,
-            state,
-            State_,
-            STATE,
-        },
-    },
-    lunk::{
-        EventGraph,
-    },
-    rooting::{
-        set_root,
-    },
+    lunk::EventGraph,
+    rooting::set_root,
     serde::Deserialize,
     std::{
         cell::RefCell,
         panic,
         rc::Rc,
     },
-    crate::{
+    wasm::{
+        async_::bg_val,
         js::{
             scan_env,
             style_export::{
@@ -50,14 +32,32 @@ use {
             LogJsErr,
             VecLog,
         },
+        state::{
+            build_ministate,
+            read_ministate,
+            record_replace_ministate,
+            state,
+            Ministate,
+            State_,
+            LOCALSTORAGE_PWA_MINISTATE,
+            SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
+            STATE,
+        },
+        swproto::FromSw,
     },
-    wasm_bindgen::JsCast,
+    wasm_bindgen::{
+        JsCast,
+        JsValue,
+    },
+    wasm_bindgen_futures::{
+        spawn_local,
+        JsFuture,
+    },
     web_sys::{
         MessageEvent,
+        ServiceWorkerRegistration,
     },
 };
-
-pub mod libmain;
 
 pub fn main() {
     panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -66,11 +66,20 @@ pub fn main() {
     let log = log1.clone() as Rc<dyn Log>;
     eg.event(|pc| {
         let env = scan_env(&log);
+        let service_worker = bg_val(async {
+            let sw =
+                JsFuture::from(window().navigator().service_worker().register("./serviceworker.js"))
+                    .await
+                    .map_err(|e| format!("Error registering service worker: {:?}", e.as_string()))?;
+            return Ok(sw.dyn_into::<ServiceWorkerRegistration>().unwrap());
+        });
         let root = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
 
         // Build app state
         STATE.with(|s| *s.borrow_mut() = Some(Rc::new(State_ {
             eg: pc.eg(),
+            current_chat: RefCell::new(None),
+            service_worker: service_worker,
             root: root.clone(),
             ministate: RefCell::new(shed!{
                 'found _;
@@ -135,6 +144,23 @@ pub fn main() {
                 ).log(&state().log, &"Error storing PWA state");
                 build_ministate(pc, &ministate);
             }).unwrap()
+        }).forget();
+        EventListener::new(&window().navigator().service_worker(), "message", |ev| {
+            let ev =
+                ev.dyn_ref::<MessageEvent>().expect("Got wrong event type in service worker message event handler");
+            let data =
+                <JsValue as JsValueSerdeExt>::into_serde::<FromSw>(
+                    &ev.data(),
+                ).expect("Got wrong data type from service worker");
+            match data {
+                FromSw::Reload => {
+                    document().location().unwrap().reload().expect("Error triggering reload");
+                },
+                FromSw::Notification(n) => {
+                    // TODO
+                },
+            }
+            ev.data();
         }).forget();
 
         // Root and display

@@ -1,6 +1,6 @@
 use {
     glove::reqresp,
-    shared::interface::wire::shared::{
+    shared::interface::shared::{
         ChannelId,
     },
 };
@@ -15,9 +15,8 @@ pub mod s2sv1t {
             Deserialize,
             Serialize,
         },
-        shared::interface::wire::shared::{
+        shared::interface::shared::{
             ChannelId,
-            InvitationToken,
         },
         spaghettinuum::{
             byteszb32::BytesZb32,

@@ -1,5 +1,9 @@
 use {
     crate::{
+        js::{
+            el_async,
+            style_export,
+        },
         localdata::{
             get_stored_api_channelgroups,
             get_stored_api_channels,
@@ -12,6 +16,8 @@ use {
             ministate_octothorpe,
             state,
             Ministate,
+            MinistateChannel,
+            MinistateChannelGroup,
         },
     },
     flowcontrol::ta_return,
@@ -25,7 +31,7 @@ use {
         Deserialize,
         Serialize,
     },
-    shared::interface::wire::shared::ChannelGroupId,
+    shared::interface::shared::ChannelGroupId,
     std::{
         cell::RefCell,
         collections::{
@@ -33,10 +39,6 @@ use {
             HashSet,
         },
         rc::Rc,
-    },
-    crate::js::{
-        el_async,
-        style_export,
     },
 };
 
@@ -95,7 +97,10 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
             LocalCocg::Channel(old_c) => {
                 let out = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: old_c.res.memo_short,
-                    link: ministate_octothorpe(&Ministate::Channel(old_c.res.id.clone())),
+                    link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
+                        channel: old_c.res.id.clone(),
+                        reset: None,
+                    })),
                 }).root;
                 lookup_el_menu_channels.borrow_mut().insert(old_c.res.id, out.clone());
                 out
@@ -105,14 +110,20 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                 for local_c2 in old_cg.children {
                     let el2 = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                         text: local_c2.res.memo_short,
-                        link: ministate_octothorpe(&Ministate::Channel(local_c2.res.id.clone())),
+                        link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
+                            channel: local_c2.res.id.clone(),
+                            reset: None,
+                        })),
                     }).root;
                     lookup_el_menu_channels.borrow_mut().insert(local_c2.res.id, el2.clone());
                     children.push(el2);
                 }
                 let out = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
                     text: old_cg.v.res.memo_short.clone(),
-                    link: ministate_octothorpe(&Ministate::ChannelGroup(old_cg.v.res.id)),
+                    link: ministate_octothorpe(&Ministate::ChannelGroup(MinistateChannelGroup {
+                        channelgroup: old_cg.v.res.id,
+                        reset: None,
+                    })),
                     children: vec![],
                 });
                 out.group_el.ref_splice(0, 0, children);
@@ -161,7 +172,10 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                             } else {
                                 new_els1.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                                     text: new_c.res.memo_short,
-                                    link: ministate_octothorpe(&Ministate::Channel(new_c.res.id)),
+                                    link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
+                                        channel: new_c.res.id,
+                                        reset: None,
+                                    })),
                                 }).root);
                             }
                         },
@@ -179,7 +193,10 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                             } else {
                                 let next_el1 = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
                                     text: new_cg.v.res.memo_short,
-                                    link: ministate_octothorpe(&Ministate::ChannelGroup(new_cg.v.res.id)),
+                                    link: ministate_octothorpe(&Ministate::ChannelGroup(MinistateChannelGroup {
+                                        channelgroup: new_cg.v.res.id,
+                                        reset: None,
+                                    })),
                                     children: vec![],
                                 });
                                 new_els1.push(next_el1.root);
@@ -201,7 +218,10 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                                         new_out_els2.push(
                                             style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                                                 text: new_c2.res.memo_short,
-                                                link: ministate_octothorpe(&Ministate::Channel(new_c2.res.id)),
+                                                link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
+                                                    channel: new_c2.res.id,
+                                                    reset: None,
+                                                })),
                                             }).root,
                                         );
                                     }
@@ -248,6 +268,7 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
     // Other widgets, assemble and return
     let out = style_export::cont_page_top(style_export::ContPageTopArgs {
         identities_link: ministate_octothorpe(&Ministate::Identities),
+        settings_link: ministate_octothorpe(&Ministate::Settings),
         add_link: ministate_octothorpe(&Ministate::TopAdd),
         body: channel_elements,
     });

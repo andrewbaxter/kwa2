@@ -11,9 +11,16 @@ js-sys = "0.3"
 reqwasm = { version = "0.5", features = ["json"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-wasm-bindgen = "=0.2.100"
-wasm-bindgen-futures = "0.4"
+wasm-bindgen = "=0.2.105"
+wasm-bindgen-futures = { version = "0.4", features = [
+    "futures-core-03-stream",
+] }
 web-sys = { version = "0.3", features = [
+    "Cache",
+    "CacheStorage",
+    "WindowClient",
+    "Clients",
+    "ClientQueryOptions",
     "Clipboard",
     "ClipboardItem",
     "CssStyleDeclaration",
@@ -21,6 +28,8 @@ web-sys = { version = "0.3", features = [
     "DomException",
     "DomParser",
     "DomRect",
+    "ExtendableEvent",
+    "FetchEvent",
     "History",
     "HtmlAudioElement",
     "HtmlDocument",
@@ -34,6 +43,10 @@ web-sys = { version = "0.3", features = [
     "IntersectionObserver",
     "IntersectionObserverEntry",
     "IntersectionObserverInit",
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    "FileSystemWritableFileStream",
+    "FileSystemGetDirectoryOptions",
     "KeyboardEvent",
     "Location",
     "MediaMetadata",
@@ -45,10 +58,24 @@ web-sys = { version = "0.3", features = [
     "MediaError",
     "Navigator",
     "NodeList",
+    "Notification",
+    "NotificationOptions",
+    "NotificationPermission",
+    "PushEvent",
+    "PushManager",
+    "PushMessageData",
+    "PushSubscription",
+    "PushSubscriptionJson",
+    "PushSubscriptionOptionsInit",
+    "ServiceWorkerContainer",
+    "ServiceWorkerGlobalScope",
+    "ServiceWorkerRegistration",
     "StorageManager",
     "SupportedType",
     "Url",
+    "VisibilityState",
     "WheelEvent",
+    "WorkerLocation",
 ] }
 futures = "0.3"
 tokio = { version = "1", features = ["macros", "sync"] }
@@ -57,7 +84,8 @@ defer = "0.1"
 shared = { path = "../shared" }
 sha2 = "0.10"
 lunk = { version = "0.3" }
-rooting = { version = "0.1", features = ["futures"] }
+rooting = { version = "0.2", features = ["futures"] }
+rooting-forms = { version = "0.3", features = ["jiff"] }
 urlencoding = "2"
 qrcode = { version = "0.13", default-features = false, features = ["svg"] }
 uuid = { version = "1", features = ["v4", "js"] }
@@ -69,7 +97,6 @@ by_address = "1"
 tokio-stream = { version = "0.1", features = ["sync"] }
 mime2ext = "0.1"
 spaghettinuum = { path = "../spaghettinuum/source/shared" }
-rooting-forms = { version = "0.2", features = ["jiff"] }
 jiff = { version = "0.2", features = ["serde"] }
 
 [build-dependencies]

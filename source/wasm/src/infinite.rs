@@ -80,7 +80,7 @@
 //! after the last known element in the feed, so any missing elements will be
 //! included.
 use {
-    crate::mathutil::MoreMath,
+    crate::util::MoreMath,
     flowcontrol::shed,
     gloo::timers::callback::Timeout,
     lunk::{
@@ -121,9 +121,8 @@ use {
 const PX_PER_CM: f64 = 96. / 2.54;
 const BUFFER: f64 = PX_PER_CM * 40.;
 const CSS_HIDE: &'static str = "hide";
-pub const REQUEST_COUNT: usize = 50;
 const MIN_RESERVE: usize = 50;
-const MAX_RESERVE: usize = MIN_RESERVE + 2 * REQUEST_COUNT;
+const MAX_RESERVE: usize = MIN_RESERVE + 2 * 50;
 
 trait ElExt {
     fn offset_top(&self) -> f64;
@@ -140,28 +139,26 @@ impl ElExt for El {
     }
 }
 
-pub trait TimeTraits: 'static + Clone + std::fmt::Debug + PartialEq + Eq + PartialOrd + Hash { }
-
-impl<T: 'static + Clone + std::fmt::Debug + PartialEq + Eq + PartialOrd + Hash> TimeTraits for T { }
-
 pub trait FeedIdTraits: 'static + Clone + std::fmt::Debug + PartialEq + Eq + PartialOrd + Hash { }
 
 impl<T: 'static + Clone + std::fmt::Debug + PartialEq + Eq + PartialOrd + Hash> FeedIdTraits for T { }
 
-/// Represents an atom in the infinite scroller.
-pub trait Entry<Id> {
+pub trait Entry {
+    type FeedId: Clone + PartialEq + Eq + PartialOrd + Hash;
+    type Time: 'static + Clone + std::fmt::Debug + PartialEq + Eq + PartialOrd + Hash;
+
     fn create_el(&self, pc: &mut ProcessingContext) -> El;
-    fn time(&self) -> Id;
+    fn time(&self) -> Self::Time;
 }
 
-struct EntryState<FeedId, Id> {
-    feed_id: FeedId,
-    entry: Rc<dyn Entry<Id>>,
+struct EntryState<E: Entry> {
+    feed_id: E::FeedId,
+    entry: Rc<E>,
     entry_el: El,
     _entry_el_observe: ObserveHandle,
 }
 
-impl<FeedId, Id> ContainerEntry for EntryState<FeedId, Id> {
+impl<E: Entry> ContainerEntry for EntryState<E> {
     fn el(&self) -> &El {
         return &self.entry_el;
     }
@@ -173,94 +170,82 @@ impl<FeedId, Id> ContainerEntry for EntryState<FeedId, Id> {
 ///
 /// The stop states of the feed are controlled by the feed when it calls `respond_`
 /// methods.
-pub trait Feed<FeedId, Time: TimeTraits> {
-    fn set_parent(&self, parent: WeakInfiniscroll<FeedId, Time>);
-    fn request_around(&self, eg: EventGraph, time: Time, count: usize);
-    fn request_before(&self, eg: EventGraph, time: Time, count: usize);
-    fn request_after(&self, eg: EventGraph, time: Time, count: usize);
+pub trait Feed<E: Entry> {
+    fn set_parent(&self, parent: WeakInfinite<E>);
+
+    // Must return the element with id `id`, or else, at least one element before and
+    // after time (if they exist)
+    fn request_around(&self, eg: EventGraph, time: E::Time);
+    fn request_before(&self, eg: EventGraph, time: E::Time);
+    fn request_after(&self, eg: EventGraph, time: E::Time);
 }
 
-struct FeedState<FeedId, Time> {
-    feed: Box<dyn Feed<FeedId, Time>>,
+struct FeedState<E: Entry> {
+    feed: Box<dyn Feed<E>>,
     /// No elements, shortcut for request_around for initial data
     initial: bool,
     /// All entries are sorted and come before all realized entries. Front = nearest to
     /// real = late to early.
-    early_reserve: VecDeque<Rc<dyn Entry<Time>>>,
+    early_reserve: VecDeque<Rc<E>>,
     /// All entries are sorted and come after all realized entries. Front = nearest to
     /// real = early to late.
-    late_reserve: VecDeque<Rc<dyn Entry<Time>>>,
+    late_reserve: VecDeque<Rc<E>>,
     early_stop: bool,
     late_stop: bool,
-    latest_known: Option<Time>,
-    earliest_known: Option<Time>,
+    earliest_known: Option<E::Time>,
 }
 
-impl<FeedId, Id: TimeTraits> FeedState<FeedId, Id> {
-    fn update_earliest_known(&mut self, time: Id) {
+impl<E: Entry> FeedState<E> {
+    fn update_earliest_known(&mut self, id: E::Time) {
         match &self.earliest_known {
-            Some(i) => if time < *i {
-                self.earliest_known = Some(time);
+            Some(i) => if id < *i {
+                self.earliest_known = Some(id);
             },
-            None => self.earliest_known = Some(time),
+            None => self.earliest_known = Some(id),
         }
-    }
-
-    fn update_latest_known(&mut self, time: Id) -> bool {
-        match &self.latest_known {
-            Some(i) => if time > *i {
-                self.latest_known = Some(time);
-                return true;
-            },
-            None => {
-                self.latest_known = Some(time);
-                return true;
-            },
-        }
-        return false;
     }
 }
 
-struct Infiniscroll_<FeedId, Time: Clone + Hash + PartialEq> {
+struct Infiniscroll_<E: Entry> {
     eg: EventGraph,
     /// Used when new/resetting
-    reset_time: Time,
+    reset_time: RefCell<E::Time>,
     outer_stack: El,
     frame: El,
-    cached_frame_height: f64,
+    cached_frame_height: Cell<f64>,
     content: El,
     content_layout: El,
     /// Mirrors content's height, used to avoid js round trips (keep in sync)
-    logical_content_height: f64,
-    logical_content_layout_offset: f64,
-    logical_scroll_top: f64,
+    logical_content_height: Cell<f64>,
+    logical_content_layout_offset: Cell<f64>,
+    logical_scroll_top: Cell<f64>,
     center_spinner: El,
     early_spinner: El,
     late_spinner: El,
-    feeds: HashMap<FeedId, FeedState<FeedId, Time>>,
-    want_sticky: Option<Time>,
-    reserve_sticky_entry: Option<EntryState<FeedId, Time>>,
+    feeds: RefCell<HashMap<E::FeedId, FeedState<E>>>,
+    want_sticky: RefCell<Option<E::Time>>,
+    reserve_sticky_entry: RefCell<Option<EntryState<E>>>,
     early_sticky: El,
     late_sticky: El,
     /// All entries are sorted.
-    real: Container<EntryState<FeedId, Time>>,
-    cached_real_offset: f64,
+    real: RefCell<Container<EntryState<E>>>,
+    cached_real_offset: Cell<f64>,
     /// None if real is empty (i.e. invalid index)
-    anchor_i: Option<usize>,
-    anchor_alignment: f64,
+    anchor_i: Cell<Option<usize>>,
+    anchor_alignment: Cell<f64>,
     /// Offset of anchor element origin from view (scrolling)/desired content
     /// (recentering) origin.  If alignment is 0 (origin is top of element), has range
     /// `-height..0` because if the element is below the origin the anchor would
     /// actually be the previous element. If alignment is 1, has range `0..height`.
-    anchor_offset: f64,
-    shake_future: Option<Timeout>,
-    entry_resize_observer: Option<ResizeObserver>,
+    anchor_offset: Cell<f64>,
+    shake_future: RefCell<Option<Timeout>>,
+    entry_resize_observer: RefCell<Option<ResizeObserver>>,
     // After making content layout changes, the next scroll event will be synthetic
     // (not human-volitional), so ignore it for anchor modification.
-    mute_scroll: Instant,
+    mute_scroll: Cell<Instant>,
     // After human-volitional scrolling, more scrolling may soon come so push back
     // shake for this number of ms.
-    delay_shake: u32,
+    delay_shake: Cell<u32>,
 }
 
 fn calc_anchor_offset(real_origin_y: f64, anchor_top: f64, anchor_height: f64, anchor_alignment: f64) -> f64 {
@@ -269,10 +254,10 @@ fn calc_anchor_offset(real_origin_y: f64, anchor_top: f64, anchor_height: f64, a
     return anchor_offset;
 }
 
-impl<FeedId, Time: TimeTraits> Infiniscroll_<FeedId, Time> {
-    fn reanchor_inner(&mut self, mut anchor_i: usize, real_origin_y: f64) {
+impl<E: Entry> Infiniscroll_<E> {
+    fn reanchor_inner(&self, mut anchor_i: usize, real_origin_y: f64) {
         // Move anchor pointer down until directly after desired element
-        while let Some(e_state) = self.real.get(anchor_i + 1) {
+        while let Some(e_state) = self.real.borrow().get(anchor_i + 1) {
             if e_state.entry_el.offset_top() > real_origin_y {
                 break;
             }
@@ -280,7 +265,7 @@ impl<FeedId, Time: TimeTraits> Infiniscroll_<FeedId, Time> {
         }
 
         // Move anchor pointer up until directly above (=at) desired element.
-        while let Some(e_state) = self.real.get(anchor_i) {
+        while let Some(e_state) = self.real.borrow().get(anchor_i) {
             if e_state.entry_el.offset_top() <= real_origin_y {
                 break;
             }
@@ -291,100 +276,111 @@ impl<FeedId, Time: TimeTraits> Infiniscroll_<FeedId, Time> {
         }
 
         // Calculate offset
-        let anchor = self.real.get(anchor_i).unwrap();
-        self.anchor_offset =
-            calc_anchor_offset(
-                real_origin_y,
-                anchor.entry_el.offset_top(),
-                anchor.entry_el.offset_height(),
-                self.anchor_alignment,
-            );
+        {
+            let real = self.real.borrow();
+            let anchor = real.get(anchor_i).unwrap();
+            self
+                .anchor_offset
+                .set(
+                    calc_anchor_offset(
+                        real_origin_y,
+                        anchor.entry_el.offset_top(),
+                        anchor.entry_el.offset_height(),
+                        self.anchor_alignment.get(),
+                    ),
+                );
+        }
 
         // .
-        self.anchor_i = Some(anchor_i);
+        self.anchor_i.set(Some(anchor_i));
     }
 
-    fn scroll_reanchor(&mut self) {
-        if let Some(anchor_i) = self.anchor_i {
+    fn scroll_reanchor(&self) {
+        if let Some(anchor_i) = self.anchor_i.get() {
             let real_origin_y = 
                 // Origin in content space
-                self.logical_scroll_top + self.anchor_alignment.mix(0., self.cached_frame_height)
+                self.logical_scroll_top.get() + self.anchor_alignment.get().mix(0., self.cached_frame_height.get())
                 // Origin in content-layout space
-                - self.logical_content_layout_offset - self.cached_real_offset;
+                - self.logical_content_layout_offset.get() - self.cached_real_offset.get();
             self.reanchor_inner(anchor_i, real_origin_y);
         } else {
-            self.anchor_i = None;
-            self.anchor_offset = 0.;
+            self.anchor_i.set(None);
+            self.anchor_offset.set(0.);
         }
     }
 
     // Change anchor based on logical values (anchor, alignment), + frame height
-    fn transition_alignment_reanchor(&mut self) {
-        let Some(anchor_i) = self.anchor_i.clone() else {
+    fn transition_alignment_reanchor(&self) {
+        let Some(anchor_i) = self.anchor_i.get() else {
             return;
         };
-        let anchor = self.real.get(anchor_i).unwrap();
-        let real_origin_y =
-            anchor.entry_el.offset_top() + anchor.entry_el.offset_height() * self.anchor_alignment -
-                self.anchor_offset;
-        let candidate_early_real_origin_y = real_origin_y - self.cached_frame_height * self.anchor_alignment;
-        let candidate_late_real_origin_y = real_origin_y + self.cached_frame_height * (1. - self.anchor_alignment);
+        let real_origin_y = {
+            let real = self.real.borrow();
+            let anchor = real.get(anchor_i).unwrap();
+            anchor.entry_el.offset_top() + anchor.entry_el.offset_height() * self.anchor_alignment.get() -
+                self.anchor_offset.get()
+        };
+        let candidate_early_real_origin_y =
+            real_origin_y - self.cached_frame_height.get() * self.anchor_alignment.get();
+        let candidate_late_real_origin_y =
+            real_origin_y + self.cached_frame_height.get() * (1. - self.anchor_alignment.get());
         let mut early_all_stop = true;
         let mut late_all_stop = true;
-        for f in self.feeds.values() {
+        for f in self.feeds.borrow().values() {
             early_all_stop = early_all_stop && f.early_stop && f.early_reserve.is_empty();
             late_all_stop = late_all_stop && f.late_stop && f.late_reserve.is_empty();
         }
-        let last_el = self.real.last().unwrap();
-        let last_el_top = last_el.entry_el.offset_top();
-        let first_el = self.real.first().unwrap();
+        let last_el = self.real.borrow().last().unwrap().entry_el.clone();
+        let last_el_top = last_el.offset_top();
+        let first_el = self.real.borrow().first().unwrap().entry_el.clone();
         let first_el_top = 0.;
-        let first_el_height = first_el.entry_el.offset_height();
+        let first_el_height = first_el.offset_height();
         let first_el_bottom = first_el_top + first_el_height;
 
         // # Hovering late end, align to late end
         if late_all_stop && candidate_late_real_origin_y >= last_el_top {
-            self.anchor_alignment = 1.;
-            self.anchor_i = Some(self.real.len() - 1);
-            self.anchor_offset =
-                calc_anchor_offset(
-                    candidate_late_real_origin_y,
-                    last_el_top,
-                    last_el.entry_el.offset_height(),
-                    self.anchor_alignment,
+            self.anchor_alignment.set(1.);
+            self.anchor_i.set(Some(self.real.borrow().len() - 1));
+            self
+                .anchor_offset
+                .set(
+                    calc_anchor_offset(
+                        candidate_late_real_origin_y,
+                        last_el_top,
+                        last_el.offset_height(),
+                        self.anchor_alignment.get(),
+                    ),
                 );
             return;
         }
 
         // # Hovering early end, align to early end
         if early_all_stop && candidate_early_real_origin_y <= first_el_bottom {
-            self.anchor_alignment = 0.;
-            self.anchor_i = Some(0);
-            self.anchor_offset =
-                calc_anchor_offset(
-                    candidate_early_real_origin_y,
-                    first_el_top,
-                    first_el_height,
-                    self.anchor_alignment,
+            self.anchor_alignment.set(0.);
+            self.anchor_i.set(Some(0));
+            self
+                .anchor_offset
+                .set(
+                    calc_anchor_offset(
+                        candidate_early_real_origin_y,
+                        first_el_top,
+                        first_el_height,
+                        self.anchor_alignment.get(),
+                    ),
                 );
             return;
         }
 
         // # Otherwise, revert to middle
-        self.anchor_alignment = 0.5;
+        self.anchor_alignment.set(0.5);
         let new_real_origin_y = (candidate_early_real_origin_y + candidate_late_real_origin_y) / 2.;
         self.reanchor_inner(anchor_i, new_real_origin_y);
     }
 }
 
 fn get_pivot_early<
-    FeedId: FeedIdTraits,
-    Time: Clone,
->(
-    entries: &Container<EntryState<FeedId, Time>>,
-    feed_id: &FeedId,
-    f_state: &FeedState<FeedId, Time>,
-) -> Option<Time> {
+    E: Entry,
+>(entries: &Container<EntryState<E>>, feed_id: &E::FeedId, f_state: &FeedState<E>) -> Option<E::Time> {
     return f_state
         .early_reserve
         .back()
@@ -396,13 +392,8 @@ fn get_pivot_early<
 }
 
 fn get_pivot_late<
-    FeedId: FeedIdTraits,
-    Time: Clone,
->(
-    entries: &Container<EntryState<FeedId, Time>>,
-    feed_id: &FeedId,
-    f_state: &FeedState<FeedId, Time>,
-) -> Option<Time> {
+    E: Entry,
+>(entries: &Container<EntryState<E>>, feed_id: &E::FeedId, f_state: &FeedState<E>) -> Option<E::Time> {
     return f_state
         .late_reserve
         .back()
@@ -419,14 +410,13 @@ fn get_pivot_late<
 }
 
 fn realize_entry<
-    FeedId: FeedIdTraits,
-    Time: Clone,
+    E: Entry,
 >(
     pc: &mut ProcessingContext,
     entry_resize_observer: &ResizeObserver,
-    feed_id: &FeedId,
-    entry: Rc<dyn Entry<Time>>,
-) -> EntryState<FeedId, Time> {
+    feed_id: &E::FeedId,
+    entry: Rc<E>,
+) -> EntryState<E> {
     let entry_el = entry.create_el(pc);
     return EntryState {
         feed_id: feed_id.clone(),
@@ -437,20 +427,25 @@ fn realize_entry<
 }
 
 #[derive(Clone)]
-pub struct WeakInfiniscroll<FeedId, Id: TimeTraits>(Weak<RefCell<Infiniscroll_<FeedId, Id>>>);
+pub struct WeakInfinite<E: Entry>(Weak<Infiniscroll_<E>>);
 
-impl<FeedId: FeedIdTraits, Id: TimeTraits> WeakInfiniscroll<FeedId, Id> {
-    pub fn upgrade(&self) -> Option<Infiniscroll<FeedId, Id>> {
-        return self.0.upgrade().map(Infiniscroll);
+impl<E: Entry> WeakInfinite<E> {
+    pub fn upgrade(&self) -> Option<Infinite<E>> {
+        return self.0.upgrade().map(Infinite);
     }
 }
 
-#[derive(Clone)]
-pub struct Infiniscroll<FeedId: FeedIdTraits, Id: TimeTraits>(Rc<RefCell<Infiniscroll_<FeedId, Id>>>);
+pub struct Infinite<E: Entry>(Rc<Infiniscroll_<E>>);
 
-impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, TimeT> {
-    pub fn new(eg: &EventGraph, reset_id: TimeT, feeds: HashMap<FeedIdT, Box<dyn Feed<FeedIdT, TimeT>>>) -> Self {
-        let outer_stack = stack().classes(&["infinite"]);
+impl<E: Entry> Clone for Infinite<E> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<E: 'static + Entry> Infinite<E> {
+    pub fn new(eg: &EventGraph, reset_time: E::Time) -> Self {
+        let outer_stack = el("div").classes(&["infinite"]);
         let frame = el("div").classes(&["frame"]);
         let content = el("div").classes(&["content"]);
         let content_layout = el("div").classes(&["content_layout"]);
@@ -472,65 +467,46 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                 late_spinner.clone()
             ],
         );
-        let state = Infiniscroll(Rc::new(RefCell::new(Infiniscroll_ {
+        let state = Infinite(Rc::new(Infiniscroll_ {
             eg: eg.clone(),
-            reset_time: reset_id,
+            reset_time: RefCell::new(reset_time),
             outer_stack: outer_stack,
             frame: frame.clone(),
-            cached_frame_height: 0.,
+            cached_frame_height: Cell::new(0.),
             content: content.clone(),
             content_layout: content_layout,
-            logical_content_height: 0.,
-            logical_content_layout_offset: 0.,
-            logical_scroll_top: 0.,
+            logical_content_height: Cell::new(0.),
+            logical_content_layout_offset: Cell::new(0.),
+            logical_scroll_top: Cell::new(0.),
             center_spinner: center_spinner,
             early_spinner: early_spinner,
             late_spinner: late_spinner,
-            feeds: HashMap::new(),
-            want_sticky: None,
-            reserve_sticky_entry: None,
+            feeds: RefCell::new(HashMap::new()),
+            want_sticky: RefCell::new(None),
+            reserve_sticky_entry: RefCell::new(None),
             early_sticky: content_lines_early_sticky,
             late_sticky: content_lines_late_sticky,
-            real: content_lines_real,
-            cached_real_offset: 0.,
-            anchor_i: None,
-            anchor_alignment: 0.5,
-            anchor_offset: 0.,
-            shake_future: None,
-            entry_resize_observer: None,
-            mute_scroll: Instant::now() + Duration::from_millis(300),
-            delay_shake: 0,
-        })));
-        let entry_resize_observer = Some(ResizeObserver::new({
-            let state = state.weak();
-            move |_| {
-                let Some(state) = state.upgrade() else {
-                    return;
-                };
-                {
-                    let mut state1 = state.0.borrow_mut();
-                    state1.mute_scroll = Instant::now() + Duration::from_millis(50);
-                }
-                state.shake();
-            }
+            real: RefCell::new(content_lines_real),
+            cached_real_offset: Cell::new(0.),
+            anchor_i: Cell::new(None),
+            anchor_alignment: Cell::new(0.5),
+            anchor_offset: Cell::new(0.),
+            shake_future: RefCell::new(None),
+            entry_resize_observer: RefCell::new(None),
+            mute_scroll: Cell::new(Instant::now() + Duration::from_millis(300)),
+            delay_shake: Cell::new(0),
         }));
         {
-            let mut state1 = state.0.borrow_mut();
-            let weak_state = state.weak();
-            for (feed_id, feed) in feeds.into_iter() {
-                feed.set_parent(weak_state.clone());
-                state1.feeds.insert(feed_id, FeedState {
-                    feed: feed,
-                    initial: true,
-                    early_reserve: VecDeque::new(),
-                    late_reserve: VecDeque::new(),
-                    early_stop: false,
-                    late_stop: false,
-                    earliest_known: None,
-                    latest_known: None,
-                });
-            }
-            state1.entry_resize_observer = entry_resize_observer;
+            *state.0.entry_resize_observer.borrow_mut() = Some(ResizeObserver::new({
+                let state = state.weak();
+                move |_| {
+                    let Some(state) = state.upgrade() else {
+                        return;
+                    };
+                    state.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
+                    state.shake();
+                }
+            }));
         }
         frame.ref_on("scroll", {
             let state = state.weak();
@@ -538,16 +514,13 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                 let Some(state) = state.upgrade() else {
                     return;
                 };
-                {
-                    let mut state1 = state.0.borrow_mut();
-                    if state1.mute_scroll >= Instant::now() {
-                        return;
-                    }
-                    state1.logical_scroll_top = state1.frame.raw().scroll_top() as f64;
-                    state1.scroll_reanchor();
-                    state1.transition_alignment_reanchor();
-                    state1.delay_shake = 200;
+                if state.0.mute_scroll.get() >= Instant::now() {
+                    return;
                 }
+                state.0.logical_scroll_top.set(state.0.frame.raw().scroll_top() as f64);
+                state.0.scroll_reanchor();
+                state.0.transition_alignment_reanchor();
+                state.0.delay_shake.set(200);
                 state.shake();
             }
         });
@@ -558,14 +531,11 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                 let Some(state) = state.upgrade() else {
                     return;
                 };
-                {
-                    let mut state1 = state.0.borrow_mut();
-                    if frame_height == state1.cached_frame_height {
-                        return;
-                    }
-                    state1.cached_frame_height = frame_height;
-                    state1.mute_scroll = Instant::now() + Duration::from_millis(50);
+                if frame_height == state.0.cached_frame_height.get() {
+                    return;
                 }
+                state.0.cached_frame_height.set(frame_height);
+                state.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
                 state.shake();
             }
         });
@@ -580,41 +550,44 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                 if content_height == old_content_height.get() {
                     return;
                 }
-                let mut self1 = state.0.borrow_mut();
                 old_content_height.set(content_height);
-                self1.frame.raw().set_scroll_top(self1.logical_scroll_top.round() as i32);
-                self1.mute_scroll = Instant::now() + Duration::from_millis(50);
+                state.0.frame.raw().set_scroll_top(state.0.logical_scroll_top.get().round() as i32);
+                state.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
             }
         });
         state.shake_immediate();
         return state;
     }
 
-    pub fn weak(&self) -> WeakInfiniscroll<FeedIdT, TimeT> {
-        return WeakInfiniscroll(Rc::downgrade(&self.0));
+    pub fn add_feed(&self, id: E::FeedId, feed: impl 'static + Feed<E>) {
+        feed.set_parent(self.weak());
+        self.0.feeds.borrow_mut().insert(id, FeedState {
+            feed: Box::new(feed),
+            initial: true,
+            early_reserve: VecDeque::new(),
+            late_reserve: VecDeque::new(),
+            early_stop: false,
+            late_stop: false,
+            earliest_known: None,
+        });
+        self.shake();
+    }
+
+    pub fn weak(&self) -> WeakInfinite<E> {
+        return WeakInfinite(Rc::downgrade(&self.0));
     }
 
     pub fn el(&self) -> El {
-        return self.0.borrow().outer_stack.clone();
+        return self.0.outer_stack.clone();
     }
 
     pub fn set_padding_pre(&self, padding: &str) {
-        self
-            .0
-            .borrow()
-            .frame
-            .raw()
-            .dyn_ref::<HtmlElement>()
-            .unwrap()
-            .style()
-            .set_property("padding-top", &padding)
-            .unwrap();
+        self.0.frame.raw().dyn_ref::<HtmlElement>().unwrap().style().set_property("padding-top", &padding).unwrap();
     }
 
     pub fn set_padding_post(&self, padding: &str) {
         self
             .0
-            .borrow()
             .frame
             .raw()
             .dyn_ref::<HtmlElement>()
@@ -624,46 +597,44 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
             .unwrap();
     }
 
-    pub fn set_sticky(&self, time: &TimeT) {
+    pub fn set_sticky(&self, id: &E::Time) {
         let mut changed = false;
         shed!{
             'done _;
-            let mut self1 = self.0.borrow_mut();
-            if let Some(have_time) = &self1.want_sticky {
-                if have_time == time {
+            if let Some(have_id) = self.0.want_sticky.borrow().as_ref() {
+                if have_id == id {
                     // No change
                     break 'done;
                 } else {
                     // Changed; clean up old sticky entry
-                    if let Some(f) = &self1.reserve_sticky_entry {
+                    if let Some(f) = self.0.reserve_sticky_entry.borrow().as_ref() {
                         changed = true;
                         f.entry_el.ref_replace(vec![]);
                     }
                 }
             }
-            self1.want_sticky = Some(time.clone());
+            *self.0.want_sticky.borrow_mut() = Some(id.clone());
             // Locate rendered
-            for e in self1.real.iter() {
-                if &e.entry.time() == time {
+            for e in &*self.0.real.borrow() {
+                if &e.entry.time() == id {
                     // Element exists, must be marked sticky but otherwise all good
                     break 'done;
                 }
             }
             // Not rendered; clear and jump
             changed = true;
-            self1.reset_time = time.clone();
-            self1.real.clear();
-            self1.anchor_i = None;
-            self1.anchor_alignment = 0.5;
-            self1.anchor_offset = 0.;
-            for f in self1.feeds.values_mut() {
+            *self.0.reset_time.borrow_mut() = id.clone();
+            self.0.real.borrow_mut().clear();
+            self.0.anchor_i.set(None);
+            self.0.anchor_alignment.set(0.5);
+            self.0.anchor_offset.set(0.);
+            for f in self.0.feeds.borrow_mut().values_mut() {
                 f.early_reserve.clear();
                 f.late_reserve.clear();
                 f.early_stop = false;
                 f.late_stop = false;
                 f.initial = true;
                 f.earliest_known = None;
-                f.latest_known = None;
             }
         }
         if changed {
@@ -672,15 +643,11 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
     }
 
     pub fn clear_sticky(&self) {
+        *self.0.want_sticky.borrow_mut() = None;
         let mut changed = false;
-        {
-            let mut self1 = self.0.borrow_mut();
-            let self1 = &mut *self1;
-            self1.want_sticky = None;
-            if let Some(s) = self1.reserve_sticky_entry.take() {
-                changed = true;
-                s.entry_el.ref_replace(vec![]);
-            }
+        if let Some(s) = self.0.reserve_sticky_entry.borrow_mut().take() {
+            changed = true;
+            s.entry_el.ref_replace(vec![]);
         }
         if changed {
             self.shake();
@@ -688,26 +655,25 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
     }
 
     fn shake_immediate(&self) {
-        let mut self1 = self.0.borrow_mut();
-        let self1 = &mut *self1;
-        let eg = self1.eg.clone();
+        let eg = self.0.eg.clone();
         eg.event(|pc| {
-            self1.delay_shake = 0;
-            self1.shake_future = None;
+            self.0.delay_shake.set(0);
+            *self.0.shake_future.borrow_mut() = None;
 
             // # Calculate content + current theoretical used space
             let mut used_early = 0f64;
             let mut used_late = 0f64;
             let mut real_origin_y = 0f64;
-            if !self1.real.is_empty() {
-                let real_height = self1.real.el().offset_height();
-                let anchor_i = self1.anchor_i.unwrap();
-                let anchor = &mut self1.real.get(anchor_i).unwrap();
+            if !self.0.real.borrow().is_empty() {
+                let real = self.0.real.borrow_mut();
+                let real_height = real.el().offset_height();
+                let anchor_i = self.0.anchor_i.get().unwrap();
+                let anchor = &mut real.get(anchor_i).unwrap();
                 let anchor_top = anchor.entry_el.offset_top();
                 let anchor_height = anchor.entry_el.offset_height();
-                real_origin_y = anchor_top + anchor_height * self1.anchor_alignment
+                real_origin_y = anchor_top + anchor_height * self.0.anchor_alignment.get()
                     // Shift up becomes early usage
-                    - self1.anchor_offset;
+                    - self.0.anchor_offset.get();
                 used_early = real_origin_y;
                 used_late = real_height - real_origin_y;
             }
@@ -715,9 +681,9 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
             // # Realize and unrealize elements to match goal bounds
             //
             // ## Early...
-            let want_nostop_early = BUFFER + self1.cached_frame_height * self1.anchor_alignment;
+            let want_nostop_early = BUFFER + self.0.cached_frame_height.get() * self.0.anchor_alignment.get();
             let mut unrealize_early = 0usize;
-            for e in &self1.real {
+            for e in &*self.0.real.borrow() {
                 let bottom = e.entry_el.offset_top() + e.entry_el.offset_height();
                 let min_dist = real_origin_y - bottom;
                 if min_dist <= want_nostop_early {
@@ -732,7 +698,7 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                 'realize_early _;
                 while used_early < want_nostop_early {
                     let mut use_feed = None;
-                    for (feed_id, f_state) in &self1.feeds {
+                    for (feed_id, f_state) in &*self.0.feeds.borrow() {
                         let Some(entry) = f_state.early_reserve.front() else {
                             // Reserve empty
                             if f_state.early_stop {
@@ -758,21 +724,29 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                     let Some((feed_id, _)) = use_feed else {
                         break 'realize_early;
                     };
-                    let feed = self1.feeds.get_mut(&feed_id).unwrap();
-                    let entry = feed.early_reserve.pop_front().unwrap();
+                    let entry =
+                        self.0.feeds.borrow_mut().get_mut(&feed_id).unwrap().early_reserve.pop_front().unwrap();
                     let mut real = None;
-                    if let Some(f) = &self1.reserve_sticky_entry {
-                        if f.entry.time() == entry.time() {
-                            let real1 = self1.reserve_sticky_entry.take().unwrap();
-                            real1.entry_el.ref_replace(vec![]);
-                            real = Some(real1);
+                    {
+                        let reserve_sticky_entry = self.0.reserve_sticky_entry.borrow_mut();
+                        if let Some(f) = &*reserve_sticky_entry {
+                            if f.entry.time() == entry.time() {
+                                let real1 = self.0.reserve_sticky_entry.borrow_mut().take().unwrap();
+                                real1.entry_el.ref_replace(vec![]);
+                                real = Some(real1);
+                            }
                         }
                     }
                     let real =
                         real.unwrap_or_else(
-                            || realize_entry(pc, self1.entry_resize_observer.as_ref().unwrap(), &feed_id, entry),
+                            || realize_entry(
+                                pc,
+                                self.0.entry_resize_observer.borrow().as_ref().unwrap(),
+                                &feed_id,
+                                entry,
+                            ),
                         );
-                    self1.real.el().ref_push(real.entry_el.clone());
+                    self.0.real.borrow_mut().el().ref_push(real.entry_el.clone());
                     let height = real.entry_el.offset_height();
                     real.entry_el.ref_replace(vec![]);
                     used_early += height;
@@ -782,9 +756,9 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
             };
 
             // ## Late...
-            let want_nostop_late = BUFFER + self1.cached_frame_height * (1. - self1.anchor_alignment);
+            let want_nostop_late = BUFFER + self.0.cached_frame_height.get() * (1. - self.0.anchor_alignment.get());
             let mut unrealize_late = 0usize;
-            for e in self1.real.iter().rev() {
+            for e in self.0.real.borrow().iter().rev() {
                 let top = e.entry_el.offset_top();
                 let min_dist = top - real_origin_y;
                 if min_dist <= want_nostop_late {
@@ -799,7 +773,7 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                 'realize_late _;
                 while used_late < want_nostop_late {
                     let mut use_feed = None;
-                    for (feed_id, f_state) in &self1.feeds {
+                    for (feed_id, f_state) in &*self.0.feeds.borrow() {
                         let Some(entry) = f_state.late_reserve.front() else {
                             // Reserve empty
                             if f_state.late_stop {
@@ -825,21 +799,26 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                     let Some((feed_id, _)) = use_feed else {
                         break 'realize_late;
                     };
-                    let feed = self1.feeds.get_mut(&feed_id).unwrap();
-                    let entry = feed.late_reserve.pop_front().unwrap();
+                    let entry =
+                        self.0.feeds.borrow_mut().get_mut(&feed_id).unwrap().late_reserve.pop_front().unwrap();
                     let mut real = None;
-                    if let Some(f) = &self1.reserve_sticky_entry {
+                    if let Some(f) = &*self.0.reserve_sticky_entry.borrow() {
                         if f.entry.time() == entry.time() {
-                            let real1 = self1.reserve_sticky_entry.take().unwrap();
+                            let real1 = self.0.reserve_sticky_entry.take().unwrap();
                             real1.entry_el.ref_replace(vec![]);
                             real = Some(real1);
                         }
                     }
                     let real =
                         real.unwrap_or_else(
-                            || realize_entry(pc, self1.entry_resize_observer.as_ref().unwrap(), &feed_id, entry),
+                            || realize_entry(
+                                pc,
+                                self.0.entry_resize_observer.borrow().as_ref().unwrap(),
+                                &feed_id,
+                                entry,
+                            ),
                         );
-                    self1.content.ref_push(real.entry_el.clone());
+                    self.0.content.ref_push(real.entry_el.clone());
                     let height = real.entry_el.offset_height();
                     real.entry_el.ref_replace(vec![]);
                     used_late += height;
@@ -851,9 +830,9 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
             // ## Apply changes
             //
             // ### Update anchor
-            match self1.anchor_i {
+            match self.0.anchor_i.get() {
                 Some(anchor_i) => {
-                    self1.anchor_i = Some(anchor_i + realized_early.len() - unrealize_early);
+                    self.0.anchor_i.set(Some(anchor_i + realized_early.len() - unrealize_early));
                 },
                 None => {
                     match (realized_early.is_empty(), realized_late.is_empty()) {
@@ -861,10 +840,10 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                             // nop
                         },
                         (true, false) => {
-                            self1.anchor_i = Some(0);
+                            self.0.anchor_i.set(Some(0));
                         },
                         (false, _) => {
-                            self1.anchor_i = Some(realized_early.len() - 1);
+                            self.0.anchor_i.set(Some(realized_early.len() - 1));
                         },
                     }
                 },
@@ -874,31 +853,38 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
             //
             // late to early -> early to late
             realized_early.reverse();
-            for evicted_e_state in self1.real.splice(0, unrealize_early, realized_early) {
-                let feed = self1.feeds.get_mut(&evicted_e_state.feed_id).unwrap();
+            for evicted_e_state in self.0.real.borrow_mut().splice(0, unrealize_early, realized_early) {
+                let mut feeds = self.0.feeds.borrow_mut();
+                let feed = feeds.get_mut(&evicted_e_state.feed_id).unwrap();
                 feed.early_reserve.push_front(evicted_e_state.entry.clone());
-                if self1.want_sticky.iter().any(|s| s == &evicted_e_state.entry.time()) {
-                    self1.early_sticky.ref_push(evicted_e_state.el().clone());
-                    self1.reserve_sticky_entry = Some(evicted_e_state);
+                if self.0.want_sticky.borrow().iter().any(|s| s == &evicted_e_state.entry.time()) {
+                    self.0.early_sticky.ref_push(evicted_e_state.el().clone());
+                    *self.0.reserve_sticky_entry.borrow_mut() = Some(evicted_e_state);
                 }
             }
 
             // ### Late elements
-            for evicted_e_state in self1.real.splice(self1.real.len() - unrealize_late, unrealize_late, realized_late).rev() {
-                let feed = self1.feeds.get_mut(&evicted_e_state.feed_id).unwrap();
+            for evicted_e_state in self
+                .0
+                .real
+                .borrow_mut()
+                .splice(self.0.real.borrow().len() - unrealize_late, unrealize_late, realized_late)
+                .rev() {
+                let mut feeds = self.0.feeds.borrow_mut();
+                let feed = feeds.get_mut(&evicted_e_state.feed_id).unwrap();
                 feed.late_reserve.push_front(evicted_e_state.entry.clone());
-                if self1.want_sticky.iter().any(|s| s == &evicted_e_state.entry.time()) {
-                    self1.late_sticky.ref_push(evicted_e_state.el().clone());
-                    self1.reserve_sticky_entry = Some(evicted_e_state);
+                if self.0.want_sticky.borrow().iter().any(|s| s == &evicted_e_state.entry.time()) {
+                    self.0.late_sticky.ref_push(evicted_e_state.el().clone());
+                    *self.0.reserve_sticky_entry.borrow_mut() = Some(evicted_e_state);
                 }
             }
 
             // # Prune reserve and unset stop status
             let mut requesting_early = false;
             let mut requesting_late = false;
-            for (feed_id, f_state) in &mut self1.feeds {
+            for (feed_id, f_state) in &mut *self.0.feeds.borrow_mut() {
                 if f_state.initial {
-                    f_state.feed.request_around(pc.eg(), self1.reset_time.clone(), REQUEST_COUNT);
+                    f_state.feed.request_around(pc.eg(), self.0.reset_time.borrow().clone());
                     requesting_early = true;
                     requesting_late = true;
                 } else {
@@ -907,8 +893,8 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                         f_state.early_stop = false;
                     }
                     if !f_state.early_stop && f_state.early_reserve.len() < MIN_RESERVE {
-                        let pivot = get_pivot_early(&self1.real, feed_id, f_state).unwrap();
-                        f_state.feed.request_before(pc.eg(), pivot, REQUEST_COUNT);
+                        let pivot = get_pivot_early(&*self.0.real.borrow(), feed_id, f_state).unwrap();
+                        f_state.feed.request_before(pc.eg(), pivot);
                         requesting_early = true;
                     }
                     if f_state.late_reserve.len() > MAX_RESERVE {
@@ -916,19 +902,28 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                         f_state.late_stop = false;
                     }
                     if !f_state.late_stop && f_state.late_reserve.len() < MIN_RESERVE {
-                        let pivot = get_pivot_late(&self1.real, feed_id, f_state).unwrap();
-                        f_state.feed.request_after(pc.eg(), pivot, REQUEST_COUNT);
+                        let pivot = get_pivot_late(&*self.0.real.borrow(), feed_id, f_state).unwrap();
+                        f_state.feed.request_after(pc.eg(), pivot);
                         requesting_late = true;
                     }
                 }
             }
-            self1.center_spinner.ref_modify_classes(&[(CSS_HIDE, !(self1.real.is_empty() && requesting_early))]);
-            self1.early_spinner.ref_modify_classes(&[(CSS_HIDE, !(!self1.real.is_empty() && requesting_early))]);
-            self1.late_spinner.ref_modify_classes(&[(CSS_HIDE, !(!self1.real.is_empty() && requesting_late))]);
-            self1.cached_real_offset = self1.real.el().offset_top();
+            self
+                .0
+                .center_spinner
+                .ref_modify_classes(&[(CSS_HIDE, !(self.0.real.borrow().is_empty() && requesting_early))]);
+            self
+                .0
+                .early_spinner
+                .ref_modify_classes(&[(CSS_HIDE, !(!self.0.real.borrow().is_empty() && requesting_early))]);
+            self
+                .0
+                .late_spinner
+                .ref_modify_classes(&[(CSS_HIDE, !(!self.0.real.borrow().is_empty() && requesting_late))]);
+            self.0.cached_real_offset.set(self.0.real.borrow().el().offset_top());
 
             // # Update alignment based on used space, stop states
-            self1.transition_alignment_reanchor();
+            self.0.transition_alignment_reanchor();
 
             // # Calculate desired space per used space + stop status
             //
@@ -949,10 +944,11 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
             }
 
             // # Update logical height, deferred real height update
-            let new_height = (want_early + want_late).max(self1.cached_frame_height);
-            if (new_height - self1.logical_content_height).abs() >= 1. {
-                self1.logical_content_height = new_height;
-                self1
+            let new_height = (want_early + want_late).max(self.0.cached_frame_height.get());
+            if (new_height - self.0.logical_content_height.get()).abs() >= 1. {
+                self.0.logical_content_height.set(new_height);
+                self
+                    .0
                     .content
                     .raw()
                     .dyn_ref::<HtmlElement>()
@@ -963,42 +959,50 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
             }
 
             // # Position content based on content size, used space, and alignment
-            self1.logical_content_layout_offset = self1.anchor_alignment.mix(
+            self.0.logical_content_layout_offset.set(self.0.anchor_alignment.get().mix(
                 // Start of content is origin (want_early) minus the amount used before
                 // (used_early)
                 want_early - used_early,
                 // Backwards from end of content, in case used < frame height.
                 // `logical_content_height` is padded, so this will push it to the end.
-                self1.logical_content_height - (want_late + used_early),
-            ) - self1.cached_real_offset;
-            self1
+                self.0.logical_content_height.get() - (want_late + used_early),
+            ) - self.0.cached_real_offset.get());
+            self
+                .0
                 .content_layout
                 .raw()
                 .dyn_ref::<HtmlElement>()
                 .unwrap()
                 .style()
-                .set_property("top", &format!("{}px", self1.logical_content_layout_offset))
+                .set_property("top", &format!("{}px", self.0.logical_content_layout_offset.get()))
                 .unwrap();
 
             // # Calculate centered scroll so visual origin matches content origin
-            self1.logical_scroll_top =
-                self1
-                    .anchor_alignment
-                    .mix(want_early, self1.logical_content_height - want_late - self1.cached_frame_height)
-                    .max(0.);
-            self1.frame.raw().set_scroll_top(self1.logical_scroll_top.round() as i32);
-            self1.mute_scroll = Instant::now() + Duration::from_millis(50);
+            self
+                .0
+                .logical_scroll_top
+                .set(
+                    self
+                        .0
+                        .anchor_alignment
+                        .get()
+                        .mix(
+                            want_early,
+                            self.0.logical_content_height.get() - want_late - self.0.cached_frame_height.get(),
+                        )
+                        .max(0.),
+                );
+            self.0.frame.raw().set_scroll_top(self.0.logical_scroll_top.get().round() as i32);
+            self.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
         });
     }
 
     fn shake(&self) {
-        let mut self1 = self.0.borrow_mut();
-        let mute_scroll = self1.mute_scroll >= Instant::now();
-        if mute_scroll || self1.delay_shake == 0 {
-            drop(self1);
+        let mute_scroll = self.0.mute_scroll.get() >= Instant::now();
+        if mute_scroll || self.0.delay_shake.get() == 0 {
             self.shake_immediate();
         } else {
-            self1.shake_future = Some(Timeout::new(self1.delay_shake, {
+            *self.0.shake_future.borrow_mut() = Some(Timeout::new(self.0.delay_shake.get(), {
                 let state = self.weak();
                 move || {
                     let Some(state) = state.upgrade() else {
@@ -1013,21 +1017,19 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
     /// Called by feed, in response to `request__around`.
     pub fn respond_entries_around(
         &self,
-        feed_id: FeedIdT,
-        pivot: TimeT,
-        entries: Vec<Rc<dyn Entry<TimeT>>>,
+        feed_id: &E::FeedId,
+        pivot: &E::Time,
+        entries: Vec<Rc<E>>,
         early_stop: bool,
         late_stop: bool,
     ) {
-        {
-            let mut self1 = self.0.borrow_mut();
-            let eg = self1.eg.clone();
-            eg.event(|pc| {
-                let self1 = &mut *self1;
-                if pivot != self1.reset_time {
-                    return;
-                }
-                let feed = self1.feeds.get_mut(&feed_id).unwrap();
+        self.0.eg.event(|pc| {
+            if *pivot != *self.0.reset_time.borrow() {
+                return;
+            }
+            {
+                let mut feeds = self.0.feeds.borrow_mut();
+                let feed = feeds.get_mut(&feed_id).unwrap();
                 if !feed.initial {
                     return;
                 }
@@ -1042,40 +1044,51 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                     let time = e.time();
                     feed.update_earliest_known(time.clone());
                     feed.update_earliest_known(time.clone());
-                    if time < self1.reset_time {
+                    if time < *self.0.reset_time.borrow() {
                         prepend.push(e);
-                    } else if time == self1.reset_time {
-                        let real = realize_entry(pc, self1.entry_resize_observer.as_ref().unwrap(), &feed_id, e);
-                        self1.real.push(real);
-                        self1.anchor_i = Some(0);
+                    } else if time == *self.0.reset_time.borrow() {
+                        let real =
+                            realize_entry(pc, self.0.entry_resize_observer.borrow().as_ref().unwrap(), feed_id, e);
+                        self.0.real.borrow_mut().push(real);
+                        self.0.anchor_i.set(Some(0));
                     } else {
                         postpend.push(e);
                     }
                 }
                 for e in &prepend {
-                    if self1.want_sticky.iter().any(|s| s == &e.time()) {
+                    if self.0.want_sticky.borrow().iter().any(|s| s == &e.time()) {
                         let real =
-                            realize_entry(pc, self1.entry_resize_observer.as_ref().unwrap(), &feed_id, e.clone());
-                        self1.early_sticky.ref_push(real.el().clone());
-                        self1.reserve_sticky_entry = Some(real);
+                            realize_entry(
+                                pc,
+                                self.0.entry_resize_observer.borrow().as_ref().unwrap(),
+                                feed_id,
+                                e.clone(),
+                            );
+                        self.0.early_sticky.ref_push(real.el().clone());
+                        *self.0.reserve_sticky_entry.borrow_mut() = Some(real);
                     }
                 }
                 prepend.reverse();
                 feed.early_reserve.extend(prepend);
                 for e in &postpend {
-                    if self1.want_sticky.iter().any(|s| s == &e.time()) {
+                    if self.0.want_sticky.borrow().iter().any(|s| s == &e.time()) {
                         let real =
-                            realize_entry(pc, self1.entry_resize_observer.as_ref().unwrap(), &feed_id, e.clone());
-                        self1.late_sticky.ref_push(real.el().clone());
-                        self1.reserve_sticky_entry = Some(real);
+                            realize_entry(
+                                pc,
+                                self.0.entry_resize_observer.borrow().as_ref().unwrap(),
+                                feed_id,
+                                e.clone(),
+                            );
+                        self.0.late_sticky.ref_push(real.el().clone());
+                        *self.0.reserve_sticky_entry.borrow_mut() = Some(real);
                     }
                 }
                 feed.late_reserve.extend(postpend);
                 feed.early_stop = early_stop;
                 feed.late_stop = late_stop;
-                self1.transition_alignment_reanchor();
-            });
-        }
+            }
+            self.0.transition_alignment_reanchor();
+        });
         self.shake();
     }
 
@@ -1089,9 +1102,9 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
     ///   entry at the time the request was received.
     pub fn respond_entries_before(
         &self,
-        feed_id: &FeedIdT,
-        initial_pivot: &TimeT,
-        entries: Vec<Rc<dyn Entry<TimeT>>>,
+        feed_id: &E::FeedId,
+        initial_pivot: &E::Time,
+        entries: Vec<Rc<E>>,
         mut stop: bool,
     ) {
         if entries.is_empty() {
@@ -1099,6 +1112,7 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
         }
         assert!(shed!{
             'assert _;
+            // Assert properly ordered and >= pivot
             let mut at = initial_pivot.clone();
             for e in &entries {
                 if e.time() >= at {
@@ -1109,36 +1123,42 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
             true
         });
         {
-            let mut self1 = self.0.borrow_mut();
-            let self1 = &mut *self1;
-            let Some(current_pivot) = get_pivot_early(&self1.real, feed_id, self1.feeds.get(feed_id).unwrap()) else {
-                return;
-            };
+            let Some(current_pivot) =
+                get_pivot_early(&self.0.real.borrow(), feed_id, self.0.feeds.borrow().get(feed_id).unwrap()) else {
+                    return;
+                };
             if initial_pivot != &current_pivot {
                 return;
             }
-            let eg = self1.eg.clone();
-            eg.event(|pc| {
-                let feed_state = self1.feeds.get_mut(feed_id).unwrap();
+            self.0.eg.event(|pc| {
                 {
-                    let earliest_known = feed_state.earliest_known.clone().unwrap();
-                    if initial_pivot != &earliest_known && entries.iter().all(|e| e.time() != earliest_known) {
-                        // Know of element beyond this result (via an async channel)
-                        stop = false;
+                    let mut feeds = self.0.feeds.borrow_mut();
+                    let feed_state = feeds.get_mut(feed_id).unwrap();
+                    {
+                        let earliest_known = feed_state.earliest_known.clone().unwrap();
+                        if initial_pivot != &earliest_known && entries.iter().all(|e| e.time() != earliest_known) {
+                            // Know of element beyond this result (via an async channel)
+                            stop = false;
+                        }
                     }
-                }
-                feed_state.update_earliest_known(entries.last().unwrap().time());
-                for e in entries.iter().rev() {
-                    if self1.want_sticky.iter().any(|s| s == &e.time()) {
-                        let real =
-                            realize_entry(pc, self1.entry_resize_observer.as_ref().unwrap(), feed_id, e.clone());
-                        self1.early_sticky.ref_push(real.el().clone());
-                        self1.reserve_sticky_entry = Some(real);
+                    feed_state.update_earliest_known(entries.last().unwrap().time());
+                    for e in entries.iter().rev() {
+                        if self.0.want_sticky.borrow().iter().any(|s| s == &e.time()) {
+                            let real =
+                                realize_entry(
+                                    pc,
+                                    self.0.entry_resize_observer.borrow().as_ref().unwrap(),
+                                    feed_id,
+                                    e.clone(),
+                                );
+                            self.0.early_sticky.ref_push(real.el().clone());
+                            *self.0.reserve_sticky_entry.borrow_mut() = Some(real);
+                        }
                     }
+                    feed_state.early_reserve.extend(entries);
+                    feed_state.early_stop = stop;
                 }
-                feed_state.early_reserve.extend(entries);
-                feed_state.early_stop = stop;
-                self1.transition_alignment_reanchor();
+                self.0.transition_alignment_reanchor();
             });
         }
         self.shake();
@@ -1154,9 +1174,9 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
     ///   entry at the time the request was received.
     pub fn respond_entries_after(
         &self,
-        feed_id: &FeedIdT,
-        initial_pivot: &TimeT,
-        mut entries: Vec<Rc<dyn Entry<TimeT>>>,
+        feed_id: &E::FeedId,
+        initial_pivot: &E::Time,
+        mut entries: Vec<Rc<E>>,
         mut stop: bool,
     ) {
         if entries.is_empty() {
@@ -1175,19 +1195,18 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
             true
         });
         {
-            let mut self1 = self.0.borrow_mut();
-            let self1 = &mut *self1;
-            let Some(current_pivot) = get_pivot_late(&self1.real, feed_id, self1.feeds.get(feed_id).unwrap()) else {
-                return;
-            };
+            let Some(current_pivot) =
+                get_pivot_late(&self.0.real.borrow(), feed_id, self.0.feeds.borrow().get(feed_id).unwrap()) else {
+                    return;
+                };
             if initial_pivot != &current_pivot {
                 return;
             }
-            self1.eg.event(|pc| {
+            self.0.eg.event(|pc| {
                 // Gather overall state
                 let mut all_stopped = true;
                 let mut all_reserve_empty = true;
-                for feed_state in self1.feeds.values() {
+                for feed_state in self.0.feeds.borrow().values() {
                     if !feed_state.late_stop {
                         all_stopped = false;
                     }
@@ -1195,121 +1214,120 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
                         all_reserve_empty = false;
                     }
                 }
-                let feed_state = self1.feeds.get_mut(feed_id).unwrap();
-                let mut inferred_stop = true;
                 {
-                    let latest_known = feed_state.latest_known.clone().unwrap();
-                    if initial_pivot != &latest_known && entries.iter().all(|e| e.time() != latest_known) {
-                        // Know of element beyond this result (via an async channel)
-                        inferred_stop = false;
-                    }
-                }
-                shed!{
-                    'done_adding _;
-                    macro_rules! add_to_reserve{
-                        () => {
-                            for entry in entries {
-                                if feed_state.late_reserve.len() < MAX_RESERVE {
-                                    let entry_time = entry.time();
-                                    if self1.want_sticky.iter().any(|s| s == &entry_time) {
-                                        let real =
-                                            realize_entry(
-                                                pc,
-                                                self1.entry_resize_observer.as_ref().unwrap(),
-                                                feed_id,
-                                                entry.clone(),
-                                            );
-                                        self1.reserve_sticky_entry = Some(real);
+                    let mut feeds = self.0.feeds.borrow_mut();
+                    let feed_state = feeds.get_mut(feed_id).unwrap();
+                    shed!{
+                        'done_adding _;
+                        macro_rules! add_to_reserve{
+                            () => {
+                                for entry in entries {
+                                    if feed_state.late_reserve.len() < MAX_RESERVE {
+                                        let entry_time = entry.time();
+                                        if self.0.want_sticky.borrow().iter().any(|s| s == &entry_time) {
+                                            let real =
+                                                realize_entry(
+                                                    pc,
+                                                    self.0.entry_resize_observer.borrow().as_ref().unwrap(),
+                                                    feed_id,
+                                                    entry.clone(),
+                                                );
+                                            *self.0.reserve_sticky_entry.borrow_mut() = Some(real);
+                                        }
+                                        feed_state.late_reserve.push_back(entry);
+                                    } else {
+                                        stop = false;
+                                        break;
                                     }
-                                    feed_state.late_reserve.push_back(entry);
-                                } else {
-                                    stop = false;
-                                    break;
                                 }
-                            }
-                        };
-                    }
-                    // Already a reserve, new elements guaranteed to be ordered afterwards
-                    if !feed_state.late_reserve.is_empty() {
-                        add_to_reserve!();
-                        feed_state.late_stop = stop;
-                        break 'done_adding;
-                    }
-                    // No reserve, new elements could need to be sorted into real depending on how
-                    // feed events interleaved
-                    let real_latest_time = self1.real.last().unwrap().entry.time();
-                    entries.reverse();
-                    let mut last_insert_before_i = 0;
-                    loop {
-                        let Some(entry) = entries.last() else {
-                            break;
-                        };
-                        let entry_time = entry.time();
-                        if entry_time >= real_latest_time {
-                            break;
+                            };
                         }
-                        let entry = entries.pop().unwrap();
-                        let insert_before_i = shed!{
-                            'find_insert _;
-                            for (i, real_state) in self1.real.iter().enumerate().skip(last_insert_before_i).rev() {
-                                if entry_time > real_state.entry.time() {
-                                    break 'find_insert i + 1;
-                                }
+                        // Already a reserve, new elements guaranteed to be ordered afterwards
+                        if !feed_state.late_reserve.is_empty() {
+                            add_to_reserve!();
+                            feed_state.late_stop = stop;
+                            break 'done_adding;
+                        }
+                        // No reserve, new elements could need to be sorted into real depending on how
+                        // feed events interleaved
+                        let real_latest_time = self.0.real.borrow().last().unwrap().entry.time();
+                        entries.reverse();
+                        let mut last_insert_before_i = 0;
+                        loop {
+                            let Some(entry) = entries.last() else {
+                                break;
+                            };
+                            let entry_time = entry.time();
+                            if entry_time >= real_latest_time {
+                                break;
                             }
-                            break 'find_insert 0;
-                        };
-                        last_insert_before_i = insert_before_i;
-                        if insert_before_i == 0 {
-                            // Insert at start of early reserve, because insertion is unbounded within
-                            // realized elements (shake will realize it if necessary) OR no real elements
-                            if self1.want_sticky.iter().any(|s| s == &entry_time) {
+                            let entry = entries.pop().unwrap();
+                            let insert_before_i = shed!{
+                                'find_insert _;
+                                for (
+                                    i,
+                                    real_state,
+                                ) in self.0.real.borrow().iter().enumerate().skip(last_insert_before_i).rev() {
+                                    if entry_time > real_state.entry.time() {
+                                        break 'find_insert i + 1;
+                                    }
+                                }
+                                break 'find_insert 0;
+                            };
+                            last_insert_before_i = insert_before_i;
+                            if insert_before_i == 0 {
+                                // Insert at start of early reserve, because insertion is unbounded within
+                                // realized elements (shake will realize it if necessary) OR no real elements
+                                if self.0.want_sticky.borrow().iter().any(|s| s == &entry_time) {
+                                    let real =
+                                        realize_entry(
+                                            pc,
+                                            self.0.entry_resize_observer.borrow().as_ref().unwrap(),
+                                            feed_id,
+                                            entry.clone(),
+                                        );
+                                    self.0.early_sticky.ref_push(real.el().clone());
+                                    *self.0.reserve_sticky_entry.borrow_mut() = Some(real);
+                                }
+                                feed_state.early_reserve.push_front(entry);
+                            } else {
+                                // Insert within real elements
+                                let real = realize_entry(pc, self.0.entry_resize_observer.borrow().as_ref().unwrap(), feed_id, entry);
+                                let anchor_i = self.0.anchor_i.get().unwrap();
+                                if insert_before_i <= anchor_i {
+                                    self.0.anchor_i.set(Some(anchor_i + 1));
+                                }
+                                self.0.real.borrow_mut().insert(insert_before_i, real);
+                            }
+                        }
+                        // Remaining new elements come after the final real element
+                        entries.reverse();
+                        if all_stopped && all_reserve_empty {
+                            // No other feeds have reserve so these are the guaranteed next (of known
+                            // elements) - go ahead and realize.
+                            for entry in entries {
                                 let real =
                                     realize_entry(
                                         pc,
-                                        self1.entry_resize_observer.as_ref().unwrap(),
+                                        self.0.entry_resize_observer.borrow().as_ref().unwrap(),
                                         feed_id,
-                                        entry.clone(),
+                                        entry,
                                     );
-                                self1.early_sticky.ref_push(real.el().clone());
-                                self1.reserve_sticky_entry = Some(real);
+                                let anchor_i = self.0.anchor_i.get().unwrap();
+                                if anchor_i == self.0.real.borrow().len() - 1 {
+                                    self.0.anchor_i.set(Some(anchor_i + 1));
+                                }
+                                self.0.real.borrow_mut().push(real);
                             }
-                            feed_state.early_reserve.push_front(entry);
-                        } else {
-                            // Insert within real elements
-                            let real = realize_entry(pc, self1.entry_resize_observer.as_ref().unwrap(), feed_id, entry);
-                            let anchor_i = self1.anchor_i.unwrap();
-                            if insert_before_i <= anchor_i {
-                                self1.anchor_i = Some(anchor_i + 1);
-                            }
-                            self1.real.insert(insert_before_i, real);
                         }
-                    }
-                    // Remaining new elements come after the final real element
-                    entries.reverse();
-                    if all_stopped && all_reserve_empty {
-                        // No other feeds have reserve so these are the guaranteed next (of known
-                        // elements) - go ahead and realize.
-                        for entry in entries {
-                            let real =
-                                realize_entry(pc, self1.entry_resize_observer.as_ref().unwrap(), feed_id, entry);
-                            let anchor_i = self1.anchor_i.unwrap();
-                            if anchor_i == self1.real.len() - 1 {
-                                self1.anchor_i = Some(anchor_i + 1);
-                            }
-                            self1.real.push(real);
+                        else {
+                            // Other feeds have reserve so these need to be pulled in by ordering (because
+                            // there's reserve we can't be anchored at last element anyway)
+                            add_to_reserve!();
                         }
-                        if stop && !inferred_stop {
-                            let pivot = get_pivot_late(&self1.real, feed_id, feed_state).unwrap();
-                            feed_state.feed.request_after(pc.eg(), pivot, REQUEST_COUNT)
-                        }
-                    }
-                    else {
-                        // Other feeds have reserve so these need to be pulled in by ordering (because
-                        // there's reserve we can't be anchored at last element anyway)
-                        add_to_reserve!();
-                    }
-                    feed_state.late_stop = stop;
-                };
+                        feed_state.late_stop = stop;
+                    };
+                }
             });
         }
         self.shake();
@@ -1318,18 +1336,12 @@ impl<FeedIdT: FeedIdTraits, TimeT: TimeTraits + 'static> Infiniscroll<FeedIdT, T
     /// Called by feed when notified of new entries, to decide if the view is in a
     /// state where it can accept more entries. Returns a pivot if new entries are
     /// acceptable.
-    pub fn want_after(&self, feed_id: FeedIdT, entry_id: TimeT) -> Option<(TimeT, usize)> {
-        let mut self1 = self.0.borrow_mut();
-        let self1 = &mut *self1;
-        let f_state = self1.feeds.get_mut(&feed_id).unwrap();
-        if f_state.update_latest_known(entry_id) && f_state.late_stop {
-            // nop
-        } else {
-            return None;
-        }
+    pub fn want_after(&self, feed_id: E::FeedId) -> Option<E::Time> {
+        let mut feeds = self.0.feeds.borrow_mut();
+        let f_state = feeds.get_mut(&feed_id).unwrap();
         if !f_state.late_stop {
             return None;
         }
-        return Some((get_pivot_late(&self1.real, &feed_id, f_state).unwrap(), REQUEST_COUNT));
+        return get_pivot_late(&self.0.real.borrow(), &feed_id, f_state);
     }
 }

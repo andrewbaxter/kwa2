@@ -1,25 +1,30 @@
 use {
     crate::{
         api::req_post_json,
-        formutil::build_form,
         localdata::{
             self,
         },
+        pageutil::build_form,
         state::{
             goto_replace_ministate,
             state,
             Ministate,
+            MinistateChannel,
+            MinistateChannelInvite,
         },
     },
     jiff::Timestamp,
     lunk::ProcessingContext,
     rooting::El,
     rooting_forms::Form,
-    shared::interface::wire::{
-        c2s::{
+    shared::interface::{
+        shared::{
+            QualifiedChannelId,
+            QualifiedMessageId,
+        },
+        wire::c2s::{
             self,
         },
-        shared::QualifiedChannelId,
     },
     std::rc::Rc,
 };
@@ -36,17 +41,22 @@ struct Form_ {
     expiry: Option<Timestamp>,
 }
 
-pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId) -> El {
+pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>) -> El {
     let eg = pc.eg();
     let (form_els, form_state) = Form_::new_form("", None);
     let form_state = Rc::new(form_state);
     return build_form(
+        //. .
         format!("New invite"),
-        Ministate::ChannelMenu(channel.clone()),
+        Ministate::ChannelMenu(MinistateChannel {
+            channel: channel.clone(),
+            reset: reset_id.clone(),
+        }),
         form_els.error.unwrap(),
         form_els.elements,
         {
             let channel = channel.clone();
+            let reset_id = reset_id.clone();
             async move |idem| {
                 let Ok(new_values) = form_state.parse() else {
                     return Ok(());
@@ -61,7 +71,11 @@ pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId) -> El {
                 }).await?;
                 localdata::ensure_channelinvite(res.clone()).await;
                 eg.event(|pc| {
-                    goto_replace_ministate(pc, &state().log, &Ministate::ChannelInvite(res.id));
+                    goto_replace_ministate(pc, &state().log, &Ministate::ChannelInvite(MinistateChannelInvite {
+                        channel: channel.clone(),
+                        invite: res.id,
+                        reset: reset_id.clone(),
+                    }));
                 }).unwrap();
                 return Ok(());
             }

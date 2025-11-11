@@ -187,6 +187,11 @@ fn main() {
             returns: vec![("root", &el_)],
         },
         Func {
+            name: "leafMenuButton",
+            args: vec![("text", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
             name: "leafMenuGroup",
             args: vec![("text", &string_), ("link", &string_), ("children", &arrel_)],
             returns: vec![("root", &el_), ("groupEl", &el_)],
@@ -200,7 +205,12 @@ fn main() {
         // xx Components, styles: top
         Func {
             name: "contPageTop",
-            args: vec![("body", &el_), ("identitiesLink", &string_), ("addLink", &string_)],
+            args: vec![
+                ("body", &el_),
+                ("identitiesLink", &string_),
+                ("addLink", &string_),
+                ("settingsLink", &string_)
+            ],
             returns: vec![("root", &el_)],
         },
         // /////////////////////////////////////////////////////////////////////////////
@@ -212,12 +222,17 @@ fn main() {
         },
         Func {
             name: "contMenuBar",
-            args: vec![
-                ("backLink", &string_),
-                ("text", &string_),
-                ("centerLink", &optstring_),
-                ("right", &optel_)
-            ],
+            args: vec![("backLink", &string_), ("center", &el_), ("right", &optel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafMenuBarCenterPlaceholder",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafMenuBarCenter",
+            args: vec![("text", &string_), ("link", &optstring_)],
             returns: vec![("root", &el_)],
         },
         Func {
@@ -256,12 +271,17 @@ fn main() {
         },
         Func {
             name: "contChatBar",
-            args: vec![
-                ("backLink", &string_),
-                ("text", &string_),
-                ("centerLink", &optstring_),
-                ("right", &optel_)
-            ],
+            args: vec![("backLink", &string_), ("center", &el_), ("right", &optel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatBarCenterPlaceholder",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatBarCenter",
+            args: vec![("text", &string_), ("link", &optstring_)],
             returns: vec![("root", &el_)],
         },
     ] {

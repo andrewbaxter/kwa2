@@ -2871,7 +2871,6 @@ name = "native"
 version = "0.1.0"
 dependencies = [
  "aargvark",
- "chrono",
  "cookie",
  "deadpool-sqlite",
  "flowcontrol",
@@ -2886,6 +2885,7 @@ dependencies = [
  "hyper 1.7.0",
  "hyper-tungstenite",
  "hyper-util",
+ "jiff",
  "loga",
  "moka 0.12.11",
  "oauth2",

@@ -1,61 +1,48 @@
 use {
     crate::{
-        localdata::{
-            get_stored_api_identityinvites,
-            req_api_identityinvites,
-            LocalIdentityInvite,
+        js::style_export,
+        localdata::greq_api_identityinvites,
+        pageutil::{
+            build_nol_menu,
+            LazyPage,
         },
         state::{
             ministate_octothorpe,
             Ministate,
+            MinistateIdentityInvite,
         },
     },
     rooting::El,
-    shared::interface::wire::shared::IdentityInviteId,
-    crate::js::{
-        el_async,
-        style_export,
-    },
+    shared::interface::shared::IdentityInviteId,
+    spaghettinuum::interface::identity::Identity,
 };
 
-fn build1(local: LocalIdentityInvite) -> El {
-    let bar = style_export::cont_menu_bar(style_export::ContMenuBarArgs {
-        back_link: ministate_octothorpe(&Ministate::IdentityInvites(local.res.token.identity.clone())),
-        text: local.res.memo_short.clone(),
-        center_link: None,
-        right: None,
+pub fn build(identity: &Identity, id: &IdentityInviteId) -> El {
+    return build_nol_menu(&Ministate::IdentityInvites(identity.clone()), greq_api_identityinvites(id, true), {
+        let identity = identity.clone();
+        move |local| LazyPage {
+            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+                text: local.res.memo_short.clone(),
+                link: None,
+            }).root,
+            body: vec![
+                //. .
+                style_export::leaf_menu_code(style_export::LeafMenuCodeArgs { text: local.res.token.token.0.clone() }).root,
+                style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                    text: format!("Edit"),
+                    link: ministate_octothorpe(&Ministate::IdentityInviteEdit(MinistateIdentityInvite {
+                        identity: identity.clone(),
+                        invite: local.res.id.clone(),
+                    })),
+                }).root,
+                style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                    text: format!("Delete"),
+                    link: ministate_octothorpe(&Ministate::IdentityInviteDelete(MinistateIdentityInvite {
+                        identity: identity.clone(),
+                        invite: local.res.id.clone(),
+                    })),
+                }).root,
+            ],
+        }
     });
-    return style_export::cont_page_menu(style_export::ContPageMenuArgs { children: vec![
-        //. .
-        bar.root,
-        style_export::leaf_menu_code(style_export::LeafMenuCodeArgs { text: local.res.token.token.0.clone() }).root,
-        style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-            text: format!("Edit"),
-            link: ministate_octothorpe(&Ministate::IdentityInviteEdit(local.res.id.clone())),
-        }).root,
-        style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-            text: format!("Delete"),
-            link: ministate_octothorpe(&Ministate::IdentityInviteDelete(local.res.id.clone())),
-        }).root,
-    ] }).root;
-}
-
-pub fn build(id: &IdentityInviteId) -> El {
-    match get_stored_api_identityinvites(Some(id)).into_iter().find(|x| x.res.id == *id) {
-        Some(local) => {
-            return build1(local);
-        },
-        None => {
-            return el_async({
-                let id = id.clone();
-                async move {
-                    let Some(local) =
-                        req_api_identityinvites(Some(&id)).await?.into_iter().find(|x| x.res.id == id) else {
-                            return Err(format!("Could not find identity invite [{}]", id.0));
-                        };
-                    return Ok(vec![build1(local)]);
-                }
-            });
-        },
-    }
 }

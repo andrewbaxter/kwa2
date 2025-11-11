@@ -1,5 +1,15 @@
 use {
     crate::{
+        async_::BgVal,
+        chat_entry::ChatEntry,
+        infinite::Infinite,
+        js::{
+            get_dom_octothorpe,
+            Env,
+            Log,
+            LogJsErr,
+            VecLog,
+        },
         page_channel,
         page_channel_delete,
         page_channel_edit,
@@ -26,9 +36,11 @@ use {
         page_identityinvite_edit,
         page_identityinvite_new,
         page_identityinvites,
+        page_settings,
         page_top,
         page_top_add,
     },
+    futures::channel::oneshot,
     gloo::{
         storage::{
             LocalStorage,
@@ -41,30 +53,30 @@ use {
         EventGraph,
         ProcessingContext,
     },
-    rooting::El,
+    rooting::{
+        spawn_rooted,
+        El,
+    },
     serde::{
         Deserialize,
         Serialize,
     },
-    shared::interface::wire::shared::{
+    shared::interface::shared::{
         ChannelGroupId,
         ChannelInviteId,
         IdentityInviteId,
         QualifiedChannelId,
+        QualifiedMessageId,
     },
     spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
+        future::Future,
         rc::Rc,
     },
-    crate::js::{
-        get_dom_octothorpe,
-        Env,
-        Log,
-        LogJsErr,
-        VecLog,
-    },
     wasm_bindgen::JsValue,
+    wasm_bindgen_futures::spawn_local,
+    web_sys::ServiceWorkerRegistration,
 };
 
 pub const LOCALSTORAGE_PWA_MINISTATE: &str = "pwa_ministate";
@@ -72,8 +84,38 @@ pub const SESSIONSTORAGE_POST_REDIRECT_MINISTATE: &str = "post_redirect";
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateChannel {
+    pub channel: QualifiedChannelId,
+    pub reset: Option<QualifiedMessageId>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateChannelInvite {
+    pub channel: QualifiedChannelId,
+    pub reset: Option<QualifiedMessageId>,
+    pub invite: ChannelInviteId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateChannelGroup {
+    pub channelgroup: ChannelGroupId,
+    pub reset: Option<QualifiedMessageId>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateIdentityInvite {
+    pub identity: Identity,
+    pub invite: IdentityInviteId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Ministate {
     Top,
+    Settings,
     TopAdd,
     ChannelJoinUrl,
     ChannelNew,
@@ -85,22 +127,22 @@ pub enum Ministate {
     IdentityDelete(Identity),
     IdentityInvites(Identity),
     IdentityInviteNew(Identity),
-    IdentityInvite(IdentityInviteId),
-    IdentityInviteEdit(IdentityInviteId),
-    IdentityInviteDelete(IdentityInviteId),
-    Channel(QualifiedChannelId),
-    ChannelMenu(QualifiedChannelId),
-    ChannelEdit(QualifiedChannelId),
-    ChannelDelete(QualifiedChannelId),
-    ChannelInvites(QualifiedChannelId),
-    ChannelInviteNew(QualifiedChannelId),
-    ChannelInvite(ChannelInviteId),
-    ChannelInviteEdit(ChannelInviteId),
-    ChannelInviteDelete(ChannelInviteId),
-    ChannelGroup(ChannelGroupId),
-    ChannelGroupMenu(ChannelGroupId),
-    ChannelGroupEdit(ChannelGroupId),
-    ChannelGroupDelete(ChannelGroupId),
+    IdentityInvite(MinistateIdentityInvite),
+    IdentityInviteEdit(MinistateIdentityInvite),
+    IdentityInviteDelete(MinistateIdentityInvite),
+    Channel(MinistateChannel),
+    ChannelMenu(MinistateChannel),
+    ChannelEdit(MinistateChannel),
+    ChannelDelete(MinistateChannel),
+    ChannelInvites(MinistateChannel),
+    ChannelInviteNew(MinistateChannel),
+    ChannelInvite(MinistateChannelInvite),
+    ChannelInviteEdit(MinistateChannelInvite),
+    ChannelInviteDelete(MinistateChannelInvite),
+    ChannelGroup(MinistateChannelGroup),
+    ChannelGroupMenu(MinistateChannelGroup),
+    ChannelGroupEdit(MinistateChannelGroup),
+    ChannelGroupDelete(MinistateChannelGroup),
 }
 
 pub fn ministate_octothorpe(s: &Ministate) -> String {
@@ -148,15 +190,17 @@ pub fn read_ministate(log: &Rc<dyn Log>) -> Ministate {
 
 pub struct State_ {
     pub eg: EventGraph,
+    pub service_worker: BgVal<Result<ServiceWorkerRegistration, String>>,
     pub root: El,
     pub ministate: RefCell<Ministate>,
     pub env: Env,
     pub log: Rc<dyn Log>,
     pub log1: Rc<VecLog>,
+    pub current_chat: RefCell<Option<Infinite<ChatEntry>>>,
 }
 
 thread_local!{
-    pub(crate) static STATE: RefCell<Option<Rc<State_>>> = RefCell::new(None);
+    pub static STATE: RefCell<Option<Rc<State_>>> = RefCell::new(None);
 }
 
 pub fn state() -> Rc<State_> {
@@ -174,6 +218,9 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
     match s {
         Ministate::Top => {
             body = page_top::build(pc);
+        },
+        Ministate::Settings => {
+            body = page_settings::build();
         },
         Ministate::TopAdd => {
             body = page_top_add::build();
@@ -199,14 +246,14 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
         Ministate::IdentityInviteNew(id) => {
             body = page_identityinvite_new::build(pc, id);
         },
-        Ministate::IdentityInvite(id) => {
-            body = page_identityinvite::build(id);
+        Ministate::IdentityInvite(s) => {
+            body = page_identityinvite::build(&s.identity, &s.invite);
         },
-        Ministate::IdentityInviteEdit(id) => {
-            body = page_identityinvite_edit::build(pc, id);
+        Ministate::IdentityInviteEdit(s) => {
+            body = page_identityinvite_edit::build(pc, &s.identity, &s.invite);
         },
-        Ministate::IdentityInviteDelete(id) => {
-            body = page_identityinvite_delete::build(pc, id);
+        Ministate::IdentityInviteDelete(s) => {
+            body = page_identityinvite_delete::build(pc, &s.identity, &s.invite);
         },
         Ministate::ChannelNew => {
             body = page_channel_new::build(pc);
@@ -214,48 +261,67 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
         Ministate::ChannelJoinUrl => {
             body = page_channel_join_url::build(pc);
         },
-        Ministate::Channel(id) => {
-            body = page_channel::build(id);
+        Ministate::Channel(s) => {
+            body = page_channel::build(pc, &s.channel, &s.reset);
         },
-        Ministate::ChannelMenu(id) => {
-            body = page_channel_menu::build(id);
+        Ministate::ChannelMenu(s) => {
+            body = page_channel_menu::build(&s.channel, &s.reset);
         },
-        Ministate::ChannelEdit(id) => {
-            body = page_channel_edit::build(pc, id);
+        Ministate::ChannelEdit(s) => {
+            body = page_channel_edit::build(pc, &s.channel, &s.reset);
         },
-        Ministate::ChannelDelete(id) => {
-            body = page_channel_delete::build(pc, id);
+        Ministate::ChannelDelete(s) => {
+            body = page_channel_delete::build(pc, &s.channel, &s.reset);
         },
-        Ministate::ChannelInvites(id) => {
-            body = page_channelinvites::build(id);
+        Ministate::ChannelInvites(s) => {
+            body = page_channelinvites::build(&s.channel, &s.reset);
         },
-        Ministate::ChannelInviteNew(id) => {
-            body = page_channelinvite_new::build(pc, id);
+        Ministate::ChannelInviteNew(s) => {
+            body = page_channelinvite_new::build(pc, &s.channel, &s.reset);
         },
-        Ministate::ChannelInvite(id) => {
-            body = page_channelinvite::build(id);
+        Ministate::ChannelInvite(s) => {
+            body = page_channelinvite::build(&s.channel, &s.invite, &s.reset);
         },
-        Ministate::ChannelInviteEdit(id) => {
-            body = page_channelinvite_edit::build(pc, id);
+        Ministate::ChannelInviteEdit(s) => {
+            body = page_channelinvite_edit::build(pc, &s.channel, &s.invite, &s.reset);
         },
-        Ministate::ChannelInviteDelete(id) => {
-            body = page_channelinvite_delete::build(pc, id);
+        Ministate::ChannelInviteDelete(s) => {
+            body = page_channelinvite_delete::build(pc, &s.channel, &s.invite, &s.reset);
         },
         Ministate::ChannelGroupNew => {
             body = page_channelgroup_new::build(pc);
         },
-        Ministate::ChannelGroup(id) => {
-            body = page_channelgroup::build(id);
+        Ministate::ChannelGroup(s) => {
+            body = page_channelgroup::build(pc, &s.channelgroup, &s.reset);
         },
-        Ministate::ChannelGroupMenu(id) => {
-            body = page_channelgroup_menu::build(id);
+        Ministate::ChannelGroupMenu(s) => {
+            body = page_channelgroup_menu::build(&s.channelgroup, &s.reset);
         },
-        Ministate::ChannelGroupEdit(id) => {
-            body = page_channelgroup_edit::build(pc, id);
+        Ministate::ChannelGroupEdit(s) => {
+            body = page_channelgroup_edit::build(pc, &s.channelgroup, &s.reset);
         },
-        Ministate::ChannelGroupDelete(id) => {
-            body = page_channelgroup_delete::build(pc, id);
+        Ministate::ChannelGroupDelete(s) => {
+            body = page_channelgroup_delete::build(pc, &s.channelgroup, &s.reset);
         },
     }
     set_page(body);
+}
+
+pub fn spawn_rooted_log(
+    message: &'static str,
+    f: impl Future<Output = Result<(), String>> + 'static,
+) -> oneshot::Receiver<()> {
+    return spawn_rooted(async move {
+        if let Err(e) = f.await {
+            state().log.log(&format!("Error in background task [{}]: {}", message, e));
+        }
+    });
+}
+
+pub fn spawn_log(message: &'static str, f: impl Future<Output = Result<(), String>> + 'static) {
+    spawn_local(async move {
+        if let Err(e) = f.await {
+            state().log.log(&format!("Error in background task [{}]: {}", message, e));
+        }
+    });
 }

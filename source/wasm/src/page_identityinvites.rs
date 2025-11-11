@@ -1,5 +1,9 @@
 use {
     crate::{
+        js::{
+            el_async,
+            style_export,
+        },
         localdata::{
             get_stored_api_identityinvites,
             req_api_identityinvites,
@@ -8,6 +12,7 @@ use {
             ministate_octothorpe,
             state,
             Ministate,
+            MinistateIdentityInvite,
         },
     },
     flowcontrol::ta_return,
@@ -21,10 +26,6 @@ use {
         cell::RefCell,
         collections::HashMap,
         rc::Rc,
-    },
-    crate::js::{
-        el_async,
-        style_export,
     },
 };
 
@@ -41,7 +42,10 @@ pub fn build(_pc: &mut ProcessingContext, identity: &Identity) -> El {
     for old_invite in old_invites.clone() {
         let out = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
             text: old_invite.res.memo_short.clone(),
-            link: ministate_octothorpe(&Ministate::IdentityInvite(old_invite.res.id)),
+            link: ministate_octothorpe(&Ministate::IdentityInvite(MinistateIdentityInvite {
+                identity: identity.clone(),
+                invite: old_invite.res.id,
+            })),
         });
         lookup_el_invites.borrow_mut().insert(old_invite.res.id, out.root.clone());
         inv_elements.ref_push(out.root);
@@ -75,7 +79,10 @@ pub fn build(_pc: &mut ProcessingContext, identity: &Identity) -> El {
                     } else {
                         let next_el1 = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                             text: new_invite.res.memo_short,
-                            link: ministate_octothorpe(&Ministate::IdentityInvite(new_invite.res.id)),
+                            link: ministate_octothorpe(&Ministate::IdentityInvite(MinistateIdentityInvite {
+                                identity: identity.clone(),
+                                invite: new_invite.res.id,
+                            })),
                         });
                         new_els1.push(next_el1.root);
                     }
@@ -105,8 +112,10 @@ pub fn build(_pc: &mut ProcessingContext, identity: &Identity) -> El {
         //. .
         style_export::cont_menu_bar(style_export::ContMenuBarArgs {
             back_link: ministate_octothorpe(&Ministate::Top),
-            text: format!("Invites"),
-            center_link: None,
+            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+                text: format!("Invites"),
+                link: None,
+            }).root,
             right: Some(
                 style_export::leaf_menu_bar_add(
                     style_export::LeafMenuBarAddArgs {

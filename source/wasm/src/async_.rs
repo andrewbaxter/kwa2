@@ -1,10 +1,8 @@
 use {
     futures::Future,
-    std::{
-        sync::{
-            Arc,
-            Mutex,
-        },
+    std::sync::{
+        Arc,
+        Mutex,
     },
     tokio::sync::Semaphore,
     wasm_bindgen_futures::spawn_local,

@@ -498,7 +498,7 @@ pub fn lazy_el_async<E: ToString, F: 'static + AsyncFnOnce() -> Result<Vec<El>, 
             };
             for e in entries {
                 if e.intersection_ratio() >= 0.5 {
-                    *data.borrow_mut() = spawn_rooted({
+                    *data.borrow_mut() = scope_any(spawn_rooted({
                         let Some(f) = f.take() else {
                             return;
                         };
@@ -527,7 +527,7 @@ pub fn lazy_el_async<E: ToString, F: 'static + AsyncFnOnce() -> Result<Vec<El>, 
                             }
                             out.ref_replace(new_el);
                         }
-                    });
+                    }));
                 }
             }
         }
@@ -618,4 +618,12 @@ pub fn download(filename: String, data: impl serde::Serialize) {
     a.click();
     body.remove_child(&a).unwrap();
     Url::revoke_object_url(&url).unwrap();
+}
+
+pub fn el_menu_button(name: String, mut cb: impl 'static + AsyncFnMut() -> Result<(), String>) -> El {
+    return style_export::leaf_menu_button(style_export::LeafMenuButtonArgs { text: name })
+        .root
+        .on("click", move |_| {
+            cb();
+        });
 }

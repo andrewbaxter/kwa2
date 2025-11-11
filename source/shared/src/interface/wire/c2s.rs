@@ -1,5 +1,5 @@
 use {
-    crate::interface::wire::shared::{
+    crate::interface::shared::{
         ChannelGroupId,
         ChannelInviteId,
         IdentityInviteId,
@@ -9,11 +9,13 @@ use {
         QualifiedChannelId,
         QualifiedChannelInviteToken,
         QualifiedIdentityInviteToken,
+        QualifiedMessageId,
     },
     glove::reqresp,
     jiff::Timestamp,
     schemars::JsonSchema,
     serde::{
+        de::DeserializeOwned,
         Deserialize,
         Serialize,
     },
@@ -25,10 +27,16 @@ use {
 pub struct ModifyOption<T> {
     pub value: Option<T>,
 }
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct Logout;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct Logout {}
+pub struct NotificationRegister {
+    /// Matches `toJson()` result of push subscription object in js.
+    pub data: serde_json::Value,
+}
 
 // # Identity
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -311,46 +319,12 @@ pub struct MessageLastPage {
     pub identity: Identity,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Clone)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MessageLastPageRes {
-    pub page: usize,
-}
-
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessagePageContaining {
     pub channel: QualifiedChannelId,
     pub identity: Identity,
     pub message: MessageId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Clone)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MessagePageContainingRes {
-    pub page: usize,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MessageGetPage {
-    pub channel: QualifiedChannelId,
-    pub identity: Identity,
-    pub page: usize,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Clone)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MessageGetPageRes {
-    pub messages: Vec<Message>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MessageDelete {
-    pub channel: QualifiedChannelId,
-    pub identity: Identity,
-    pub message_id: MessageId,
 }
 
 // Other
@@ -370,6 +344,7 @@ pub enum ChannelOrChannelGroup {
 
 reqresp!(pub proto {
         Logout(Logout) =>(),
+        NotificationRegister(NotificationRegister) =>(),
         IdentityCreate(IdentityCreate) => IdentityRes,
         IdentityModify(IdentityModify) => IdentityRes,
         IdentityDelete(IdentityDelete) =>(),
@@ -399,8 +374,134 @@ reqresp!(pub proto {
     //.    MemberDelete(MemberDelete) =>(),
     //.    MemberList(MemberList) => Vec < Identity >,
     //.    MessagePush(MessagePush) =>(),
-    //.    MessageLastPage(MessageLastPage) => MessageLastPageRes,
-    //.    MessagePageContaining(MessagePageContaining) => MessagePageContainingRes,
-    //.    MessageGetPage(MessageGetPage) => MessageGetPageRes,
-    //.    MessageDelete(MessageDelete) =>(),
     });
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct SnapOffset(pub usize);
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ActivityOffset(pub usize);
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct SnapMessage {
+    pub offset: SnapOffset,
+    pub original_id: QualifiedMessageId,
+    pub original_receive_time: Timestamp,
+    pub message: MessageBody,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct SnapPageRes {
+    pub offset: SnapOffset,
+    pub page_size: usize,
+    pub activity_offset: ActivityOffset,
+    pub activity_page_size: usize,
+    pub messages: Vec<SnapMessage>,
+}
+
+pub trait PathReqTrait: Sized {
+    type Resp: DeserializeOwned;
+
+    fn deserialize_path(path: &str) -> Result<Self, String>;
+    fn serialize_path(&self) -> String;
+}
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct NotificationServerKey;
+
+impl PathReqTrait for NotificationServerKey {
+    // b64-encoded key as required by js
+    type Resp = String;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        todo!()
+    }
+
+    fn serialize_path(&self) -> String {
+        todo!()
+    }
+}
+
+pub struct SnapPageContaining {
+    pub id: QualifiedMessageId,
+}
+
+impl PathReqTrait for SnapPageContaining {
+    type Resp = Option<SnapPageRes>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        todo!()
+    }
+
+    fn serialize_path(&self) -> String {
+        todo!()
+    }
+}
+
+pub struct SnapPageContainingTime {
+    pub channel: QualifiedChannelId,
+    pub time: Timestamp,
+}
+
+impl PathReqTrait for SnapPageContainingTime {
+    type Resp = Option<SnapPageRes>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        todo!()
+    }
+
+    fn serialize_path(&self) -> String {
+        todo!()
+    }
+}
+
+pub struct SnapPage {
+    pub channel: QualifiedChannelId,
+    pub offset: SnapOffset,
+}
+
+impl PathReqTrait for SnapPage {
+    type Resp = Option<SnapPageRes>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        todo!()
+    }
+
+    fn serialize_path(&self) -> String {
+        todo!()
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ActivityPageRes {
+    pub offset: ActivityOffset,
+    pub messages: Vec<Message>,
+}
+
+pub struct ActivityPage {
+    pub offset: ActivityOffset,
+}
+
+impl PathReqTrait for ActivityPage {
+    type Resp = Option<ActivityPageRes>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        todo!()
+    }
+
+    fn serialize_path(&self) -> String {
+        todo!()
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct Notification {
+    pub message: QualifiedMessageId,
+    pub body: String,
+}

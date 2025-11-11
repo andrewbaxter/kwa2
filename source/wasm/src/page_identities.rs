@@ -1,5 +1,9 @@
 use {
     crate::{
+        js::{
+            el_async,
+            style_export,
+        },
         localdata::{
             get_stored_api_channels,
             get_stored_api_identities,
@@ -12,6 +16,7 @@ use {
             ministate_octothorpe,
             state,
             Ministate,
+            MinistateChannel,
         },
     },
     flowcontrol::ta_return,
@@ -33,10 +38,6 @@ use {
             HashSet,
         },
         rc::Rc,
-    },
-    crate::js::{
-        el_async,
-        style_export,
     },
 };
 
@@ -81,7 +82,10 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
         for old_channel in old_identity.children {
             let channel_el = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                 text: old_channel.res.memo_short,
-                link: ministate_octothorpe(&Ministate::Channel(old_channel.res.id.clone())),
+                link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
+                    channel: old_channel.res.id.clone(),
+                    reset: None,
+                })),
             }).root;
             lookup_el_channels.borrow_mut().insert(old_channel.res.id, channel_el.clone());
             children.push(channel_el);
@@ -153,7 +157,10 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                             } else {
                                 new_out_els2.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                                     text: new_channel.res.memo_short,
-                                    link: ministate_octothorpe(&Ministate::Channel(new_channel.res.id)),
+                                    link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
+                                        channel: new_channel.res.id,
+                                        reset: None,
+                                    })),
                                 }).root);
                             }
                         }
@@ -193,8 +200,10 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
         //. .
         style_export::cont_menu_bar(style_export::ContMenuBarArgs {
             back_link: ministate_octothorpe(&Ministate::Top),
-            text: format!("Identities"),
-            center_link: None,
+            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+                text: format!("Identities"),
+                link: None,
+            }).root,
             right: Some(
                 style_export::leaf_menu_bar_add(
                     style_export::LeafMenuBarAddArgs { link: ministate_octothorpe(&Ministate::IdentitiesNew) },

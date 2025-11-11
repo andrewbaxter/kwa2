@@ -1,8 +1,13 @@
 use {
     crate::{
+        js::{
+            el_async,
+            style_export,
+        },
         localdata::{
             req_api_channelgroups,
             req_api_identities,
+            NowOrLater,
         },
         state::{
             ministate_octothorpe,
@@ -18,15 +23,11 @@ use {
         El,
     },
     rooting_forms::css::err_el,
-    shared::interface::wire::shared::ChannelGroupId,
+    shared::interface::shared::ChannelGroupId,
     spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
         rc::Rc,
-    },
-    crate::js::{
-        el_async,
-        style_export,
     },
     wasm_bindgen::JsCast,
     web_sys::HtmlSelectElement,
@@ -168,15 +169,13 @@ impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormOptChannelGroup {
     }
 }
 
-pub fn build_form(
-    title: String,
-    back_link: Ministate,
+pub fn build_form_inner(
+    button_ok: &El,
     form_err_el: El,
     form_els: Vec<El>,
     do_send: impl 'static + Clone + AsyncFn(f64) -> Result<(), String>,
 ) -> El {
     let idem = random();
-    let button_ok = style_export::leaf_page_form_button_submit().root;
     let errs_el = style_export::cont_page_form_errors().root;
     let errs_own_el = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
     errs_el.ref_push(errs_own_el.clone());
@@ -222,17 +221,171 @@ pub fn build_form(
             })));
         }
     });
+    return form_el;
+}
+
+pub fn build_form(
+    title: String,
+    back_link: Ministate,
+    form_err_el: El,
+    form_els: Vec<El>,
+    do_send: impl 'static + Clone + AsyncFn(f64) -> Result<(), String>,
+) -> El {
+    let button_ok = style_export::leaf_page_form_button_submit().root;
+    let form_el = build_form_inner(&button_ok, form_err_el, form_els, do_send);
     return style_export::cont_page_form(style_export::ContPageFormArgs {
         edit_bar_children: vec![button_ok],
         children: vec![
             //. .
             style_export::cont_menu_bar(style_export::ContMenuBarArgs {
                 back_link: ministate_octothorpe(&back_link),
-                text: title,
-                center_link: None,
+                center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+                    text: title,
+                    link: None,
+                }).root,
                 right: None,
             }).root,
             form_el,
         ],
     }).root;
+}
+
+pub fn build_nol_form<
+    SEND: 'static + Clone + AsyncFn(f64) -> Result<(), String>,
+>(back_link: &Ministate, title: &str, v: NowOrLater<(El, Vec<El>, SEND)>) -> El {
+    let button_ok = style_export::leaf_page_form_button_submit().root;
+    let body;
+    match v {
+        NowOrLater::Now((form_err_el, form_els, do_send)) => {
+            body = vec![build_form_inner(&button_ok, form_err_el, form_els, do_send)];
+        },
+        NowOrLater::Later(v) => {
+            body = vec![el_async({
+                let button_ok = button_ok.clone();
+                async move {
+                    let Some((form_err_el, form_els, do_send)) = v.await.map_err(|e| e.to_string())?? else {
+                        return Err(format!("Could not find object"));
+                    };
+                    return Ok(vec![build_form_inner(&button_ok, form_err_el, form_els, do_send)]);
+                }
+            })];
+        },
+    }
+    return style_export::cont_page_form(style_export::ContPageFormArgs {
+        edit_bar_children: vec![button_ok],
+        children: [style_export::cont_menu_bar(style_export::ContMenuBarArgs {
+            back_link: ministate_octothorpe(&back_link),
+            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+                text: title.to_string(),
+                link: None,
+            }).root,
+            right: None,
+        }).root].into_iter().chain(body.into_iter()).collect(),
+    }).root;
+}
+
+pub struct LazyPage {
+    pub center: El,
+    pub body: Vec<El>,
+}
+
+pub fn build_nol_menu<
+    T: 'static,
+>(back_link: &Ministate, v: NowOrLater<T>, build: impl 'static + FnOnce(T) -> LazyPage) -> El {
+    let center;
+    let body;
+    match v {
+        NowOrLater::Now(local) => {
+            let r = build(local);
+            center = r.center;
+            body = r.body;
+        },
+        NowOrLater::Later(v) => {
+            center = style_export::leaf_menu_bar_center_placeholder().root;
+            body = vec![el_async({
+                let center = center.clone();
+                async move {
+                    let Some(local) = v.await.map_err(|e| e.to_string())?? else {
+                        return Err(format!("Could not find object"));
+                    };
+                    let r = build(local);
+                    center.ref_replace(vec![r.center]);
+                    return Ok(r.body);
+                }
+            })];
+        },
+    }
+    return style_export::cont_page_menu(
+        style_export::ContPageMenuArgs { children: [style_export::cont_menu_bar(style_export::ContMenuBarArgs {
+            back_link: ministate_octothorpe(&back_link),
+            center: center,
+            right: None,
+        }).root].into_iter().chain(body.into_iter()).collect() },
+    ).root;
+}
+
+pub fn build_nol_menu_title<
+    T: 'static,
+>(back_link: &Ministate, title: &str, v: NowOrLater<T>, build: impl 'static + FnOnce(T) -> El) -> El {
+    let body;
+    match v {
+        NowOrLater::Now(local) => {
+            body = build(local);
+        },
+        NowOrLater::Later(v) => {
+            body = el_async({
+                async move {
+                    let Some(local) = v.await.map_err(|e| e.to_string())?? else {
+                        return Err(format!("Could not find object"));
+                    };
+                    return Ok(vec![build(local)]);
+                }
+            });
+        },
+    }
+    return style_export::cont_page_menu(
+        style_export::ContPageMenuArgs { children: [style_export::cont_menu_bar(style_export::ContMenuBarArgs {
+            back_link: ministate_octothorpe(&back_link),
+            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+                text: title.to_string(),
+                link: None,
+            }).root,
+            right: None,
+        }).root].into_iter().chain([body].into_iter()).collect() },
+    ).root;
+}
+
+pub fn build_nol_chat<
+    T: 'static,
+>(back_link: &Ministate, v: NowOrLater<T>, build: impl 'static + FnOnce(T) -> LazyPage) -> El {
+    let center;
+    let body;
+    match v {
+        NowOrLater::Now(local) => {
+            let r = build(local);
+            center = r.center;
+            body = r.body;
+        },
+        NowOrLater::Later(v) => {
+            center = style_export::leaf_chat_bar_center_placeholder().root;
+            body = vec![el_async({
+                let center = center.clone();
+                async move {
+                    let Some(local) = v.await.map_err(|e| e.to_string())?? else {
+                        return Err(format!("Could not find object"));
+                    };
+                    let r = build(local);
+                    center.ref_replace(vec![r.center]);
+                    return Ok(r.body);
+                }
+            })];
+        },
+    }
+    return style_export::cont_page_chat(
+        style_export::ContPageChatArgs { children: [style_export::cont_chat_bar(style_export::ContChatBarArgs {
+            back_link: ministate_octothorpe(&back_link),
+            center: center,
+            right: None,
+        }).root].into_iter().chain(body.into_iter()).collect() },
+    ).root;
 }

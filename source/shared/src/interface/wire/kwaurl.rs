@@ -1,5 +1,5 @@
 use {
-    crate::interface::wire::shared::{
+    crate::interface::shared::{
         QualifiedMessageId,
         QualifiedChannelId,
     },

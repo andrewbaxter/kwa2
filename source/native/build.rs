@@ -30,7 +30,6 @@ use {
             },
         },
         types::{
-            type_i64,
             type_str,
         },
         QueryResCount,
@@ -47,23 +46,13 @@ fn main() {
     let root = PathBuf::from(&env::var("OUT_DIR").unwrap());
     let mut latest_version = Version::default();
     let mut queries = vec![];
-    let account_id0 = "crate::interface::shared::AccountId";
+    let account_id0 = "crate::interface::db::DbAccountId";
     let account_id_t = field_i64().custom(account_id0).build();
-    let identity_id_t0 = "spaghettinuum::interface::identity::Identity";
-    let identity_id_t = field_i64().custom(identity_id_t0).build();
-    let identity_id_opt_t = field_i64().custom(identity_id_t0).opt().build();
-    let channelgroup_id0 = "crate::interface::shared::ChannelInternalId";
-    let channelgroup_id_t = type_i64().custom(channelgroup_id0).build();
-    let channelgroup_id_opt_t = type_i64().custom(channelgroup_id0).opt().build();
-    let channel_id_t = type_str().custom("crate::interface::shared::ChannelId").build();
-    let new_message_id = |opt| {
-        let mut out = type_str().custom("crate::interface::shared::MessageId");
-        if opt {
-            out = out.opt();
-        }
-        return out.build();
-    };
-    let message_id = new_message_id(false);
+    let identity_secret_t0 = "crate::interface::db::DbIdentitySecret";
+    let identity_id_t0 = "crate::interface::db::DbIdentity";
+    let identity_id_t = field_str().custom(identity_id_t0).build();
+    let channelgroup_id0 = "crate::interface::db:DbChannelGroupId";
+    let channel_id_t = type_str().custom("shared::interface::shared::ChannelId").build();
 
     // Accounts
     {
@@ -139,7 +128,7 @@ fn main() {
                 &mut latest_version,
                 "zII52SWQB",
                 "secret",
-                field_str().custom("crate::interface::db::DbIdentitySecret").build(),
+                field_str().custom(identity_secret_t0).build(),
             );
 
         // Indexes

@@ -1,7 +1,7 @@
 use {
     crate::{
         api::req_post_json,
-        formutil::{
+        pageutil::{
             build_form,
             FormIdentity,
             FormOptChannelGroup,

@@ -103,7 +103,6 @@ use {
             ChannelOrChannelGroupGroup,
             ChannelRes,
         },
-        shared::InternalChannelId,
     },
     spaghettinuum::interface::identity::Identity,
     spaghettinuum_native::{

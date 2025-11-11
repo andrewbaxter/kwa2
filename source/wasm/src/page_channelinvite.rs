@@ -1,62 +1,57 @@
 use {
     crate::{
-        localdata::{
-            get_stored_api_channelinvites,
-            req_api_channelinvites,
-            LocalChannelInvite,
+        js::style_export,
+        localdata::get_or_req_api_channelinvite,
+        pageutil::{
+            build_nol_menu,
+            LazyPage,
         },
         state::{
             ministate_octothorpe,
             Ministate,
+            MinistateChannel,
+            MinistateChannelInvite,
         },
     },
     rooting::El,
-    shared::interface::wire::shared::{
+    shared::interface::shared::{
         ChannelInviteId,
-    },
-    crate::js::{
-        el_async,
-        style_export,
+        QualifiedChannelId,
+        QualifiedMessageId,
     },
 };
 
-fn build1(local: LocalChannelInvite) -> El {
-    let bar = style_export::cont_menu_bar(style_export::ContMenuBarArgs {
-        back_link: ministate_octothorpe(&Ministate::ChannelInvites(local.res.token.channel.clone())),
-        text: local.res.memo_short.clone(),
-        center_link: None,
-        right: None,
+pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId, reset_id: &Option<QualifiedMessageId>) -> El {
+    return build_nol_menu(&Ministate::ChannelInvites(MinistateChannel {
+        channel: channel.clone(),
+        reset: reset_id.clone(),
+    }), get_or_req_api_channelinvite(id, true), {
+        let reset_id = reset_id.clone();
+        let channel = channel.clone();
+        move |local| LazyPage {
+            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+                text: local.res.memo_short.clone(),
+                link: None,
+            }).root,
+            body: vec![
+                //. .
+                style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                    text: format!("Edit"),
+                    link: ministate_octothorpe(&Ministate::ChannelInviteEdit(MinistateChannelInvite {
+                        channel: channel.clone(),
+                        reset: reset_id.clone(),
+                        invite: local.res.id.clone(),
+                    })),
+                }).root,
+                style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                    text: format!("Delete"),
+                    link: ministate_octothorpe(&Ministate::ChannelInviteDelete(MinistateChannelInvite {
+                        channel: channel.clone(),
+                        reset: reset_id.clone(),
+                        invite: local.res.id.clone(),
+                    })),
+                }).root,
+            ],
+        }
     });
-    return style_export::cont_page_menu(style_export::ContPageMenuArgs { children: vec![
-        //. .
-        bar.root,
-        style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-            text: format!("Edit"),
-            link: ministate_octothorpe(&Ministate::ChannelInviteEdit(local.res.id.clone())),
-        }).root,
-        style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-            text: format!("Delete"),
-            link: ministate_octothorpe(&Ministate::ChannelInviteDelete(local.res.id.clone())),
-        }).root,
-    ] }).root;
-}
-
-pub fn build(id: &ChannelInviteId) -> El {
-    match get_stored_api_channelinvites(Some(id)).into_iter().find(|x| x.res.id == *id) {
-        Some(local) => {
-            return build1(local);
-        },
-        None => {
-            return el_async({
-                let id = id.clone();
-                async move {
-                    let Some(local) =
-                        req_api_channelinvites(Some(&id)).await?.into_iter().find(|x| x.res.id == id) else {
-                            return Err(format!("Could not find invite [{}]", id.0));
-                        };
-                    return Ok(vec![build1(local)]);
-                }
-            });
-        },
-    }
 }

@@ -1,79 +1,60 @@
 use {
     crate::{
         api::req_post_json,
-        formutil::build_form,
+        pageutil::build_nol_form,
+        js::style_export,
         localdata::{
             self,
-            get_stored_api_channels,
-            req_api_channels,
-            LocalChannel,
+            get_or_req_api_channel,
         },
         state::{
             goto_replace_ministate,
             state,
             Ministate,
+            MinistateChannel,
         },
     },
-    lunk::{
-        EventGraph,
-        ProcessingContext,
-    },
+    lunk::ProcessingContext,
     rooting::{
         el,
         El,
     },
-    shared::interface::wire::{
-        c2s::{
-            self,
+    shared::interface::{
+        wire::{
+            c2s::{
+                self,
+            },
         },
-        shared::QualifiedChannelId,
-    },
-    crate::js::{
-        el_async,
-        style_export,
+        shared::{
+            QualifiedChannelId,
+            QualifiedMessageId,
+        },
     },
 };
 
-pub fn build1(eg: EventGraph, value: LocalChannel) -> El {
-    return build_form(
-        format!("Delete channel"),
-        Ministate::Channel(value.res.id.clone()),
-        el("div"),
-        vec![
-            style_export::leaf_form_text(
-                style_export::LeafFormTextArgs {
-                    text: format!("Are you sure you want to delete channel [{}]", value.res.memo_short),
-                },
-            ).root
-        ],
-        async move |_idem| {
-            req_post_json(&state().env.base_url, c2s::ChannelDelete { id: value.res.id.clone() }).await?;
-            localdata::delete_channel(value.res.clone()).await;
-            eg.event(|pc| {
-                goto_replace_ministate(pc, &state().log, &Ministate::Top);
-            }).unwrap();
-            return Ok(());
-        },
-    );
-}
-
-pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId) -> El {
-    match get_stored_api_channels(Some(id)).into_iter().find(|x| x.res.id == *id) {
-        Some(value) => {
-            return build1(pc.eg(), value);
-        },
-        None => {
-            return el_async({
-                let eg = pc.eg();
-                let channel = id.clone();
-                async move {
-                    let Some(value) =
-                        req_api_channels(Some(&channel)).await?.into_iter().find(|x| x.res.id == channel) else {
-                            return Err(format!("Could not find channel [{:?}]", channel));
-                        };
-                    return Ok(vec![build1(eg.clone(), value)]);
-                }
-            });
-        },
-    }
+pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>) -> El {
+    return build_nol_form(&Ministate::Channel(MinistateChannel {
+        channel: id.clone(),
+        reset: reset_id.clone(),
+    }), "Delete channel", get_or_req_api_channel(id, false).map({
+        let eg = pc.eg();
+        |local| (
+            el("div"),
+            vec![
+                style_export::leaf_form_text(
+                    style_export::LeafFormTextArgs {
+                        text: format!("Are you sure you want to delete channel [{}]", local.res.memo_short),
+                    },
+                ).root
+            ],
+            async move |_idem| {
+                req_post_json(&state().env.base_url, c2s::ChannelDelete { id: local.res.id.clone() }).await?;
+                localdata::delete_channel(local.res.clone()).await;
+                eg.event(|pc| {
+                    goto_replace_ministate(pc, &state().log, &Ministate::Top);
+                }).unwrap();
+                return Ok(());
+            },
+        )
+    }));
 }

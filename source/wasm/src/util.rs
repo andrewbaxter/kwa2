@@ -1,9 +1,7 @@
-use {
-    std::ops::{
-        Add,
-        Mul,
-        Sub,
-    },
+use std::ops::{
+    Add,
+    Mul,
+    Sub,
 };
 
 pub trait MoreMath {

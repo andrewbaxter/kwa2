@@ -1,62 +1,52 @@
 use {
     crate::{
-        localdata::{
-            get_stored_api_channels,
-            req_api_channels,
-            LocalChannel,
+        js::style_export,
+        localdata::get_or_req_api_channel,
+        pageutil::{
+            build_nol_menu,
+            LazyPage,
         },
         state::{
             ministate_octothorpe,
             Ministate,
+            MinistateChannel,
         },
     },
     rooting::El,
-    shared::interface::wire::shared::{
+    shared::interface::shared::{
         QualifiedChannelId,
-    },
-    crate::js::{
-        el_async,
-        style_export,
+        QualifiedMessageId,
     },
 };
 
-fn build1(local: LocalChannel) -> El {
-    let bar = style_export::cont_menu_bar(style_export::ContMenuBarArgs {
-        back_link: ministate_octothorpe(&Ministate::Channel(local.res.id.clone())),
-        text: local.res.memo_short.clone(),
-        center_link: None,
-        right: None,
+pub fn build(id: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>) -> El {
+    return build_nol_menu(&Ministate::Channel(MinistateChannel {
+        channel: id.clone(),
+        reset: reset_id.clone(),
+    }), get_or_req_api_channel(id, true), {
+        let reset_id = reset_id.clone();
+        move |local| LazyPage {
+            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+                text: local.res.memo_short.clone(),
+                link: None,
+            }).root,
+            body: vec![
+                //. .
+                style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                    text: format!("Edit"),
+                    link: ministate_octothorpe(&Ministate::ChannelEdit(MinistateChannel {
+                        channel: local.res.id.clone(),
+                        reset: reset_id.clone(),
+                    })),
+                }).root,
+                style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                    text: format!("Delete"),
+                    link: ministate_octothorpe(&Ministate::ChannelDelete(MinistateChannel {
+                        channel: local.res.id.clone(),
+                        reset: reset_id.clone(),
+                    })),
+                }).root
+            ],
+        }
     });
-    return style_export::cont_page_menu(style_export::ContPageMenuArgs { children: vec![
-        //. .
-        bar.root,
-        style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-            text: format!("Edit"),
-            link: ministate_octothorpe(&Ministate::ChannelEdit(local.res.id.clone())),
-        }).root,
-        style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-            text: format!("Delete"),
-            link: ministate_octothorpe(&Ministate::ChannelDelete(local.res.id.clone())),
-        }).root,
-    ] }).root;
-}
-
-pub fn build(id: &QualifiedChannelId) -> El {
-    match get_stored_api_channels(Some(id)).into_iter().find(|x| x.res.id == *id) {
-        Some(local) => {
-            return build1(local);
-        },
-        None => {
-            return el_async({
-                let id = id.clone();
-                async move {
-                    let Some(local) =
-                        req_api_channels(Some(&id)).await?.into_iter().find(|x| x.res.id == id) else {
-                            return Err(format!("Could not find channel [{:?}]", id));
-                        };
-                    return Ok(vec![build1(local)]);
-                }
-            });
-        },
-    }
 }

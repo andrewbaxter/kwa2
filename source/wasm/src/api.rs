@@ -119,3 +119,25 @@ pub async fn req_file(base_url: &str, url: &str) -> Result<Vec<u8>, String> {
     };
     return read_resp(base_url, resp).await;
 }
+
+pub async fn req_get<T: c2s::PathReqTrait>(base_url: &str, req: T) -> Result<T::Resp, String> {
+    let req = Request::get(&format!("{}{}", base_url, req.serialize_path()));
+    let body = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(format!("Failed to send request: {}", e));
+        },
+    };
+    let body = read_resp(base_url, body).await?;
+    return Ok(
+        serde_json::from_slice::<T::Resp>(
+            &body,
+        ).map_err(
+            |e| format!(
+                "Error parsing JSON response from server response: {}\nBody: {}",
+                e,
+                String::from_utf8_lossy(&body)
+            ),
+        )?,
+    );
+}

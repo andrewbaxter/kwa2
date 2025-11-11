@@ -151,7 +151,7 @@ impl<S: 'static + Serialize + DeserializeOwned, R: 'static + Serialize + Deseria
             R: 'static + Serialize + DeserializeOwned,
         >(state: Ws<S, R>) {
             state.0.ws.set(None);
-            state.0.ws_state.set(spawn_rooted({
+            state.0.ws_state.set(scope_any(spawn_rooted({
                 let state = state.weak();
                 async move {
                     TimeoutFuture::new(1000).await;
@@ -160,7 +160,7 @@ impl<S: 'static + Serialize + DeserializeOwned, R: 'static + Serialize + Deseria
                     };
                     connect(Ws(state));
                 }
-            }));
+            })));
         }
 
         let out = Ws(Rc::new(Ws_ {

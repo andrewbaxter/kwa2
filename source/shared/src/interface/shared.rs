@@ -12,6 +12,10 @@ use {
 
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct AccountId(pub u64);
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelGroupId(pub u64);
 
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
@@ -69,6 +73,10 @@ pub struct QualifiedMessageId {
     pub message: MessageId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct OutboxMessageId(pub String);
+
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum MessageBlock {
@@ -77,10 +85,19 @@ pub enum MessageBlock {
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum MessageRel {
+    None,
+    ReplyTo(MessageId),
+    EditOf(MessageId),
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageBody {
     pub id: MessageId,
-    pub reply_to: Option<MessageId>,
-    pub blocks: Vec<MessageBlock>,
+    pub rel: MessageRel,
+    //. pub blocks: Vec<MessageBlock>,
+    pub body: String,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
