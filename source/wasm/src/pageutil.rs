@@ -11,6 +11,7 @@ use {
         },
         state::{
             ministate_octothorpe,
+            spawn_rooted_log,
             Ministate,
         },
     },
@@ -355,37 +356,38 @@ pub fn build_nol_menu_title<
     ).root;
 }
 
-pub fn build_nol_chat<
+pub fn build_nol_chat_bar<
     T: 'static,
->(back_link: &Ministate, v: NowOrLater<T>, build: impl 'static + FnOnce(T) -> LazyPage) -> El {
+>(back_link: &Ministate, v: NowOrLater<T>, build: impl 'static + FnOnce(T) -> El) -> El {
+    let mut own = vec![];
     let center;
-    let body;
     match v {
         NowOrLater::Now(local) => {
-            let r = build(local);
-            center = r.center;
-            body = r.body;
+            center = build(local);
         },
         NowOrLater::Later(v) => {
             center = style_export::leaf_chat_bar_center_placeholder().root;
-            body = vec![el_async({
-                let center = center.clone();
+            own.push(spawn_rooted_log("Fetching channel info", {
+                let top_center = center.clone();
                 async move {
                     let Some(local) = v.await.map_err(|e| e.to_string())?? else {
-                        return Err(format!("Could not find object"));
+                        top_center.ref_replace(
+                            vec![style_export::leaf_chat_bar_center(style_export::LeafChatBarCenterArgs {
+                                text: format!("Unknown"),
+                                link: None,
+                            }).root],
+                        );
+                        return Ok(());
                     };
-                    let r = build(local);
-                    center.ref_replace(vec![r.center]);
-                    return Ok(r.body);
+                    top_center.ref_replace(vec![build(local)]);
+                    return Ok(());
                 }
-            })];
+            }));
         },
     }
-    return style_export::cont_page_chat(
-        style_export::ContPageChatArgs { children: [style_export::cont_chat_bar(style_export::ContChatBarArgs {
-            back_link: ministate_octothorpe(&back_link),
-            center: center,
-            right: None,
-        }).root].into_iter().chain(body.into_iter()).collect() },
-    ).root;
+    return style_export::cont_chat_bar(style_export::ContChatBarArgs {
+        back_link: ministate_octothorpe(&back_link),
+        center: center,
+        right: None,
+    }).root.own(move |_| own);
 }

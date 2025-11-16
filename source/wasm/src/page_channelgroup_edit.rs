@@ -1,31 +1,21 @@
 use {
     crate::{
-        api::req_post_json,
-        pageutil::build_nol_form,
-        localdata::{
+        api::req_post_json, localdata::{
             self,
             get_or_req_api_channelgroup,
-        },
-        state::{
+        }, pageutil::build_nol_form, state::{
             goto_replace_ministate,
             state,
-            Ministate,
-            MinistateChannelGroup,
-        },
+            Ministate, MinistateChannelGroup,
+        }
     },
     lunk::ProcessingContext,
     rooting::El,
     rooting_forms::Form,
     shared::interface::{
-        wire::{
-            c2s::{
+        shared::ChannelGroupId, wire::c2s::{
                 self,
-            },
-        },
-        shared::{
-            ChannelGroupId,
-            QualifiedMessageId,
-        },
+            }
     },
     std::rc::Rc,
 };
@@ -38,13 +28,12 @@ struct Form_ {
     memo_long: String,
 }
 
-pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId, reset_id: &Option<QualifiedMessageId>) -> El {
-    return build_nol_form(&Ministate::ChannelGroup(MinistateChannelGroup {
-        channelgroup: id.clone(),
-        reset: reset_id.clone(),
+pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
+    return build_nol_form(&Ministate::ChannelGroup(MinistateChannelGroup{
+        id: id.clone(),
+        reset_id: None,
     }), "Edit group", get_or_req_api_channelgroup(id, false).map({
         let eg = pc.eg();
-        let reset_id = reset_id.clone();
         move |value| {
             let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
                 memo_short: value.res.memo_short.clone(),
@@ -70,10 +59,7 @@ pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId, reset_id: &Option<
                 }).await?;
                 localdata::ensure_channelgroup(res.clone()).await;
                 eg.event(|pc| {
-                    goto_replace_ministate(pc, &state().log, &Ministate::ChannelGroup(MinistateChannelGroup {
-                        channelgroup: res.id,
-                        reset: reset_id.clone(),
-                    }));
+                    goto_replace_ministate(pc, &state().log, &Ministate::ChannelGroup(MinistateChannelGroup { id: res.id, reset_id: None }));
                 }).unwrap();
                 return Ok(());
             });

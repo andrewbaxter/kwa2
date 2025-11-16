@@ -1,13 +1,13 @@
 use {
     crate::{
         api::req_post_json,
-        pageutil::{
-            build_nol_form,
-            FormOptChannelGroup,
-        },
         localdata::{
             self,
             get_or_req_api_channel,
+        },
+        pageutil::{
+            build_nol_form,
+            FormOptChannelGroup,
         },
         state::{
             goto_replace_ministate,
@@ -20,14 +20,9 @@ use {
     rooting::El,
     rooting_forms::Form,
     shared::interface::{
-        wire::{
-            c2s::{
-                self,
-            },
-        },
-        shared::{
-            QualifiedChannelId,
-            QualifiedMessageId,
+        shared::QualifiedChannelId,
+        wire::c2s::{
+            self,
         },
     },
     std::rc::Rc,
@@ -43,13 +38,12 @@ struct Form_ {
     group: FormOptChannelGroup,
 }
 
-pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>) -> El {
+pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId) -> El {
     return build_nol_form(&Ministate::Channel(MinistateChannel {
-        channel: id.clone(),
-        reset: reset_id.clone(),
+        id: id.clone(),
+        reset_id: None,
     }), "Edit channel", get_or_req_api_channel(id, false).map({
         let eg = pc.eg();
-        let reset_id = reset_id.clone();
         |local| {
             let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
                 memo_short: local.res.memo_short.clone(),
@@ -82,8 +76,8 @@ pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId, reset_id: &Opt
                 localdata::ensure_channel(res.clone()).await;
                 eg.event(|pc| {
                     goto_replace_ministate(pc, &state().log, &&Ministate::Channel(MinistateChannel {
-                        channel: res.id,
-                        reset: reset_id.clone(),
+                        id: res.id.clone(),
+                        reset_id: None,
                     }));
                 }).unwrap();
                 return Ok(());

@@ -32,4 +32,11 @@ declare type Presentation = {
     contChatBar: (args: { backLink: string, center: HTMLElement, right?: HTMLElement }) => { root: HTMLElement };
     leafChatBarCenterPlaceholder: (args: {  }) => { root: HTMLElement };
     leafChatBarCenter: (args: { text: string, link?: string }) => { root: HTMLElement };
+    leafChatEntryControls: (args: {  }) => { root: HTMLElement };
+    leafChatEntryControlNewMessage: (args: {  }) => { root: HTMLElement };
+    leafChatEntryMessageDeleted: (args: {  }) => { root: HTMLElement };
+    leafChatEntryMessage: (args: {  }) => { root: HTMLElement, body: HTMLElement };
+    contChatControlsMenu: (args: { children: HTMLElement[] }) => { root: HTMLElement };
+    leafChatControlsMenuButton: (args: { text: string }) => { root: HTMLElement };
+    leafChatControlsMessage: (args: {  }) => { root: HTMLElement, send: HTMLElement, text: HTMLElement, close: HTMLElement };
 };

@@ -6,6 +6,7 @@ use {
         Message,
         MessageBody,
         MessageId,
+        MessageIdem,
         QualifiedChannelId,
         QualifiedChannelInviteToken,
         QualifiedIdentityInviteToken,
@@ -390,6 +391,7 @@ pub struct SnapMessage {
     pub offset: SnapOffset,
     pub original_id: QualifiedMessageId,
     pub original_receive_time: Timestamp,
+    pub idem: Option<MessageIdem>,
     pub message: MessageBody,
 }
 
@@ -502,6 +504,7 @@ impl PathReqTrait for ActivityPage {
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct Notification {
-    pub message: QualifiedMessageId,
+    pub channel: QualifiedChannelId,
+    pub offset: ActivityOffset,
     pub body: String,
 }

@@ -9,7 +9,6 @@ use {
             goto_replace_ministate,
             state,
             Ministate,
-            MinistateChannel,
             MinistateChannelInvite,
         },
     },
@@ -20,7 +19,6 @@ use {
     shared::interface::{
         shared::{
             QualifiedChannelId,
-            QualifiedMessageId,
         },
         wire::c2s::{
             self,
@@ -41,22 +39,18 @@ struct Form_ {
     expiry: Option<Timestamp>,
 }
 
-pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>) -> El {
+pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId) -> El {
     let eg = pc.eg();
     let (form_els, form_state) = Form_::new_form("", None);
     let form_state = Rc::new(form_state);
     return build_form(
         //. .
         format!("New invite"),
-        Ministate::ChannelMenu(MinistateChannel {
-            channel: channel.clone(),
-            reset: reset_id.clone(),
-        }),
+        Ministate::ChannelMenu(channel.clone()),
         form_els.error.unwrap(),
         form_els.elements,
         {
             let channel = channel.clone();
-            let reset_id = reset_id.clone();
             async move |idem| {
                 let Ok(new_values) = form_state.parse() else {
                     return Ok(());
@@ -74,7 +68,6 @@ pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, reset_id:
                     goto_replace_ministate(pc, &state().log, &Ministate::ChannelInvite(MinistateChannelInvite {
                         channel: channel.clone(),
                         invite: res.id,
-                        reset: reset_id.clone(),
                     }));
                 }).unwrap();
                 return Ok(());

@@ -15,8 +15,7 @@ use {
         state::{
             ministate_octothorpe,
             state,
-            Ministate,
-            MinistateChannel,
+            Ministate, MinistateChannel,
         },
     },
     flowcontrol::ta_return,
@@ -82,9 +81,9 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
         for old_channel in old_identity.children {
             let channel_el = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                 text: old_channel.res.memo_short,
-                link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                    channel: old_channel.res.id.clone(),
-                    reset: None,
+                link: ministate_octothorpe(&Ministate::Channel(MinistateChannel{
+                    id: old_channel.res.id.clone(),
+                    reset_id: None,
                 })),
             }).root;
             lookup_el_channels.borrow_mut().insert(old_channel.res.id, channel_el.clone());
@@ -157,10 +156,7 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                             } else {
                                 new_out_els2.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                                     text: new_channel.res.memo_short,
-                                    link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                                        channel: new_channel.res.id,
-                                        reset: None,
-                                    })),
+                                    link: ministate_octothorpe(&Ministate::Channel(MinistateChannel { id: new_channel.res.id, reset_id: None })),
                                 }).root);
                             }
                         }

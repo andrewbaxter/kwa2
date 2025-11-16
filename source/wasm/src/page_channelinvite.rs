@@ -9,7 +9,6 @@ use {
         state::{
             ministate_octothorpe,
             Ministate,
-            MinistateChannel,
             MinistateChannelInvite,
         },
     },
@@ -17,16 +16,11 @@ use {
     shared::interface::shared::{
         ChannelInviteId,
         QualifiedChannelId,
-        QualifiedMessageId,
     },
 };
 
-pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId, reset_id: &Option<QualifiedMessageId>) -> El {
-    return build_nol_menu(&Ministate::ChannelInvites(MinistateChannel {
-        channel: channel.clone(),
-        reset: reset_id.clone(),
-    }), get_or_req_api_channelinvite(id, true), {
-        let reset_id = reset_id.clone();
+pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
+    return build_nol_menu(&Ministate::ChannelInvites(channel.clone()), get_or_req_api_channelinvite(id, true), {
         let channel = channel.clone();
         move |local| LazyPage {
             center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
@@ -39,7 +33,6 @@ pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId, reset_id: &Opti
                     text: format!("Edit"),
                     link: ministate_octothorpe(&Ministate::ChannelInviteEdit(MinistateChannelInvite {
                         channel: channel.clone(),
-                        reset: reset_id.clone(),
                         invite: local.res.id.clone(),
                     })),
                 }).root,
@@ -47,7 +40,6 @@ pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId, reset_id: &Opti
                     text: format!("Delete"),
                     link: ministate_octothorpe(&Ministate::ChannelInviteDelete(MinistateChannelInvite {
                         channel: channel.clone(),
-                        reset: reset_id.clone(),
                         invite: local.res.id.clone(),
                     })),
                 }).root,

@@ -21,7 +21,6 @@ use {
         shared::{
             ChannelInviteId,
             QualifiedChannelId,
-            QualifiedMessageId,
         },
         wire::c2s::{
             self,
@@ -43,19 +42,12 @@ struct Form_ {
     expiry: Option<Timestamp>,
 }
 
-pub fn build(
-    pc: &mut ProcessingContext,
-    channel: &QualifiedChannelId,
-    id: &ChannelInviteId,
-    reset_id: &Option<QualifiedMessageId>,
-) -> El {
+pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
     return build_nol_form(&Ministate::ChannelInvite(MinistateChannelInvite {
         channel: channel.clone(),
-        reset: reset_id.clone(),
         invite: id.clone(),
     }), "Edit invite", get_or_req_api_channelinvite(id, true).map({
         let eg = pc.eg();
-        let reset_id = reset_id.clone();
         let channel = channel.clone();
         move |local| {
             let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
@@ -97,7 +89,6 @@ pub fn build(
                     goto_replace_ministate(pc, &state().log, &Ministate::ChannelInvite(MinistateChannelInvite {
                         channel: channel.clone(),
                         invite: res.id,
-                        reset: reset_id.clone(),
                     }));
                 }).unwrap();
                 return Ok(());

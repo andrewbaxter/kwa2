@@ -9,7 +9,10 @@ use {
             req_api_channelinvites,
         },
         state::{
-            ministate_octothorpe, state, Ministate, MinistateChannel, MinistateChannelInvite
+            ministate_octothorpe,
+            state,
+            Ministate,
+            MinistateChannelInvite,
         },
     },
     flowcontrol::ta_return,
@@ -19,7 +22,6 @@ use {
     },
     shared::interface::shared::{
         QualifiedChannelId,
-        QualifiedMessageId,
     },
     std::{
         cell::RefCell,
@@ -28,7 +30,7 @@ use {
     },
 };
 
-pub fn build(channel: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>) -> El {
+pub fn build(channel: &QualifiedChannelId) -> El {
     let inv_elements = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
     let old_invites =
         get_stored_api_channelinvites(None)
@@ -43,7 +45,6 @@ pub fn build(channel: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>
             text: old_invite.res.memo_short.clone(),
             link: ministate_octothorpe(&Ministate::ChannelInvite(MinistateChannelInvite {
                 channel: channel.clone(),
-                reset: reset_id.clone(),
                 invite: old_invite.res.id,
             })),
         });
@@ -57,7 +58,6 @@ pub fn build(channel: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>
         let old_invites1 = old_invites;
         let lookup_el_invites = lookup_el_invites.clone();
         let channel = channel.clone();
-        let reset_id = reset_id.clone();
         async move {
             ta_return!(Vec < El >, String);
             let new_invites =
@@ -82,7 +82,6 @@ pub fn build(channel: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>
                             text: new_invite.res.memo_short,
                             link: ministate_octothorpe(&Ministate::ChannelInvite(MinistateChannelInvite {
                                 channel: channel.clone(),
-                                reset: reset_id.clone(),
                                 invite: new_invite.res.id,
                             })),
                         });
@@ -121,11 +120,7 @@ pub fn build(channel: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>
             right: Some(
                 style_export::leaf_menu_bar_add(
                     style_export::LeafMenuBarAddArgs {
-                        link: ministate_octothorpe(&Ministate::ChannelInviteNew(MinistateChannel{
-
-                            channel: channel.clone(),
-                            reset: reset_id.clone(),
-                        })),
+                        link: ministate_octothorpe(&Ministate::ChannelInviteNew(channel.clone())),
                     },
                 ).root,
             ),

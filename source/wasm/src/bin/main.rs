@@ -23,6 +23,7 @@ use {
     },
     wasm::{
         async_::bg_val,
+        chat_entry::ChatEntryLookup,
         js::{
             scan_env,
             style_export::{
@@ -43,16 +44,13 @@ use {
             SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
             STATE,
         },
-        swproto::FromSw,
+        serviceworker_proto::FromSw,
     },
     wasm_bindgen::{
         JsCast,
         JsValue,
     },
-    wasm_bindgen_futures::{
-        spawn_local,
-        JsFuture,
-    },
+    wasm_bindgen_futures::JsFuture,
     web_sys::{
         MessageEvent,
         ServiceWorkerRegistration,
@@ -78,7 +76,9 @@ pub fn main() {
         // Build app state
         STATE.with(|s| *s.borrow_mut() = Some(Rc::new(State_ {
             eg: pc.eg(),
-            current_chat: RefCell::new(None),
+            current_chat: Default::default(),
+            channel_feeds: Default::default(),
+            outbox_entries: ChatEntryLookup::new(),
             service_worker: service_worker,
             root: root.clone(),
             ministate: RefCell::new(shed!{
@@ -145,22 +145,31 @@ pub fn main() {
                 build_ministate(pc, &ministate);
             }).unwrap()
         }).forget();
-        EventListener::new(&window().navigator().service_worker(), "message", |ev| {
-            let ev =
-                ev.dyn_ref::<MessageEvent>().expect("Got wrong event type in service worker message event handler");
-            let data =
-                <JsValue as JsValueSerdeExt>::into_serde::<FromSw>(
-                    &ev.data(),
-                ).expect("Got wrong data type from service worker");
-            match data {
-                FromSw::Reload => {
-                    document().location().unwrap().reload().expect("Error triggering reload");
-                },
-                FromSw::Notification(n) => {
-                    // TODO
-                },
-            }
-            ev.data();
+        EventListener::new(&window().navigator().service_worker(), "message", {
+            let eg = pc.eg();
+            move |ev| eg.event(|pc| {
+                let ev =
+                    ev
+                        .dyn_ref::<MessageEvent>()
+                        .expect("Got wrong event type in service worker message event handler");
+                let data =
+                    <JsValue as JsValueSerdeExt>::into_serde::<FromSw>(
+                        &ev.data(),
+                    ).expect("Got wrong data type from service worker");
+                match data {
+                    FromSw::Reload => {
+                        document().location().unwrap().reload().expect("Error triggering reload");
+                    },
+                    FromSw::Notification(n) => {
+                        let state = state();
+                        let cf = state.channel_feeds.borrow();
+                        if let Some(f) = cf.get(&n.channel) {
+                            f.channel.notify(pc, n.offset);
+                        }
+                    },
+                }
+                ev.data();
+            }).unwrap()
         }).forget();
 
         // Root and display

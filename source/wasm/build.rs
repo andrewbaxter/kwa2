@@ -284,6 +284,41 @@ fn main() {
             args: vec![("text", &string_), ("link", &optstring_)],
             returns: vec![("root", &el_)],
         },
+        Func {
+            name: "leafChatEntryControls",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEntryControlNewMessage",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEntryMessageDeleted",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEntryMessage",
+            args: vec![],
+            returns: vec![("root", &el_), ("body", &el_)],
+        },
+        Func {
+            name: "contChatControlsMenu",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatControlsMenuButton",
+            args: vec![("text", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatControlsMessage",
+            args: vec![],
+            returns: vec![("root", &el_), ("send", &el_), ("text", &el_), ("close", &el_)],
+        },
     ] {
         let method_ts_name = method.name;
 

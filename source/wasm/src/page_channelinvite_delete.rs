@@ -11,7 +11,6 @@ use {
             goto_replace_ministate,
             state,
             Ministate,
-            MinistateChannel,
             MinistateChannelInvite,
         },
     },
@@ -24,7 +23,6 @@ use {
         shared::{
             ChannelInviteId,
             QualifiedChannelId,
-            QualifiedMessageId,
         },
         wire::c2s::{
             self,
@@ -32,19 +30,12 @@ use {
     },
 };
 
-pub fn build(
-    pc: &mut ProcessingContext,
-    channel: &QualifiedChannelId,
-    id: &ChannelInviteId,
-    reset_id: &Option<QualifiedMessageId>,
-) -> El {
+pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
     return build_nol_form(&Ministate::ChannelInvite(MinistateChannelInvite {
         channel: channel.clone(),
-        reset: reset_id.clone(),
         invite: id.clone(),
     }), "Delete invite", get_or_req_api_channelinvite(id, false).map({
         let eg = pc.eg();
-        let reset_id = reset_id.clone();
         move |local| (
             el("div"),
             vec![
@@ -58,10 +49,11 @@ pub fn build(
                 req_post_json(&state().env.base_url, c2s::ChannelInviteDelete { id: local.res.id.clone() }).await?;
                 localdata::delete_channelinvite(local.res.clone()).await;
                 eg.event(|pc| {
-                    goto_replace_ministate(pc, &state().log, &Ministate::ChannelInvites(MinistateChannel {
-                        channel: local.res.token.channel.clone(),
-                        reset: reset_id.clone(),
-                    }));
+                    goto_replace_ministate(
+                        pc,
+                        &state().log,
+                        &Ministate::ChannelInvites(local.res.token.channel.clone()),
+                    );
                 }).unwrap();
                 return Ok(());
             },

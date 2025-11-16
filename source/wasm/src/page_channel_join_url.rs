@@ -9,8 +9,7 @@ use {
         state::{
             goto_replace_ministate,
             state,
-            Ministate,
-            MinistateChannel,
+            Ministate, MinistateChannel,
         },
     },
     lunk::ProcessingContext,
@@ -118,9 +117,9 @@ pub fn build(pc: &mut ProcessingContext) -> El {
             }
             localdata::ensure_channel(res.clone()).await;
             eg.event(|pc| {
-                goto_replace_ministate(pc, &state().log, &Ministate::Channel(MinistateChannel {
-                    channel: res.id,
-                    reset: None,
+                goto_replace_ministate(pc, &state().log, &Ministate::Channel(MinistateChannel{
+                    id: res.id.clone(),
+                    reset_id: None,
                 }));
             }).unwrap();
             return Ok(());

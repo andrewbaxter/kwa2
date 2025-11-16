@@ -1,12 +1,12 @@
 use {
     crate::{
         api::req_post_json,
-        pageutil::build_nol_form,
         js::style_export,
         localdata::{
             self,
             get_or_req_api_channel,
         },
+        pageutil::build_nol_form,
         state::{
             goto_replace_ministate,
             state,
@@ -20,22 +20,17 @@ use {
         El,
     },
     shared::interface::{
-        wire::{
-            c2s::{
-                self,
-            },
-        },
-        shared::{
-            QualifiedChannelId,
-            QualifiedMessageId,
+        shared::QualifiedChannelId,
+        wire::c2s::{
+            self,
         },
     },
 };
 
-pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId, reset_id: &Option<QualifiedMessageId>) -> El {
+pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId) -> El {
     return build_nol_form(&Ministate::Channel(MinistateChannel {
-        channel: id.clone(),
-        reset: reset_id.clone(),
+        id: id.clone(),
+        reset_id: None,
     }), "Delete channel", get_or_req_api_channel(id, false).map({
         let eg = pc.eg();
         |local| (

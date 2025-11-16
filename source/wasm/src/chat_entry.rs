@@ -1,9 +1,16 @@
 use {
-    crate::infinite,
+    crate::{
+        chat_controls::build_chat_entry_controls,
+        chat_message::build_chat_entry_message,
+        infinite,
+    },
     defer::defer,
     jiff::Timestamp,
+    lunk::{
+        HistPrim,
+        Prim,
+    },
     rooting::{
-        el,
         scope_any,
         ScopeValue,
         WeakEl,
@@ -14,8 +21,9 @@ use {
     },
     shared::interface::{
         shared::{
-            OutboxMessageId,
+            MessageIdem,
             QualifiedChannelId,
+            QualifiedMessageId,
         },
         wire::c2s::SnapOffset,
     },
@@ -23,25 +31,21 @@ use {
         cell::RefCell,
         collections::HashMap,
         hash::Hash,
-        rc::{
-            Rc,
-        },
+        rc::Rc,
     },
 };
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
-pub enum ChatFeedIdSub {
-    Channel,
-    Outbox,
+pub enum ChatFeedId {
+    Channel(QualifiedChannelId),
+    Outbox(QualifiedChannelId),
+    Controls,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
-pub struct ChatFeedId(pub QualifiedChannelId, pub ChatFeedIdSub);
-
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
 pub enum ChatTimeId {
-    Seek,
-    Outbox(OutboxMessageId),
+    None,
+    Outbox(MessageIdem),
     Channel(SnapOffset),
 }
 
@@ -51,9 +55,24 @@ pub struct ChatTime {
     pub id: ChatTimeId,
 }
 
+impl Default for ChatTime {
+    fn default() -> Self {
+        return Self {
+            stamp: Timestamp::now(),
+            id: ChatTimeId::None,
+        };
+    }
+}
+
 type ChatEntryLookup_<K> = RefCell<HashMap<K, Rc<ChatEntry>>>;
 
 pub struct ChatEntryLookup<K: Eq + Hash>(pub Rc<ChatEntryLookup_<K>>);
+
+impl<K: Eq + Hash> Clone for ChatEntryLookup<K> {
+    fn clone(&self) -> Self {
+        return Self(self.0.clone());
+    }
+}
 
 impl<K: Eq + Hash> ChatEntryLookup<K> {
     pub fn new() -> Self {
@@ -61,31 +80,62 @@ impl<K: Eq + Hash> ChatEntryLookup<K> {
     }
 }
 
-pub struct ChatEntry {
+#[derive(Clone)]
+pub struct ChatEntryInternalMessage {
+    pub body: Prim<String>,
+}
+
+#[derive(Clone)]
+pub enum ChatEntryMessageInternal {
+    // Outbox messages that have since appeared in channel proper
+    Obviated,
+    Deleted,
+    Message(ChatEntryInternalMessage),
+}
+
+pub struct ChatEntryMessage {
     pub on_drop: ScopeValue,
+    pub internal: Prim<ChatEntryMessageInternal>,
+}
+
+pub struct ChatEntryControls {
+    pub group_mode: HistPrim<ChatMode>,
+    pub channels: Rc<RefCell<Vec<(String, QualifiedChannelId)>>>,
+}
+
+pub enum ChatEntryInternal {
+    Controls(ChatEntryControls),
+    Message(ChatEntryMessage),
+}
+
+pub struct ChatEntry {
     pub time: ChatTime,
-    pub body: RefCell<String>,
+    pub int: ChatEntryInternal,
     pub el: RefCell<Option<WeakEl>>,
 }
 
 impl ChatEntry {
-    pub fn new<
+    pub fn new_message<
         K: 'static + Eq + Hash + Clone,
     >(map: &ChatEntryLookup<K>, time: ChatTime, lookup_id: K, text: String) -> Rc<ChatEntry> {
         let out = Rc::new(ChatEntry {
-            on_drop: scope_any(defer({
-                let map = Rc::downgrade(&map.0);
-                let lookup_id = lookup_id.clone();
-                move || {
-                    let Some(map) = map.upgrade() else {
-                        return;
-                    };
-                    map.borrow_mut().remove(&lookup_id);
-                }
-            })),
             time: time,
-            body: RefCell::new(text),
-            el: RefCell::new(None),
+            int: ChatEntryInternal::Message(ChatEntryMessage {
+                on_drop: scope_any(defer({
+                    let map = Rc::downgrade(&map.0);
+                    let lookup_id = lookup_id.clone();
+                    move || {
+                        let Some(map) = map.upgrade() else {
+                            return;
+                        };
+                        map.borrow_mut().remove(&lookup_id);
+                    }
+                })),
+                internal: Prim::new(
+                    ChatEntryMessageInternal::Message(ChatEntryInternalMessage { body: Prim::new(text) }),
+                ),
+            }),
+            el: Default::default(),
         });
         map.0.borrow_mut().insert(lookup_id, out.clone());
         return out;
@@ -101,7 +151,10 @@ impl infinite::Entry for ChatEntry {
         if let Some(e) = e.as_ref().and_then(|x| x.upgrade()) {
             return e.clone();
         };
-        let out = el("div").text(&self.body.borrow());
+        let out = match &self.int {
+            ChatEntryInternal::Controls(m) => build_chat_entry_controls(pc, m),
+            ChatEntryInternal::Message(m) => build_chat_entry_message(pc, m),
+        };
         *e = Some(out.weak());
         return out;
     }

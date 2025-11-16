@@ -98,8 +98,8 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                 let out = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: old_c.res.memo_short,
                     link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                        channel: old_c.res.id.clone(),
-                        reset: None,
+                        id: old_c.res.id.clone(),
+                        reset_id: None,
                     })),
                 }).root;
                 lookup_el_menu_channels.borrow_mut().insert(old_c.res.id, out.clone());
@@ -111,8 +111,8 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                     let el2 = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                         text: local_c2.res.memo_short,
                         link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                            channel: local_c2.res.id.clone(),
-                            reset: None,
+                            id: local_c2.res.id.clone(),
+                            reset_id: None,
                         })),
                     }).root;
                     lookup_el_menu_channels.borrow_mut().insert(local_c2.res.id, el2.clone());
@@ -121,8 +121,8 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                 let out = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
                     text: old_cg.v.res.memo_short.clone(),
                     link: ministate_octothorpe(&Ministate::ChannelGroup(MinistateChannelGroup {
-                        channelgroup: old_cg.v.res.id,
-                        reset: None,
+                        id: old_cg.v.res.id,
+                        reset_id: None,
                     })),
                     children: vec![],
                 });
@@ -173,8 +173,8 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                                 new_els1.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                                     text: new_c.res.memo_short,
                                     link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                                        channel: new_c.res.id,
-                                        reset: None,
+                                        id: new_c.res.id,
+                                        reset_id: None,
                                     })),
                                 }).root);
                             }
@@ -194,8 +194,8 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                                 let next_el1 = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
                                     text: new_cg.v.res.memo_short,
                                     link: ministate_octothorpe(&Ministate::ChannelGroup(MinistateChannelGroup {
-                                        channelgroup: new_cg.v.res.id,
-                                        reset: None,
+                                        id: new_cg.v.res.id,
+                                        reset_id: None,
                                     })),
                                     children: vec![],
                                 });
@@ -219,8 +219,8 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                                             style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                                                 text: new_c2.res.memo_short,
                                                 link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                                                    channel: new_c2.res.id,
-                                                    reset: None,
+                                                    id: new_c2.res.id,
+                                                    reset_id: None,
                                                 })),
                                             }).root,
                                         );

@@ -18,7 +18,10 @@ use {
         PATH_PREFIX_CLIENT,
     },
     tokio_stream::StreamExt,
-    wasm::swproto::FromSw,
+    wasm::serviceworker_proto::{
+        FromSw,
+        FromSwNotification,
+    },
     wasm_bindgen::{
         JsCast,
         JsValue,
@@ -285,7 +288,10 @@ fn main() {
                                     if let Err(e) =
                                         client.post_message(
                                             &<JsValue as JsValueSerdeExt>::from_serde(
-                                                &FromSw::Notification(data.clone()),
+                                                &FromSw::Notification(FromSwNotification {
+                                                    channel: data.channel.clone(),
+                                                    offset: data.offset,
+                                                }),
                                             ).expect("Error converting notification message into js value"),
                                         ) {
                                         console::log_2(

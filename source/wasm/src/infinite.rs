@@ -145,7 +145,7 @@ impl<T: 'static + Clone + std::fmt::Debug + PartialEq + Eq + PartialOrd + Hash> 
 
 pub trait Entry {
     type FeedId: Clone + PartialEq + Eq + PartialOrd + Hash;
-    type Time: 'static + Clone + std::fmt::Debug + PartialEq + Eq + PartialOrd + Hash;
+    type Time: 'static + Clone + std::fmt::Debug + PartialEq + Eq + PartialOrd + Hash + Default;
 
     fn create_el(&self, pc: &mut ProcessingContext) -> El;
     fn time(&self) -> Self::Time;
@@ -210,6 +210,8 @@ struct Infiniscroll_<E: Entry> {
     eg: EventGraph,
     /// Used when new/resetting
     reset_time: RefCell<E::Time>,
+    padding_pre: El,
+    padding_post: El,
     outer_stack: El,
     frame: El,
     cached_frame_height: Cell<f64>,
@@ -444,9 +446,11 @@ impl<E: Entry> Clone for Infinite<E> {
 }
 
 impl<E: 'static + Entry> Infinite<E> {
-    pub fn new(eg: &EventGraph, reset_time: E::Time) -> Self {
+    pub fn new(eg: &EventGraph) -> Self {
         let outer_stack = el("div").classes(&["infinite"]);
         let frame = el("div").classes(&["frame"]);
+        let padding_pre = el("div").classes(&["inf_group"]);
+        let padding_post = el("div").classes(&["inf_group"]);
         let content = el("div").classes(&["content"]);
         let content_layout = el("div").classes(&["content_layout"]);
         let content_lines_early_sticky = el("div").classes(&["sticky"]);
@@ -455,7 +459,12 @@ impl<E: 'static + Entry> Infinite<E> {
         let center_spinner = el("div").classes(&["center_spinner"]);
         let early_spinner = el("div").classes(&["early_spinner", CSS_HIDE]);
         let late_spinner = el("div").classes(&["late_spinner", CSS_HIDE]);
-        outer_stack.ref_extend(vec![frame.clone(), center_spinner.clone()]);
+        outer_stack.ref_extend(
+            vec![
+                frame.clone(),
+                el("div").extend(vec![padding_pre.clone(), center_spinner.clone(), padding_post.clone()])
+            ],
+        );
         frame.ref_push(content.clone());
         content.ref_push(content_layout.clone());
         content_layout.ref_extend(
@@ -469,10 +478,12 @@ impl<E: 'static + Entry> Infinite<E> {
         );
         let state = Infinite(Rc::new(Infiniscroll_ {
             eg: eg.clone(),
-            reset_time: RefCell::new(reset_time),
+            reset_time: Default::default(),
             outer_stack: outer_stack,
             frame: frame.clone(),
             cached_frame_height: Cell::new(0.),
+            padding_pre: padding_pre.clone(),
+            padding_post: padding_post.clone(),
             content: content.clone(),
             content_layout: content_layout,
             logical_content_height: Cell::new(0.),
@@ -555,7 +566,40 @@ impl<E: 'static + Entry> Infinite<E> {
                 state.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
             }
         });
-        state.shake_immediate();
+        padding_pre.ref_on_resize({
+            let state = state.weak();
+            move |_, _w, h| {
+                let Some(state) = state.upgrade() else {
+                    return;
+                };
+                state
+                    .0
+                    .frame
+                    .raw()
+                    .dyn_ref::<HtmlElement>()
+                    .unwrap()
+                    .style()
+                    .set_property("padding-top", &h.to_string())
+                    .unwrap();
+            }
+        });
+        padding_post.ref_on_resize({
+            let state = state.weak();
+            move |_, _w, h| {
+                let Some(state) = state.upgrade() else {
+                    return;
+                };
+                state
+                    .0
+                    .frame
+                    .raw()
+                    .dyn_ref::<HtmlElement>()
+                    .unwrap()
+                    .style()
+                    .set_property("padding-bottom", &h.to_string())
+                    .unwrap();
+            }
+        });
         return state;
     }
 
@@ -581,20 +625,33 @@ impl<E: 'static + Entry> Infinite<E> {
         return self.0.outer_stack.clone();
     }
 
-    pub fn set_padding_pre(&self, padding: &str) {
-        self.0.frame.raw().dyn_ref::<HtmlElement>().unwrap().style().set_property("padding-top", &padding).unwrap();
+    pub fn padding_pre_el(&self) -> El {
+        return self.0.padding_pre.clone();
     }
 
-    pub fn set_padding_post(&self, padding: &str) {
-        self
-            .0
-            .frame
-            .raw()
-            .dyn_ref::<HtmlElement>()
-            .unwrap()
-            .style()
-            .set_property("padding-bottom", &padding)
-            .unwrap();
+    pub fn padding_post_el(&self) -> El {
+        return self.0.padding_post.clone();
+    }
+
+    fn jump_to_(&self, time: &E::Time) {
+        *self.0.reset_time.borrow_mut() = time.clone();
+        self.0.real.borrow_mut().clear();
+        self.0.anchor_i.set(None);
+        self.0.anchor_alignment.set(0.5);
+        self.0.anchor_offset.set(0.);
+        for f in self.0.feeds.borrow_mut().values_mut() {
+            f.early_reserve.clear();
+            f.late_reserve.clear();
+            f.early_stop = false;
+            f.late_stop = false;
+            f.initial = true;
+            f.earliest_known = None;
+        }
+    }
+
+    pub fn jump_to(&self, time: &E::Time) {
+        self.jump_to_(time);
+        self.shake_immediate();
     }
 
     pub fn set_sticky(&self, id: &E::Time) {
@@ -623,19 +680,7 @@ impl<E: 'static + Entry> Infinite<E> {
             }
             // Not rendered; clear and jump
             changed = true;
-            *self.0.reset_time.borrow_mut() = id.clone();
-            self.0.real.borrow_mut().clear();
-            self.0.anchor_i.set(None);
-            self.0.anchor_alignment.set(0.5);
-            self.0.anchor_offset.set(0.);
-            for f in self.0.feeds.borrow_mut().values_mut() {
-                f.early_reserve.clear();
-                f.late_reserve.clear();
-                f.early_stop = false;
-                f.late_stop = false;
-                f.initial = true;
-                f.earliest_known = None;
-            }
+            self.jump_to_(id);
         }
         if changed {
             self.shake_immediate();
