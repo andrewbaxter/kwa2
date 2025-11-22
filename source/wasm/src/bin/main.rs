@@ -23,28 +23,31 @@ use {
     },
     wasm::{
         async_::bg_val,
-        chat_entry::ChatEntryLookup,
+        background::{
+            schedule_trigger_pull,
+            trigger_push,
+        },
         js::{
+            Log,
+            LogJsErr,
+            VecLog,
             scan_env,
             style_export::{
                 self,
             },
-            Log,
-            LogJsErr,
-            VecLog,
         },
+        serviceworker_proto::FromSw,
         state::{
+            LOCALSTORAGE_PWA_MINISTATE,
+            Ministate,
+            SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
+            STATE,
+            State_,
             build_ministate,
             read_ministate,
             record_replace_ministate,
             state,
-            Ministate,
-            State_,
-            LOCALSTORAGE_PWA_MINISTATE,
-            SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
-            STATE,
         },
-        serviceworker_proto::FromSw,
     },
     wasm_bindgen::{
         JsCast,
@@ -77,8 +80,6 @@ pub fn main() {
         STATE.with(|s| *s.borrow_mut() = Some(Rc::new(State_ {
             eg: pc.eg(),
             current_chat: Default::default(),
-            channel_feeds: Default::default(),
-            outbox_entries: ChatEntryLookup::new(),
             service_worker: service_worker,
             root: root.clone(),
             ministate: RefCell::new(shed!{
@@ -127,6 +128,9 @@ pub fn main() {
             env: env.clone(),
             log1: log1,
             log: log.clone(),
+            bg_pushing: Default::default(),
+            bg_pulling_interval: Default::default(),
+            bg_pulling: Default::default(),
         })));
 
         // Load initial view
@@ -147,7 +151,7 @@ pub fn main() {
         }).forget();
         EventListener::new(&window().navigator().service_worker(), "message", {
             let eg = pc.eg();
-            move |ev| eg.event(|pc| {
+            move |ev| {
                 let ev =
                     ev
                         .dyn_ref::<MessageEvent>()
@@ -162,15 +166,32 @@ pub fn main() {
                     },
                     FromSw::Notification(n) => {
                         let state = state();
-                        let cf = state.channel_feeds.borrow();
+                        let current_chat = state.current_chat.borrow();
+                        let Some(c) = &*current_chat else {
+                            return;
+                        };
+                        let cf = c.chat_state2.channel_lookup.borrow();
                         if let Some(f) = cf.get(&n.channel) {
-                            f.channel.notify(pc, n.offset);
+                            f.channel.notify(&eg, n.offset);
                         }
                     },
                 }
                 ev.data();
-            }).unwrap()
+            }
         }).forget();
+        schedule_trigger_pull(pc.eg());
+        EventListener::new(&window(), "focus", {
+            let eg = pc.eg();
+            move |_| {
+                schedule_trigger_pull(eg.clone());
+            }
+        }).forget();
+        EventListener::new(&window(), "blur", {
+            move |_| {
+                *state().bg_pulling_interval.borrow_mut() = None;
+            }
+        }).forget();
+        trigger_push();
 
         // Root and display
         set_root(vec![root.own(|_| (

@@ -1,17 +1,19 @@
 use {
     crate::{
+        chat::{
+            ChatMode,
+            ChatState,
+        },
         chat_controls::build_chat_entry_controls,
         chat_message::build_chat_entry_message,
         infinite,
     },
-    defer::defer,
     jiff::Timestamp,
     lunk::{
         HistPrim,
         Prim,
     },
     rooting::{
-        scope_any,
         ScopeValue,
         WeakEl,
     },
@@ -21,15 +23,14 @@ use {
     },
     shared::interface::{
         shared::{
-            MessageIdem,
+            MessageClientId,
             QualifiedChannelId,
-            QualifiedMessageId,
         },
         wire::c2s::SnapOffset,
     },
+    spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
-        collections::HashMap,
         hash::Hash,
         rc::Rc,
     },
@@ -38,14 +39,14 @@ use {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
 pub enum ChatFeedId {
     Channel(QualifiedChannelId),
-    Outbox(QualifiedChannelId),
+    Outbox((Identity, QualifiedChannelId)),
     Controls,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
 pub enum ChatTimeId {
     None,
-    Outbox(MessageIdem),
+    Outbox(MessageClientId),
     Channel(SnapOffset),
 }
 
@@ -61,22 +62,6 @@ impl Default for ChatTime {
             stamp: Timestamp::now(),
             id: ChatTimeId::None,
         };
-    }
-}
-
-type ChatEntryLookup_<K> = RefCell<HashMap<K, Rc<ChatEntry>>>;
-
-pub struct ChatEntryLookup<K: Eq + Hash>(pub Rc<ChatEntryLookup_<K>>);
-
-impl<K: Eq + Hash> Clone for ChatEntryLookup<K> {
-    fn clone(&self) -> Self {
-        return Self(self.0.clone());
-    }
-}
-
-impl<K: Eq + Hash> ChatEntryLookup<K> {
-    pub fn new() -> Self {
-        return Self(Rc::new(RefCell::new(HashMap::new())));
     }
 }
 
@@ -99,8 +84,8 @@ pub struct ChatEntryMessage {
 }
 
 pub struct ChatEntryControls {
-    pub group_mode: HistPrim<ChatMode>,
-    pub channels: Rc<RefCell<Vec<(String, QualifiedChannelId)>>>,
+    pub mode: HistPrim<ChatMode>,
+    pub state: Rc<ChatState>,
 }
 
 pub enum ChatEntryInternal {
@@ -115,29 +100,17 @@ pub struct ChatEntry {
 }
 
 impl ChatEntry {
-    pub fn new_message<
-        K: 'static + Eq + Hash + Clone,
-    >(map: &ChatEntryLookup<K>, time: ChatTime, lookup_id: K, text: String) -> Rc<ChatEntry> {
+    pub fn new_message(time: ChatTime, text: String, cleanup: ScopeValue) -> Rc<ChatEntry> {
         let out = Rc::new(ChatEntry {
             time: time,
             int: ChatEntryInternal::Message(ChatEntryMessage {
-                on_drop: scope_any(defer({
-                    let map = Rc::downgrade(&map.0);
-                    let lookup_id = lookup_id.clone();
-                    move || {
-                        let Some(map) = map.upgrade() else {
-                            return;
-                        };
-                        map.borrow_mut().remove(&lookup_id);
-                    }
-                })),
+                on_drop: cleanup,
                 internal: Prim::new(
                     ChatEntryMessageInternal::Message(ChatEntryInternalMessage { body: Prim::new(text) }),
                 ),
             }),
             el: Default::default(),
         });
-        map.0.borrow_mut().insert(lookup_id, out.clone());
         return out;
     }
 }

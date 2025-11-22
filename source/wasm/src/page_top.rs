@@ -99,6 +99,7 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                     text: old_c.res.memo_short,
                     link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
                         id: old_c.res.id.clone(),
+                        own_identity: old_c.res.own_identity.clone(),
                         reset_id: None,
                     })),
                 }).root;
@@ -112,6 +113,7 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                         text: local_c2.res.memo_short,
                         link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
                             id: local_c2.res.id.clone(),
+                            own_identity: local_c2.res.own_identity.clone(),
                             reset_id: None,
                         })),
                     }).root;
@@ -174,6 +176,7 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                                     text: new_c.res.memo_short,
                                     link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
                                         id: new_c.res.id,
+                                        own_identity: new_c.res.own_identity,
                                         reset_id: None,
                                     })),
                                 }).root);
@@ -220,6 +223,7 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                                                 text: new_c2.res.memo_short,
                                                 link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
                                                     id: new_c2.res.id,
+                                                    own_identity: new_c2.res.own_identity,
                                                     reset_id: None,
                                                 })),
                                             }).root,

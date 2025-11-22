@@ -1,9 +1,12 @@
 use {
     crate::{
+        chat::{
+            ChatMode,
+            ChatState,
+        },
         chat_entry::{
             ChatEntry,
             ChatEntryControls,
-            ChatMode,
             ChatEntryInternal,
             ChatFeedId,
             ChatTime,
@@ -19,7 +22,6 @@ use {
         EventGraph,
         HistPrim,
     },
-    shared::interface::shared::QualifiedChannelId,
     std::{
         cell::RefCell,
         rc::Rc,
@@ -35,30 +37,21 @@ struct FeedControls_ {
 pub struct FeedControls(Rc<FeedControls_>);
 
 impl FeedControls {
-    pub fn new(
-        controls_group: HistPrim<ChatMode>,
-        channels: Vec<(String, QualifiedChannelId)>,
-    ) -> FeedControls {
-        let channels = Rc::new(RefCell::new(channels));
+    pub fn new(mode: HistPrim<ChatMode>, state: Rc<ChatState>) -> FeedControls {
         return FeedControls(Rc::new(FeedControls_ {
             parent: Default::default(),
-            channels: channels.clone(),
             entry: Rc::new(ChatEntry {
                 time: ChatTime {
                     stamp: Timestamp::MAX,
                     id: ChatTimeId::None,
                 },
                 int: ChatEntryInternal::Controls(ChatEntryControls {
-                    group_mode: controls_group,
-                    channels: channels,
+                    mode: mode,
+                    state: state,
                 }),
                 el: Default::default(),
             }),
         }));
-    }
-
-    pub fn add_channel(&self, memo: String, id: QualifiedChannelId) {
-        self.0.channels.borrow_mut().push((memo, id));
     }
 }
 

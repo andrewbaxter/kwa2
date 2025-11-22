@@ -4470,6 +4470,7 @@ dependencies = [
  "sha2",
  "spaghettinuum",
  "ts-rs",
+ "urlencoding",
 ]
 
 [[package]]

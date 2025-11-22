@@ -6,21 +6,21 @@ use {
             get_or_req_api_channel,
         },
         pageutil::{
-            build_nol_form,
             FormOptChannelGroup,
+            build_nol_form,
         },
         state::{
-            goto_replace_ministate,
-            state,
             Ministate,
             MinistateChannel,
+            MinistateChannelSub,
+            goto_replace_ministate,
+            state,
         },
     },
     lunk::ProcessingContext,
     rooting::El,
     rooting_forms::Form,
     shared::interface::{
-        shared::QualifiedChannelId,
         wire::c2s::{
             self,
         },
@@ -38,13 +38,15 @@ struct Form_ {
     group: FormOptChannelGroup,
 }
 
-pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId) -> El {
+pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
     return build_nol_form(&Ministate::Channel(MinistateChannel {
-        id: id.clone(),
+        id: s.id.clone(),
+        own_identity: s.own_identity.clone(),
         reset_id: None,
-    }), "Edit channel", get_or_req_api_channel(id, false).map({
+    }), "Edit channel", get_or_req_api_channel(&s.id, false).map({
         let eg = pc.eg();
-        |local| {
+        let own_identity = s.own_identity.clone();
+        move |local| {
             let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
                 memo_short: local.res.memo_short.clone(),
                 memo_long: local.res.memo_long.clone(),
@@ -56,6 +58,7 @@ pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId) -> El {
                     return Ok(());
                 };
                 let res = req_post_json(&state().env.base_url, c2s::ChannelModify {
+                    own_identity: own_identity.clone(),
                     id: local.res.id.clone(),
                     memo_short: if new_values.memo_short == local.res.memo_short {
                         None
@@ -77,6 +80,7 @@ pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId) -> El {
                 eg.event(|pc| {
                     goto_replace_ministate(pc, &state().log, &&Ministate::Channel(MinistateChannel {
                         id: res.id.clone(),
+                        own_identity: own_identity.clone(),
                         reset_id: None,
                     }));
                 }).unwrap();

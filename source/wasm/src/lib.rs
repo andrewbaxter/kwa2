@@ -45,3 +45,4 @@ pub mod chat_controls;
 pub mod util;
 pub mod outbox;
 pub mod serviceworker_proto;
+pub mod background;

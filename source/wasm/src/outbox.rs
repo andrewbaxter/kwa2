@@ -4,14 +4,16 @@ use {
     jiff::Timestamp,
     js_sys::Array,
     serde::{
-        de::DeserializeOwned,
         Deserialize,
         Serialize,
+        de::DeserializeOwned,
     },
     shared::interface::shared::{
-        MessageIdem,
+        MessageClientId,
         QualifiedChannelId,
+        QualifiedMessageId,
     },
+    spaghettinuum::interface::identity::Identity,
     std::{
         collections::BTreeMap,
         str::FromStr,
@@ -22,21 +24,29 @@ use {
         JsValue,
     },
     wasm_bindgen_futures::{
-        stream::JsStream,
         JsFuture,
+        stream::JsStream,
     },
     web_sys::{
         FileSystemDirectoryHandle,
         FileSystemFileHandle,
         FileSystemGetDirectoryOptions,
+        FileSystemWritableFileStream,
     },
 };
 
 pub const OPFS_FILENAME_MAIN: &str = "main";
 
 #[derive(Serialize, Deserialize)]
+pub enum OutboxMessageReplyTo {
+    Channel(QualifiedMessageId),
+    Outbox(MessageClientId),
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct OutboxMessage {
-    pub idem: MessageIdem,
+    pub reply_to: Option<OutboxMessageReplyTo>,
+    pub client_id: MessageClientId,
     pub body: String,
 }
 
@@ -101,17 +111,64 @@ pub async fn opfs_read_json<
     );
 }
 
-pub async fn opfs_channel_dir(channel: &QualifiedChannelId) -> FileSystemDirectoryHandle {
+pub async fn opfs_write_json<
+    T: Serialize,
+>(parent: &FileSystemDirectoryHandle, seg: &str, data: T) -> Result<(), String> {
+    let f =
+        FileSystemFileHandle::from(
+            JsFuture::from(parent.get_file_handle(seg))
+                .await
+                .map_err(|e| format!("Error getting file handle at seg [{}]: {:?}", seg, e.as_string()))?,
+        );
+    let w =
+        FileSystemWritableFileStream::from(
+            JsFuture::from(f.create_writable())
+                .await
+                .map_err(|e| format!("Error getting file handle writable at seg [{}]: {:?}", seg, e.as_string()))?,
+        );
+    JsFuture::from(
+        w
+            .write_with_str(&serde_json::to_string(&data).unwrap())
+            .map_err(|e| format!("Error writing message to opfs file at seg [{}]: {:?}", seg, e.as_string()))?,
+    )
+        .await
+        .map_err(|e| format!("Error writing message to opfs file at seg [{}] (2): {:?}", seg, e.as_string()))?;
+    return Ok(());
+}
+
+pub async fn opfs_delete(parent: &FileSystemDirectoryHandle, seg: &str) {
+    if let Err(e) = JsFuture::from(parent.remove_entry(seg)).await {
+        state().log.log_js(&format!("Error deleting opfs entry at [{}]", seg), &e);
+    }
+}
+
+pub async fn opfs_outbox() -> FileSystemDirectoryHandle {
     let opfs =
         JsFuture::from(window().navigator().storage().get_directory())
             .await
             .expect("Error getting opfs root")
             .dyn_into::<FileSystemDirectoryHandle>()
             .unwrap();
-    let opfs = opfs_ensure_dir(&opfs, "outbox").await;
+    return opfs_ensure_dir(&opfs, "outbox").await;
+}
+
+pub async fn opfs_outbox_channel_dir(ident: &Identity, channel: &QualifiedChannelId) -> FileSystemDirectoryHandle {
+    let opfs = opfs_outbox().await;
+
+    // Sender
+    let opfs = opfs_ensure_dir(&opfs, &ident.to_string()).await;
+
+    // Dest
     let opfs = opfs_ensure_dir(&opfs, &channel.identity.to_string()).await;
     let opfs = opfs_ensure_dir(&opfs, &channel.channel.0.to_string()).await;
     return opfs;
+}
+
+pub async fn opfs_outbox_message_dir(
+    parent: &FileSystemDirectoryHandle,
+    client_id: &MessageClientId,
+) -> FileSystemDirectoryHandle {
+    return opfs_ensure_dir(parent, &client_id.0).await;
 }
 
 pub async fn opfs_channel_dir_entries(

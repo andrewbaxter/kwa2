@@ -428,8 +428,13 @@ fn realize_entry<
     };
 }
 
-#[derive(Clone)]
 pub struct WeakInfinite<E: Entry>(Weak<Infiniscroll_<E>>);
+
+impl<E: Entry> Clone for WeakInfinite<E> {
+    fn clone(&self) -> Self {
+        return Self(self.0.clone());
+    }
+}
 
 impl<E: Entry> WeakInfinite<E> {
     pub fn upgrade(&self) -> Option<Infinite<E>> {
@@ -927,9 +932,18 @@ impl<E: 'static + Entry> Infinite<E> {
             // # Prune reserve and unset stop status
             let mut requesting_early = false;
             let mut requesting_late = false;
+            let center = {
+                let entries = self.0.real.borrow();
+                entries.get(entries.len() / 2).map(|x| x.entry.time())
+            };
             for (feed_id, f_state) in &mut *self.0.feeds.borrow_mut() {
                 if f_state.initial {
-                    f_state.feed.request_around(pc.eg(), self.0.reset_time.borrow().clone());
+                    f_state
+                        .feed
+                        .request_around(
+                            pc.eg(),
+                            center.as_ref().cloned().unwrap_or_else(|| self.0.reset_time.borrow().clone()),
+                        );
                     requesting_early = true;
                     requesting_late = true;
                 } else {

@@ -14,8 +14,10 @@ use {
     },
     rooting::set_root_non_dom,
     shared::interface::{
-        wire::c2s,
         PATH_PREFIX_CLIENT,
+        wire::{
+            s2c,
+        },
     },
     tokio_stream::StreamExt,
     wasm::serviceworker_proto::{
@@ -27,13 +29,12 @@ use {
         JsValue,
     },
     wasm_bindgen_futures::{
+        JsFuture,
         future_to_promise,
         spawn_local,
         stream::JsStream,
-        JsFuture,
     },
     web_sys::{
-        console,
         Cache,
         ExtendableEvent,
         FetchEvent,
@@ -43,6 +44,7 @@ use {
         RequestMode,
         ServiceWorkerGlobalScope,
         WindowClient,
+        console,
     },
 };
 
@@ -274,7 +276,7 @@ fn main() {
                                 .expect("Error reading data from push event")
                                 .json()
                                 .expect("Error reading data from push event as json");
-                        let data: c2s::Notification =
+                        let data: s2c::Notification =
                             JsValueSerdeExt::into_serde(
                                 &data,
                             ).expect("Received payload doesn't match expected format");

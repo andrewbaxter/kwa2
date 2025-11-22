@@ -6,10 +6,11 @@ use {
         },
         pageutil::build_form,
         state::{
-            goto_replace_ministate,
-            state,
             Ministate,
             MinistateChannelInvite,
+            MinistateChannelSub,
+            goto_replace_ministate,
+            state,
         },
     },
     jiff::Timestamp,
@@ -17,9 +18,7 @@ use {
     rooting::El,
     rooting_forms::Form,
     shared::interface::{
-        shared::{
-            QualifiedChannelId,
-        },
+        shared::QualifiedChannelId,
         wire::c2s::{
             self,
         },
@@ -46,7 +45,10 @@ pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId) -> El {
     return build_form(
         //. .
         format!("New invite"),
-        Ministate::ChannelMenu(channel.clone()),
+        Ministate::ChannelMenu(MinistateChannelSub {
+            id: channel.clone(),
+            own_identity: channel.identity.clone(),
+        }),
         form_els.error.unwrap(),
         form_els.elements,
         {

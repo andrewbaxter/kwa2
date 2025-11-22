@@ -1,10 +1,15 @@
 use {
     crate::{
         api::req_get,
+        chat::{
+            ChatMode,
+            ChatModeReplyMessage,
+            ChatModeReplyMessageTarget,
+            ChatState,
+        },
         chat_entry::{
             ChatEntry,
             ChatEntryInternal,
-            ChatEntryLookup,
             ChatEntryMessageInternal,
             ChatFeedId,
             ChatTime,
@@ -15,23 +20,28 @@ use {
             WeakInfinite,
         },
         outbox::{
-            opfs_channel_dir,
-            opfs_list_dir,
-            opfs_read_json,
-            OutboxMessage,
             OPFS_FILENAME_MAIN,
+            OutboxMessage,
+            opfs_list_dir,
+            opfs_outbox_channel_dir,
+            opfs_read_json,
         },
         state::{
             spawn_rooted_log,
             state,
         },
     },
-    flowcontrol::exenum,
+    defer::defer,
+    flowcontrol::{
+        exenum,
+        shed,
+    },
     futures::channel::oneshot,
     lunk::EventGraph,
+    rooting::scope_any,
     shared::interface::{
         shared::{
-            MessageIdem,
+            MessageClientId,
             QualifiedChannelId,
             QualifiedMessageId,
         },
@@ -52,14 +62,14 @@ use {
     wasm_bindgen::JsValue,
     wasm_bindgen_futures::JsFuture,
     web_sys::{
-        console,
         FileSystemDirectoryHandle,
+        console,
     },
 };
 
 pub struct ChannelFeed_ {
     id: QualifiedChannelId,
-    entry_lookup: ChatEntryLookup<QualifiedMessageId>,
+    chat_state: Rc<ChatState>,
     parent: RefCell<Option<WeakInfinite<ChatEntry>>>,
     /// Ignore server-push for events older than we've already observed
     known_latest_server_time: Cell<Option<ActivityOffset>>,
@@ -80,9 +90,9 @@ fn page_for(page_size: usize, entry: usize) -> usize {
 }
 
 impl ChannelFeed {
-    pub fn new(id: QualifiedChannelId) -> Self {
+    pub fn new(chat_state: Rc<ChatState>, id: QualifiedChannelId) -> Self {
         return ChannelFeed(Rc::new(ChannelFeed_ {
-            entry_lookup: ChatEntryLookup::new(),
+            chat_state: chat_state,
             id: id,
             parent: RefCell::new(None),
             known_latest_server_time: Cell::new(None),
@@ -123,17 +133,14 @@ impl ChannelFeed {
                             self1.0.known_latest_server_time.set(Some(have_data_time));
                             break;
                         }
-                        let Some(resp) =
-                            req_get(
-                                &state().env.base_url,
-                                c2s::ActivityPage {
-                                    offset: ActivityOffset(
-                                        page_for(self1.0.activity_page_size.get(), have_data_time.0 + 1),
-                                    ),
-                                },
-                            ).await? else {
-                                break;
-                            };
+                        let Some(resp) = req_get(&state().env.base_url, c2s::ActivityPage {
+                            channel: self1.0.id.clone(),
+                            offset: ActivityOffset(
+                                page_for(self1.0.activity_page_size.get(), have_data_time.0 + 1),
+                            ),
+                        }).await? else {
+                            break;
+                        };
                         let mut server_time = resp.offset;
                         eg.event(|pc| {
                             for (off1, entry) in resp.messages.into_iter().enumerate() {
@@ -149,7 +156,7 @@ impl ChannelFeed {
                                     },
                                 };
                                 server_time = ActivityOffset(resp.offset.0 + off1);
-                                let entries = self1.0.entry_lookup.0.borrow_mut();
+                                let entries = self1.0.chat_state.entry_channel_lookup.borrow_mut();
                                 let Some(e) = entries.get(&QualifiedMessageId {
                                     channel: self1.0.id.clone(),
                                     message: entry.id,
@@ -176,19 +183,41 @@ impl ChannelFeed {
     }
 }
 
-async fn delete_outbox_entry(
+async fn obviate_outbox_entry(
     eg: &EventGraph,
-    entry_lookup: &ChatEntryLookup<MessageIdem>,
-    idem: MessageIdem,
+    chat_state: &Rc<ChatState>,
     channel: &QualifiedChannelId,
+    idem: &MessageClientId,
+    id: &QualifiedMessageId,
 ) {
     eg.event(|pc| {
-        if let Some(e) = entry_lookup.0.borrow().get(&idem) {
+        if let Some(e) =
+            chat_state
+                .entry_outbox_lookup
+                .borrow()
+                .get(&(channel.clone(), id.message.identity.clone(), idem.clone())) {
             let e = exenum!(&e.int, ChatEntryInternal:: Message(e) => e).unwrap();
             e.internal.set(pc, ChatEntryMessageInternal::Obviated);
         }
+        shed!{
+            let mode = chat_state.mode.borrow();
+            let ChatMode::ReplyMessage(mode) = &*mode else {
+                break;
+            };
+            let ChatModeReplyMessageTarget::Outbox(target) = &mode.target else {
+                break;
+            };
+            if target.message != *idem {
+                break;
+            }
+            let own_ident = mode.own_identity.clone();
+            chat_state.mode.set(pc, ChatMode::ReplyMessage(ChatModeReplyMessage {
+                target: ChatModeReplyMessageTarget::Channel(id.clone()),
+                own_identity: own_ident,
+            }));
+        }
     }).unwrap();
-    let channel_dir = opfs_channel_dir(channel).await;
+    let channel_dir = opfs_outbox_channel_dir(&id.message.identity, channel).await;
     for (k, v) in opfs_list_dir(&channel_dir).await {
         let v = FileSystemDirectoryHandle::from(v);
         let m = match opfs_read_json::<OutboxMessage>(&v, OPFS_FILENAME_MAIN).await {
@@ -202,7 +231,7 @@ async fn delete_outbox_entry(
                 continue;
             },
         };
-        if m.idem != idem {
+        if m.client_id != *idem {
             continue;
         }
         if let Err(e) = JsFuture::from(channel_dir.remove_entry(&k)).await {
@@ -211,21 +240,47 @@ async fn delete_outbox_entry(
     }
 }
 
-fn create_entries(
+async fn create_entries(
     eg: &EventGraph,
-    entry_lookup: &ChatEntryLookup<QualifiedMessageId>,
-    outbox_entry_lookup: &ChatEntryLookup<MessageIdem>,
+    chat_state: &Rc<ChatState>,
     messages: Vec<SnapMessage>,
 ) -> Vec<Rc<ChatEntry>> {
     let mut out = vec![];
     for e in messages {
-        if let Some(idem) = e.idem {
-            delete_outbox_entry(eg, outbox_entry_lookup, idem, &e.original_id.channel);
+        if let Some(client_id) = &e.client_id {
+            obviate_outbox_entry(eg, chat_state, &e.original_id.channel, client_id, &e.original_id).await;
         }
-        out.push(ChatEntry::new_message(&entry_lookup, ChatTime {
+        let entry = ChatEntry::new_message(ChatTime {
             stamp: e.original_receive_time,
             id: ChatTimeId::Channel(e.offset),
-        }, e.original_id, e.message.body));
+        }, e.message.body, scope_any(defer({
+            let chat_state = Rc::downgrade(chat_state);
+            let id = e.original_id.clone();
+            let client_id = e.client_id.clone();
+            move || {
+                let Some(chat_state) = chat_state.upgrade() else {
+                    return;
+                };
+                chat_state.entry_channel_lookup.borrow_mut().remove(&id);
+                if let Some(client_id) = &client_id {
+                    chat_state
+                        .entry_channel_lookup_by_client_id
+                        .borrow_mut()
+                        .remove(&(id.channel.clone(), id.channel.identity.clone(), client_id.clone()));
+                }
+            }
+        })));
+        out.push(entry.clone());
+        chat_state.entry_channel_lookup.borrow_mut().insert(e.original_id.clone(), entry.clone());
+        if let Some(client_id) = &e.client_id {
+            chat_state
+                .entry_channel_lookup_by_client_id
+                .borrow_mut()
+                .insert(
+                    (e.original_id.channel.clone(), e.original_id.channel.identity.clone(), client_id.clone()),
+                    entry.clone(),
+                );
+        }
     }
     return out;
 }
@@ -258,6 +313,23 @@ impl Feed<ChatEntry> for ChannelFeed {
                     );
                     return Ok(());
                 };
+                let Some(resp) = req_get(&state().env.base_url, c2s::SnapPage {
+                    channel: self1.0.id.clone(),
+                    offset: resp,
+                }).await? else {
+                    // Just expired? Shouldn't happen generally
+                    let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
+                        return Ok(());
+                    };
+                    parent.respond_entries_around(
+                        &ChatFeedId::Channel(self1.0.id.clone()),
+                        &time,
+                        vec![],
+                        true,
+                        true,
+                    );
+                    return Ok(());
+                };
                 {
                     let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                         return Ok(());
@@ -265,7 +337,7 @@ impl Feed<ChatEntry> for ChannelFeed {
                     parent.respond_entries_around(
                         &ChatFeedId::Channel(self1.0.id.clone()),
                         &time,
-                        create_entries(&eg, &self1.0.entry_lookup, &state().outbox_entries, resp.messages),
+                        create_entries(&eg, &self1.0.chat_state, resp.messages).await,
                         resp.offset.0 == 0,
                         false,
                     );
@@ -301,7 +373,7 @@ impl Feed<ChatEntry> for ChannelFeed {
                     parent.respond_entries_before(
                         &ChatFeedId::Channel(self1.0.id.clone()),
                         &time,
-                        create_entries(&eg, &self1.0.entry_lookup, &state().outbox_entries, resp.messages),
+                        create_entries(&eg, &self1.0.chat_state, resp.messages).await,
                         false,
                     );
                 }
@@ -337,7 +409,7 @@ impl Feed<ChatEntry> for ChannelFeed {
                     parent.respond_entries_after(
                         &ChatFeedId::Channel(self1.0.id.clone()),
                         &time,
-                        create_entries(&eg, &self1.0.entry_lookup, &state().outbox_entries, resp.messages),
+                        create_entries(&eg, &self1.0.chat_state, resp.messages).await,
                         false,
                     );
                 }

@@ -8,30 +8,31 @@ use {
         },
         pageutil::build_nol_form,
         state::{
-            goto_replace_ministate,
-            state,
             Ministate,
             MinistateChannel,
+            MinistateChannelSub,
+            goto_replace_ministate,
+            state,
         },
     },
     lunk::ProcessingContext,
     rooting::{
-        el,
         El,
+        el,
     },
     shared::interface::{
-        shared::QualifiedChannelId,
         wire::c2s::{
             self,
         },
     },
 };
 
-pub fn build(pc: &mut ProcessingContext, id: &QualifiedChannelId) -> El {
+pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
     return build_nol_form(&Ministate::Channel(MinistateChannel {
-        id: id.clone(),
+        id: s.id.clone(),
+        own_identity: s.own_identity.clone(),
         reset_id: None,
-    }), "Delete channel", get_or_req_api_channel(id, false).map({
+    }), "Delete channel", get_or_req_api_channel(&s.id, false).map({
         let eg = pc.eg();
         |local| (
             el("div"),

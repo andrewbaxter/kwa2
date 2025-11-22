@@ -13,14 +13,14 @@ use {
     jiff::Timestamp,
     js_sys::{
         Array,
-        Object,
         JSON,
+        Object,
     },
     rooting::{
-        scope_any,
-        spawn_rooted,
         El,
         ScopeValue,
+        scope_any,
+        spawn_rooted,
     },
     std::{
         cell::RefCell,
@@ -28,14 +28,14 @@ use {
         rc::Rc,
     },
     wasm_bindgen::{
-        prelude::Closure,
         JsCast,
         JsValue,
         UnwrapThrowExt,
+        prelude::Closure,
     },
     wasm_bindgen_futures::{
-        spawn_local,
         JsFuture,
+        spawn_local,
     },
     web_sys::{
         Blob,
@@ -620,10 +620,33 @@ pub fn download(filename: String, data: impl serde::Serialize) {
     Url::revoke_object_url(&url).unwrap();
 }
 
-pub fn el_menu_button(name: String, mut cb: impl 'static + AsyncFnMut() -> Result<(), String>) -> El {
-    return style_export::leaf_menu_button(style_export::LeafMenuButtonArgs { text: name })
-        .root
-        .on("click", move |_| {
-            cb();
-        });
+pub fn configure_async_button_once(button: &El, cb: impl 'static + Clone + AsyncFnOnce() -> ()) {
+    button.ref_on("click", {
+        let button = button.weak();
+        let bg = RefCell::new(None);
+        let cb = RefCell::new(Some(cb));
+        move |_| {
+            {
+                let Some(button) = button.upgrade() else {
+                    return;
+                };
+                button.ref_modify_classes(&[(&style_export::class_state_thinking().value, true)]);
+            }
+            {
+                let Some(cb) = cb.borrow_mut().take() else {
+                    return;
+                };
+                *bg.borrow_mut() = Some(spawn_rooted({
+                    let button = button.clone();
+                    async move {
+                        cb().await;
+                        let Some(button) = button.upgrade() else {
+                            return;
+                        };
+                        button.ref_modify_classes(&[(&style_export::class_state_thinking().value, false)]);
+                    }
+                }));
+            }
+        }
+    });
 }

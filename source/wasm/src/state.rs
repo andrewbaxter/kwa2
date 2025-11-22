@@ -1,19 +1,18 @@
 use {
     crate::{
         async_::BgVal,
-        chat_entry::{
-            ChatEntry,
-            ChatEntryLookup,
+        chat::{
+            ChatState,
+            ChatState2,
         },
-        chat_feed_channel::ChannelFeed,
-        chat_feed_outbox::OutboxFeed,
+        chat_entry::ChatEntry,
         infinite::Infinite,
         js::{
-            get_dom_octothorpe,
             Env,
             Log,
             LogJsErr,
             VecLog,
+            get_dom_octothorpe,
         },
         page_channel,
         page_channel_delete,
@@ -51,6 +50,7 @@ use {
             LocalStorage,
             Storage,
         },
+        timers::callback::Interval,
         utils::window,
     },
     js_sys::decode_uri,
@@ -59,8 +59,8 @@ use {
         ProcessingContext,
     },
     rooting::{
-        spawn_rooted,
         El,
+        spawn_rooted,
     },
     serde::{
         Deserialize,
@@ -70,14 +70,12 @@ use {
         ChannelGroupId,
         ChannelInviteId,
         IdentityInviteId,
-        MessageIdem,
         QualifiedChannelId,
         QualifiedMessageId,
     },
     spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
-        collections::HashMap,
         future::Future,
         rc::Rc,
     },
@@ -107,14 +105,29 @@ pub struct MinistateIdentityInvite {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MinistateChannel {
     pub id: QualifiedChannelId,
+    pub own_identity: Identity,
     pub reset_id: Option<QualifiedMessageId>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateChannelSub {
+    pub id: QualifiedChannelId,
+    pub own_identity: Identity,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateChannelGroupResetId {
+    pub own_identity: Identity,
+    pub message: QualifiedMessageId,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MinistateChannelGroup {
     pub id: ChannelGroupId,
-    pub reset_id: Option<QualifiedMessageId>,
+    pub reset_id: Option<MinistateChannelGroupResetId>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -137,9 +150,9 @@ pub enum Ministate {
     IdentityInviteEdit(MinistateIdentityInvite),
     IdentityInviteDelete(MinistateIdentityInvite),
     Channel(MinistateChannel),
-    ChannelMenu(QualifiedChannelId),
-    ChannelEdit(QualifiedChannelId),
-    ChannelDelete(QualifiedChannelId),
+    ChannelMenu(MinistateChannelSub),
+    ChannelEdit(MinistateChannelSub),
+    ChannelDelete(MinistateChannelSub),
     ChannelInvites(QualifiedChannelId),
     ChannelInviteNew(QualifiedChannelId),
     ChannelInvite(MinistateChannelInvite),
@@ -194,9 +207,18 @@ pub fn read_ministate(log: &Rc<dyn Log>) -> Ministate {
     return Ministate::Top;
 }
 
-pub struct ChannelFeedPair {
-    pub channel: ChannelFeed,
-    pub outbox: OutboxFeed,
+#[derive(Clone)]
+pub enum CurrentChatSource {
+    Channel(QualifiedChannelId),
+    Group(ChannelGroupId),
+}
+
+#[derive(Clone)]
+pub struct CurrentChat {
+    pub source: CurrentChatSource,
+    pub inf: Infinite<ChatEntry>,
+    pub chat_state: Rc<ChatState>,
+    pub chat_state2: Rc<ChatState2>,
 }
 
 pub struct State_ {
@@ -207,9 +229,10 @@ pub struct State_ {
     pub env: Env,
     pub log: Rc<dyn Log>,
     pub log1: Rc<VecLog>,
-    pub current_chat: RefCell<Option<Infinite<ChatEntry>>>,
-    pub channel_feeds: RefCell<HashMap<QualifiedChannelId, ChannelFeedPair>>,
-    pub outbox_entries: ChatEntryLookup<MessageIdem>,
+    pub current_chat: RefCell<Option<CurrentChat>>,
+    pub bg_pushing: RefCell<Option<oneshot::Receiver<()>>>,
+    pub bg_pulling_interval: RefCell<Option<Interval>>,
+    pub bg_pulling: RefCell<Option<oneshot::Receiver<()>>>,
 }
 
 thread_local!{
@@ -220,7 +243,7 @@ pub fn state() -> Rc<State_> {
     return STATE.with(|x| x.borrow().clone()).unwrap();
 }
 
-fn set_page(body: El) {
+pub fn set_page(body: El) {
     let r = &state().root;
     r.ref_clear();
     r.ref_push(body);
@@ -343,14 +366,15 @@ pub const SESSIONSTORAGE_CHAT_RESET: &str = "chat_reset";
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum SessionStorageChatResetSource {
-    Channel(QualifiedChannelId),
-    ChannelGroup(ChannelGroupId),
+pub struct SessionStorageChatResetChannelGroup {
+    pub channel_group: ChannelGroupId,
+    pub own_identity: Identity,
+    pub reset_id: QualifiedMessageId,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct SessionStorageChatReset {
-    pub source: SessionStorageChatResetSource,
-    pub reset_id: QualifiedMessageId,
+pub enum SessionStorageChatReset {
+    Channel(QualifiedMessageId),
+    ChannelGroup(SessionStorageChatResetChannelGroup),
 }

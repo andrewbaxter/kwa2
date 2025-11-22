@@ -14,3 +14,4 @@ glove = "0.5"
 spaghettinuum = { path = "../spaghettinuum/source/shared" }
 serde_urlencoded = "0.7"
 jiff = { version = "0.2", features = ["serde"] }
+urlencoding = "2"

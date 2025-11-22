@@ -1,4 +1,5 @@
 use {
+    jiff::Timestamp,
     schemars::JsonSchema,
     serde::{
         Deserialize,
@@ -60,7 +61,13 @@ pub struct QualifiedChannelId {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
-pub struct MessageIdem(pub String);
+pub struct MessageClientId(pub String);
+
+impl MessageClientId {
+    pub fn from_timestamp(t: Timestamp) -> Self {
+        return Self(t.to_string());
+    }
+}
 
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -93,7 +100,7 @@ pub enum MessageRel {
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageBody {
-    pub idem: Option<MessageIdem>,
+    pub client_id: Option<MessageClientId>,
     pub id: MessageId,
     pub rel: MessageRel,
     //. pub blocks: Vec<MessageBlock>,

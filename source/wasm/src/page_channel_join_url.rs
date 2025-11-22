@@ -9,7 +9,8 @@ use {
         state::{
             goto_replace_ministate,
             state,
-            Ministate, MinistateChannel,
+            Ministate,
+            MinistateChannel,
         },
     },
     lunk::ProcessingContext,
@@ -105,20 +106,23 @@ pub fn build(pc: &mut ProcessingContext) -> El {
                 FormKwaUrlInvite::Identity(u) => {
                     res = req_post_json(&state().env.base_url, c2s::ChannelJoinIdentity {
                         identity: u.identity,
+                        sender: new_values.identity.0.clone(),
                         code: u.code,
                     }).await?;
                 },
                 FormKwaUrlInvite::Channel(u) => {
                     res = req_post_json(&state().env.base_url, c2s::ChannelJoinChannel {
                         channel: u.channel,
+                        sender: new_values.identity.0.clone(),
                         code: u.code,
                     }).await?;
                 },
             }
             localdata::ensure_channel(res.clone()).await;
             eg.event(|pc| {
-                goto_replace_ministate(pc, &state().log, &Ministate::Channel(MinistateChannel{
+                goto_replace_ministate(pc, &state().log, &Ministate::Channel(MinistateChannel {
                     id: res.id.clone(),
+                    own_identity: new_values.identity.0.clone(),
                     reset_id: None,
                 }));
             }).unwrap();
