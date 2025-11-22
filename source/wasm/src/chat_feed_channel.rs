@@ -48,8 +48,12 @@ use {
         wire::c2s::{
             self,
             ActivityOffset,
+            ActivityPage,
+            ActivityPageOffsetPos,
+            PagePosition,
             SnapMessage,
-            SnapOffset,
+            SnapPage,
+            SnapPageOffsetPos,
         },
     },
     std::{
@@ -73,9 +77,7 @@ pub struct ChannelFeed_ {
     parent: RefCell<Option<WeakInfinite<ChatEntry>>>,
     /// Ignore server-push for events older than we've already observed
     known_latest_server_time: Cell<Option<ActivityOffset>>,
-    have_data_time: Cell<Option<ActivityOffset>>,
-    snap_page_size: Cell<usize>,
-    activity_page_size: Cell<usize>,
+    have_data_time: Cell<Option<ActivityPageOffsetPos>>,
     pulling_snap_around: RefCell<Option<oneshot::Receiver<()>>>,
     pulling_snap_before: RefCell<Option<oneshot::Receiver<()>>>,
     pulling_snap_after: RefCell<Option<oneshot::Receiver<()>>>,
@@ -85,10 +87,6 @@ pub struct ChannelFeed_ {
 #[derive(Clone)]
 pub struct ChannelFeed(Rc<ChannelFeed_>);
 
-fn page_for(page_size: usize, entry: usize) -> usize {
-    return (entry / page_size) * page_size;
-}
-
 impl ChannelFeed {
     pub fn new(chat_state: Rc<ChatState>, id: QualifiedChannelId) -> Self {
         return ChannelFeed(Rc::new(ChannelFeed_ {
@@ -97,8 +95,6 @@ impl ChannelFeed {
             parent: RefCell::new(None),
             known_latest_server_time: Cell::new(None),
             have_data_time: Cell::new(None),
-            snap_page_size: Cell::new(50),
-            activity_page_size: Cell::new(50),
             pulling_snap_around: RefCell::new(None),
             pulling_snap_before: RefCell::new(None),
             pulling_snap_after: RefCell::new(None),
@@ -106,20 +102,8 @@ impl ChannelFeed {
         }));
     }
 
-    pub fn notify(&self, eg: &EventGraph, offset: ActivityOffset) {
-        self.update_seen_time(eg, offset);
-    }
-
-    fn update_seen_time(&self, eg: &EventGraph, new_data_time: ActivityOffset) {
-        if self.0.known_latest_server_time.get().map(|known_time| new_data_time > known_time).unwrap_or(true) {
-            // If empty or resp time newer, update
-            self.0.known_latest_server_time.set(Some(new_data_time));
-        }
-        if self.0.have_data_time.get().map(|data_time| new_data_time < data_time).unwrap_or(true) {
-            // If empty or resp time older, update
-            self.0.have_data_time.set(Some(new_data_time));
-        }
-        if self.0.known_latest_server_time.get() != self.0.have_data_time.get() {
+    fn maybe_trigger_pull(&self, eg: &EventGraph) {
+        if self.0.known_latest_server_time.get() != self.0.have_data_time.get().map(|x| x.offset_pos.offset) {
             *self.0.pulling_activity.borrow_mut() = Some(spawn_rooted_log("pulling new channel events", {
                 let self1 = self.clone();
                 let eg = eg.clone();
@@ -129,22 +113,24 @@ impl ChannelFeed {
                             break;
                         };
                         let known_server_time = self1.0.known_latest_server_time.get().unwrap();
-                        if have_data_time >= known_server_time {
-                            self1.0.known_latest_server_time.set(Some(have_data_time));
+                        if have_data_time.offset_pos.offset >= known_server_time {
+                            self1.0.known_latest_server_time.set(Some(have_data_time.offset_pos.offset));
                             break;
                         }
-                        let Some(resp) = req_get(&state().env.base_url, c2s::ActivityPage {
+                        let next_page = match &have_data_time.offset_pos.pos {
+                            PagePosition::First => ActivityPage(have_data_time.page.0 - 1),
+                            _ => have_data_time.page,
+                        };
+                        let Some(resp) = req_get(&state().env.base_url, c2s::GetActivityPage {
                             channel: self1.0.id.clone(),
-                            offset: ActivityOffset(
-                                page_for(self1.0.activity_page_size.get(), have_data_time.0 + 1),
-                            ),
+                            page: next_page,
                         }).await? else {
                             break;
                         };
-                        let mut server_time = resp.offset;
+                        let mut server_time = None;
                         eg.event(|pc| {
-                            for (off1, entry) in resp.messages.into_iter().enumerate() {
-                                let entry = match entry.0.get_no_verify() {
+                            for entry in resp.messages.into_iter() {
+                                let entry1 = match entry.message.0.get_no_verify() {
                                     Ok(e) => e,
                                     Err(e) => {
                                         state()
@@ -155,11 +141,14 @@ impl ChannelFeed {
                                         continue;
                                     },
                                 };
-                                server_time = ActivityOffset(resp.offset.0 + off1);
+                                server_time = Some(ActivityPageOffsetPos {
+                                    page: next_page,
+                                    offset_pos: entry.offset_pos,
+                                });
                                 let entries = self1.0.chat_state.entry_channel_lookup.borrow_mut();
                                 let Some(e) = entries.get(&QualifiedMessageId {
                                     channel: self1.0.id.clone(),
-                                    message: entry.id,
+                                    message: entry1.id,
                                 }) else {
                                     continue;
                                 };
@@ -169,17 +158,42 @@ impl ChannelFeed {
                                     ChatEntryMessageInternal::Obviated => { },
                                     ChatEntryMessageInternal::Deleted => { },
                                     ChatEntryMessageInternal::Message(m) => {
-                                        m.body.set(pc, entry.body.clone());
+                                        m.body.set(pc, entry1.body.clone());
                                     },
                                 }
                             }
                         });
-                        self1.0.have_data_time.set(Some(server_time));
+                        self1.0.have_data_time.set(server_time);
                     }
                     return Ok(());
                 }
             }));
         }
+    }
+
+    pub fn notify(&self, eg: &EventGraph, offset: ActivityOffset) {
+        self.update_known_time(eg, offset);
+    }
+
+    fn update_known_or_have_time(&self, eg: &EventGraph, new_data_time: ActivityPageOffsetPos) {
+        if self
+            .0
+            .have_data_time
+            .get()
+            .map(|data_time| new_data_time.offset_pos < data_time.offset_pos)
+            .unwrap_or(true) {
+            // If empty or resp time older, update
+            self.0.have_data_time.set(Some(new_data_time));
+        }
+        self.update_known_time(eg, new_data_time.offset_pos.offset);
+    }
+
+    fn update_known_time(&self, eg: &EventGraph, new_offset: ActivityOffset) {
+        if self.0.known_latest_server_time.get().map(|known_time| new_offset > known_time).unwrap_or(true) {
+            // If empty or resp time newer, update
+            self.0.known_latest_server_time.set(Some(new_offset));
+        }
+        self.maybe_trigger_pull(eg);
     }
 }
 
@@ -243,6 +257,7 @@ async fn obviate_outbox_entry(
 async fn create_entries(
     eg: &EventGraph,
     chat_state: &Rc<ChatState>,
+    snap_page: SnapPage,
     messages: Vec<SnapMessage>,
 ) -> Vec<Rc<ChatEntry>> {
     let mut out = vec![];
@@ -252,7 +267,10 @@ async fn create_entries(
         }
         let entry = ChatEntry::new_message(ChatTime {
             stamp: e.original_receive_time,
-            id: ChatTimeId::Channel(e.offset),
+            id: ChatTimeId::Channel(SnapPageOffsetPos {
+                page: snap_page.clone(),
+                offset_pos: e.offset_pos,
+            }),
         }, e.message.body, scope_any(defer({
             let chat_state = Rc::downgrade(chat_state);
             let id = e.original_id.clone();
@@ -297,7 +315,7 @@ impl Feed<ChatEntry> for ChannelFeed {
         *self.0.pulling_snap_around.borrow_mut() = Some(spawn_rooted_log("Channel feed - requesting messages around", {
             let self1 = self.clone();
             async move {
-                let Some(resp) = req_get(&state().env.base_url, c2s::SnapPageContainingTime {
+                let Some(page) = req_get(&state().env.base_url, c2s::SnapPageContainingTime {
                     channel: self1.0.id.clone(),
                     time: time.stamp.clone(),
                 }).await? else {
@@ -313,9 +331,9 @@ impl Feed<ChatEntry> for ChannelFeed {
                     );
                     return Ok(());
                 };
-                let Some(resp) = req_get(&state().env.base_url, c2s::SnapPage {
+                let Some(resp) = req_get(&state().env.base_url, c2s::GetSnapPage {
                     channel: self1.0.id.clone(),
-                    offset: resp,
+                    page: page,
                 }).await? else {
                     // Just expired? Shouldn't happen generally
                     let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
@@ -337,12 +355,12 @@ impl Feed<ChatEntry> for ChannelFeed {
                     parent.respond_entries_around(
                         &ChatFeedId::Channel(self1.0.id.clone()),
                         &time,
-                        create_entries(&eg, &self1.0.chat_state, resp.messages).await,
-                        resp.offset.0 == 0,
+                        create_entries(&eg, &self1.0.chat_state, page, resp.messages).await,
+                        page.0 == 0,
                         false,
                     );
                 }
-                self1.update_seen_time(&eg, resp.activity_offset);
+                self1.update_known_or_have_time(&eg, resp.latest_activity);
                 return Ok(());
             }
         }));
@@ -353,19 +371,38 @@ impl Feed<ChatEntry> for ChannelFeed {
             let self1 = self.clone();
             async move {
                 let offset = exenum!(time.id, ChatTimeId:: Channel(c) => c).unwrap();
-                if offset.0 == 0 {
+                if offset.offset_pos.offset.0 == 0 {
                     let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                         return Ok(());
                     };
                     parent.respond_entries_before(&ChatFeedId::Channel(self1.0.id.clone()), &time, vec![], true);
                     return Ok(());
                 }
-                let Some(resp): Option<c2s::SnapPageRes> = req_get(&state().env.base_url, c2s::SnapPage {
+                let page = match &offset.offset_pos.pos {
+                    PagePosition::First => SnapPage(offset.page.0 - 1),
+                    _ => offset.page,
+                };
+                let Some(mut resp): Option<c2s::SnapPageRes> = req_get(&state().env.base_url, c2s::GetSnapPage {
                     channel: self1.0.id.clone(),
-                    offset: SnapOffset(page_for(self1.0.snap_page_size.get(), offset.0 - 1)),
+                    page: page,
                 }).await? else {
                     return Ok(());
                 };
+                resp
+                    .messages
+                    .splice(
+                        resp
+                            .messages
+                            .iter()
+                            .enumerate()
+                            .find_map(|(i, v)| if v.offset_pos.offset >= offset.offset_pos.offset {
+                                Some(i)
+                            } else {
+                                None
+                            })
+                            .unwrap_or(resp.messages.len()) .. resp.messages.len(),
+                        [],
+                    );
                 {
                     let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                         return Ok(());
@@ -373,11 +410,11 @@ impl Feed<ChatEntry> for ChannelFeed {
                     parent.respond_entries_before(
                         &ChatFeedId::Channel(self1.0.id.clone()),
                         &time,
-                        create_entries(&eg, &self1.0.chat_state, resp.messages).await,
+                        create_entries(&eg, &self1.0.chat_state, page, resp.messages).await,
                         false,
                     );
                 }
-                self1.update_seen_time(&eg, resp.activity_offset);
+                self1.update_known_or_have_time(&eg, resp.latest_activity);
                 return Ok(());
             }
         }));
@@ -387,14 +424,14 @@ impl Feed<ChatEntry> for ChannelFeed {
         *self.0.pulling_snap_after.borrow_mut() = Some(spawn_rooted_log("Channel feed, requesting messages after", {
             let self1 = self.clone();
             async move {
-                let Some(resp): Option<c2s::SnapPageRes> = req_get(&state().env.base_url, c2s::SnapPage {
+                let offset = exenum!(time.id, ChatTimeId:: Channel(c) => c).unwrap();
+                let page = match &offset.offset_pos.pos {
+                    PagePosition::Last => SnapPage(offset.page.0 + 1),
+                    _ => offset.page,
+                };
+                let Some(mut resp): Option<c2s::SnapPageRes> = req_get(&state().env.base_url, c2s::GetSnapPage {
                     channel: self1.0.id.clone(),
-                    offset: SnapOffset(
-                        page_for(
-                            self1.0.snap_page_size.get(),
-                            exenum!(time.id, ChatTimeId:: Channel(c) => c).unwrap().0 + 1,
-                        ),
-                    ),
+                    page: page,
                 }).await? else {
                     let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                         return Ok(());
@@ -402,6 +439,20 @@ impl Feed<ChatEntry> for ChannelFeed {
                     parent.respond_entries_after(&ChatFeedId::Channel(self1.0.id.clone()), &time, vec![], true);
                     return Ok(());
                 };
+                resp
+                    .messages
+                    .splice(
+                        0 ..
+                            resp
+                                .messages
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, v)| v.offset_pos.offset <= offset.offset_pos.offset)
+                                .map(|x| x.0)
+                                .last()
+                                .unwrap_or(0),
+                        [],
+                    );
                 {
                     let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                         return Ok(());
@@ -409,11 +460,11 @@ impl Feed<ChatEntry> for ChannelFeed {
                     parent.respond_entries_after(
                         &ChatFeedId::Channel(self1.0.id.clone()),
                         &time,
-                        create_entries(&eg, &self1.0.chat_state, resp.messages).await,
+                        create_entries(&eg, &self1.0.chat_state, page, resp.messages).await,
                         false,
                     );
                 }
-                self1.update_seen_time(&eg, resp.activity_offset);
+                self1.update_known_or_have_time(&eg, resp.latest_activity);
                 return Ok(());
             }
         }));

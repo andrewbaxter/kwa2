@@ -29,6 +29,7 @@ use {
     },
 };
 
+// POST/JSON data
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ModifyOption<T> {
@@ -371,14 +372,58 @@ reqresp!(pub proto {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct SnapOffset(pub usize);
 
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct SnapOffsetPos {
+    pub offset: SnapOffset,
+    pub pos: PagePosition,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct SnapPage(pub usize);
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum PagePosition {
+    First,
+    Middle,
+    Last,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct SnapPageOffsetPos {
+    pub page: SnapPage,
+    pub offset_pos: SnapOffsetPos,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ActivityOffset(pub usize);
 
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ActivityOffsetPos {
+    pub offset: ActivityOffset,
+    pub pos: PagePosition,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ActivityPage(pub usize);
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ActivityPageOffsetPos {
+    pub page: ActivityPage,
+    pub offset_pos: ActivityOffsetPos,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct SnapMessage {
-    pub offset: SnapOffset,
+    pub offset_pos: SnapOffsetPos,
     pub original_id: QualifiedMessageId,
     pub original_receive_time: Timestamp,
     pub client_id: Option<MessageClientId>,
@@ -388,13 +433,11 @@ pub struct SnapMessage {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct SnapPageRes {
-    pub offset: SnapOffset,
-    pub page_size: usize,
-    pub activity_offset: ActivityOffset,
-    pub activity_page_size: usize,
+    pub latest_activity: ActivityPageOffsetPos,
     pub messages: Vec<SnapMessage>,
 }
 
+// # GET/Path data
 pub trait PathReqTrait: Sized {
     type Resp: DeserializeOwned;
 
@@ -465,7 +508,7 @@ impl PathReqTrait for NotificationServerKey {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct SnapByRes {
     pub original_receive_time: Timestamp,
-    pub offset: SnapOffset,
+    pub offset: SnapPageOffsetPos,
 }
 
 pub struct SnapById {
@@ -481,7 +524,7 @@ impl PathReqTrait for SnapById {
         let mut parts = deserialize_path(path);
         confirm_path_const(&mut parts, "")?;
         confirm_path_const(&mut parts, PATH_PREFIX_SNAP_BY_ID)?;
-        let out = SnapById { id: QualifiedMessageId {
+        let out = Self { id: QualifiedMessageId {
             channel: QualifiedChannelId {
                 identity: confirm_path_element(&mut parts, "channel identity")?,
                 channel: ChannelId(confirm_path_element(&mut parts, "channel")?),
@@ -553,7 +596,7 @@ pub struct SnapPageContainingTime {
 const PATH_PREFIX_SNAP_PAGE_CONTAINING_TIME: &str = "snap_page_containing_time";
 
 impl PathReqTrait for SnapPageContainingTime {
-    type Resp = Option<SnapOffset>;
+    type Resp = Option<SnapPage>;
 
     fn deserialize_path(path: &str) -> Result<Self, String> {
         let mut parts = deserialize_path(path);
@@ -582,26 +625,26 @@ impl PathReqTrait for SnapPageContainingTime {
     }
 }
 
-pub struct SnapPage {
+pub struct GetSnapPage {
     pub channel: QualifiedChannelId,
-    pub offset: SnapOffset,
+    pub page: SnapPage,
 }
 
 const PATH_PREFIX_SNAP_PAGE: &str = "snap_page";
 
-impl PathReqTrait for SnapPage {
+impl PathReqTrait for GetSnapPage {
     type Resp = Option<SnapPageRes>;
 
     fn deserialize_path(path: &str) -> Result<Self, String> {
         let mut parts = deserialize_path(path);
         confirm_path_const(&mut parts, "")?;
         confirm_path_const(&mut parts, PATH_PREFIX_SNAP_PAGE)?;
-        let out = SnapPage {
+        let out = GetSnapPage {
             channel: QualifiedChannelId {
                 identity: confirm_path_element(&mut parts, "channel identity")?,
                 channel: ChannelId(confirm_path_element(&mut parts, "channel")?),
             },
-            offset: SnapOffset(confirm_path_element(&mut parts, "snap offset")?),
+            page: SnapPage(confirm_path_element(&mut parts, "snap page")?),
         };
         confirm_path_empty(&mut parts)?;
         return Ok(out);
@@ -613,7 +656,7 @@ impl PathReqTrait for SnapPage {
                 PATH_PREFIX_SNAP_PAGE.to_string(),
                 self.channel.identity.to_string(),
                 self.channel.channel.0.to_string(),
-                self.offset.0.to_string(),
+                self.page.0.to_string(),
             ],
         );
     }
@@ -642,31 +685,37 @@ impl PathReqTrait for ActivityLatestAll {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ActivityPageRes {
-    pub offset: ActivityOffset,
-    pub messages: Vec<Message>,
+pub struct ActivityPageMessage {
+    pub message: Message,
+    pub offset_pos: ActivityOffsetPos,
 }
 
-pub struct ActivityPage {
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ActivityPageRes {
+    pub messages: Vec<ActivityPageMessage>,
+}
+
+pub struct GetActivityPage {
     pub channel: QualifiedChannelId,
-    pub offset: ActivityOffset,
+    pub page: ActivityPage,
 }
 
 const PATH_PREFIX_ACTIVITY_PAGE: &str = "activity_page";
 
-impl PathReqTrait for ActivityPage {
+impl PathReqTrait for GetActivityPage {
     type Resp = Option<ActivityPageRes>;
 
     fn deserialize_path(path: &str) -> Result<Self, String> {
         let mut parts = deserialize_path(path);
         confirm_path_const(&mut parts, "")?;
         confirm_path_const(&mut parts, PATH_PREFIX_ACTIVITY_PAGE)?;
-        let out = ActivityPage {
+        let out = GetActivityPage {
             channel: QualifiedChannelId {
                 identity: confirm_path_element(&mut parts, "channel identity")?,
                 channel: ChannelId(confirm_path_element(&mut parts, "channel")?),
             },
-            offset: ActivityOffset(confirm_path_element(&mut parts, "offset")?),
+            page: ActivityPage(confirm_path_element(&mut parts, "page")?),
         };
         confirm_path_empty(&mut parts)?;
         return Ok(out);
@@ -678,7 +727,7 @@ impl PathReqTrait for ActivityPage {
                 PATH_PREFIX_ACTIVITY_PAGE.to_string(),
                 self.channel.identity.to_string(),
                 self.channel.channel.0.to_string(),
-                self.offset.0.to_string(),
+                self.page.0.to_string(),
             ],
         );
     }

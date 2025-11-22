@@ -26,7 +26,9 @@ use {
             MessageClientId,
             QualifiedChannelId,
         },
-        wire::c2s::SnapOffset,
+        wire::c2s::{
+            SnapPageOffsetPos,
+        },
     },
     spaghettinuum::interface::identity::Identity,
     std::{
@@ -47,7 +49,7 @@ pub enum ChatFeedId {
 pub enum ChatTimeId {
     None,
     Outbox(MessageClientId),
-    Channel(SnapOffset),
+    Channel(SnapPageOffsetPos),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, PartialOrd, Ord, Hash)]
