@@ -83,6 +83,55 @@ pub struct IdentityDelete {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct IdentityList;
 
+// # Identity invitation
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IdentityInviteCreate {
+    #[serde(default)]
+    pub idem: Option<String>,
+    pub memo_short: String,
+    pub memo_long: String,
+    pub identity: Identity,
+    #[serde(default)]
+    pub single_use: bool,
+    #[serde(default)]
+    pub expiry: Option<Timestamp>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IdentityInviteRes {
+    pub id: IdentityInviteId,
+    pub token: QualifiedIdentityInviteToken,
+    pub memo_short: String,
+    pub memo_long: String,
+    pub single_use: bool,
+    pub expiry: Option<Timestamp>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IdentityInviteModify {
+    pub id: IdentityInviteId,
+    #[serde(default)]
+    pub memo_short: Option<String>,
+    #[serde(default)]
+    pub memo_long: Option<String>,
+    #[serde(default)]
+    pub single_use: Option<bool>,
+    #[serde(default)]
+    pub expiry: Option<ModifyOption<Timestamp>>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IdentityInviteDelete {
+    pub id: IdentityInviteId,
+}
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IdentityInviteList;
+
 // # Channel group
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -180,54 +229,26 @@ pub struct ChannelJoinIdentity {
     pub code: String,
 }
 
-// # Identity invitation
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInviteCreate {
-    #[serde(default)]
-    pub idem: Option<String>,
-    pub memo_short: String,
-    pub memo_long: String,
-    pub identity: Identity,
-    #[serde(default)]
-    pub single_use: bool,
-    #[serde(default)]
-    pub expiry: Option<Timestamp>,
-}
-
+// # Channel member
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInviteRes {
-    pub id: IdentityInviteId,
-    pub token: QualifiedIdentityInviteToken,
-    pub memo_short: String,
-    pub memo_long: String,
-    pub single_use: bool,
-    pub expiry: Option<Timestamp>,
+pub enum ForeignMemoShort {
+    Confirmed(String),
+    Unconfirmed(String),
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInviteModify {
-    pub id: IdentityInviteId,
-    #[serde(default)]
-    pub memo_short: Option<String>,
-    #[serde(default)]
-    pub memo_long: Option<String>,
-    #[serde(default)]
-    pub single_use: Option<bool>,
-    #[serde(default)]
-    pub expiry: Option<ModifyOption<Timestamp>>,
+pub struct ChannelMemberList {
+    pub channel: QualifiedChannelId,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInviteDelete {
-    pub id: IdentityInviteId,
+pub struct ChannelMemberDelete {
+    pub channel: QualifiedChannelId,
+    pub member: Identity,
 }
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct IdentityInviteList;
 
 // # Channel invitation
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -278,25 +299,29 @@ pub struct ChannelInviteDelete {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelInviteList;
 
-// Channel member
+// Contacts
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ContactRes {
+    pub id: Identity,
+    pub memo_short: String,
+    pub memo_long: String,
+}
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MemberAdd {
-    pub channel: QualifiedChannelId,
-    pub identity: Identity,
+pub struct ContactList;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ContactModify {
+    pub id: Identity,
+    #[serde(default)]
+    pub memo_short: Option<String>,
+    #[serde(default)]
+    pub memo_long: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MemberDelete {
-    pub channel: QualifiedChannelId,
-    pub identity: Identity,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MemberList {}
-
+// Message
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessagePush {
@@ -306,36 +331,6 @@ pub struct MessagePush {
     pub body: String,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MessageLastPage {
-    pub channel: QualifiedChannelId,
-    pub identity: Identity,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct MessagePageContaining {
-    pub channel: QualifiedChannelId,
-    pub identity: Identity,
-    pub message: MessageId,
-}
-
-// Other
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelOrChannelGroupGroup {
-    pub group: ChannelGroupRes,
-    pub children: Vec<ChannelRes>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum ChannelOrChannelGroup {
-    Channel(ChannelRes),
-    ChannelGroup(ChannelOrChannelGroupGroup),
-}
-
 reqresp!(pub proto {
     Logout(Logout) =>(),
     NotificationRegister(NotificationRegister) =>(),
@@ -343,6 +338,10 @@ reqresp!(pub proto {
     IdentityModify(IdentityModify) => IdentityRes,
     IdentityDelete(IdentityDelete) =>(),
     IdentityList(IdentityList) => Vec < IdentityRes >,
+    IdentityInviteCreate(IdentityInviteCreate) => IdentityInviteRes,
+    IdentityInviteModify(IdentityInviteModify) => IdentityInviteRes,
+    IdentityInviteDelete(IdentityInviteDelete) =>(),
+    IdentityInviteList(IdentityInviteList) => Vec < IdentityInviteRes >,
     ChannelGroupCreate(ChannelGroupCreate) => ChannelGroupRes,
     ChannelGroupModify(ChannelGroupModify) => ChannelGroupRes,
     ChannelGroupDelete(ChannelGroupDelete) =>(),
@@ -353,18 +352,14 @@ reqresp!(pub proto {
     ChannelModify(ChannelModify) => ChannelRes,
     ChannelDelete(ChannelDelete) =>(),
     ChannelList(ChannelList) => Vec < ChannelRes >,
-    //.    ChannelGet(ChannelGet) => ChannelRes,
-    IdentityInviteCreate(IdentityInviteCreate) => IdentityInviteRes,
-    IdentityInviteModify(IdentityInviteModify) => IdentityInviteRes,
-    IdentityInviteDelete(IdentityInviteDelete) =>(),
-    IdentityInviteList(IdentityInviteList) => Vec < IdentityInviteRes >,
+    ChannelMemberList(ChannelMemberList) => Vec < Identity >,
+    ChannelMemberDelete(ChannelMemberDelete) =>(),
     ChannelInviteCreate(ChannelInviteCreate) => ChannelInviteRes,
     ChannelInviteModify(ChannelInviteModify) => ChannelInviteRes,
     ChannelInviteDelete(ChannelInviteDelete) =>(),
     ChannelInviteList(ChannelInviteList) => Vec < ChannelInviteRes >,
-    //.    MemberAdd(MemberAdd) =>(),
-    //.    MemberDelete(MemberDelete) =>(),
-    //.    MemberList(MemberList) => Vec < Identity >,
+    ContactList(ContactList) => Vec < ContactRes >,
+    ContactModify(ContactModify) => ContactRes,
     MessagePush(MessagePush) =>(),
 });
 
@@ -438,6 +433,8 @@ pub struct SnapPageRes {
 }
 
 // # GET/Path data
+//
+// ---
 pub trait PathReqTrait: Sized {
     type Resp: DeserializeOwned;
 

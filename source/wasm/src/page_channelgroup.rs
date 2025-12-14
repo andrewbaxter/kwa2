@@ -21,6 +21,7 @@ use {
         infinite::{
             Entry,
             Infinite,
+            InfiniteEls,
         },
         js::{
             LogJsErr,
@@ -198,7 +199,11 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
             mode: mode.clone(),
         });
         chat_state2 = Rc::new(ChatState2 { channel_lookup: Default::default() });
-        inf = Infinite::new(&pc.eg());
+        inf = Infinite::new(&pc.eg(), InfiniteEls {
+            center_spinner: style_export::leaf_chat_spinner_center().root,
+            early_spinner: style_export::leaf_chat_spinner_early().root,
+            late_spinner: style_export::leaf_chat_spinner_late().root,
+        });
         inf.add_feed(ChatFeedId::Controls, FeedControls::new(mode.clone(), chat_state.clone()));
         *state().current_chat.borrow_mut() = Some(CurrentChat {
             source: CurrentChatSource::Group(m.id.clone()),

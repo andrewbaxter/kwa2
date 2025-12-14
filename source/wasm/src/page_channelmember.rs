@@ -1,27 +1,25 @@
 use {
     crate::{
         js::style_export,
-        localdata::get_or_req_api_channelinvite,
+        localdata::{
+            get_or_req_api_contact,
+        },
         pageutil::{
-            build_nol_menu,
             LazyPage,
+            build_nol_menu,
         },
         state::{
-            ministate_octothorpe,
             Ministate,
-            MinistateChannelInvite,
+            MinistateChannelMember,
+            ministate_octothorpe,
         },
     },
     rooting::El,
-    shared::interface::shared::{
-        ChannelInviteId,
-        QualifiedChannelId,
-    },
 };
 
-pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
-    return build_nol_menu(&Ministate::ChannelInvites(channel.clone()), get_or_req_api_channelinvite(id, true), {
-        let channel = channel.clone();
+pub fn build(s: &MinistateChannelMember) -> El {
+    return build_nol_menu(&Ministate::ChannelMembers(s.channel.clone()), get_or_req_api_contact(&s.identity, true), {
+        let channel = s.channel.clone();
         move |local| LazyPage {
             center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
                 text: local.res.memo_short.clone(),
@@ -31,16 +29,16 @@ pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
                 //. .
                 style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: format!("Edit"),
-                    link: ministate_octothorpe(&Ministate::ChannelInviteEdit(MinistateChannelInvite {
+                    link: ministate_octothorpe(&Ministate::ChannelMemberEdit(MinistateChannelMember {
                         channel: channel.clone(),
-                        invite: local.res.id.clone(),
+                        identity: local.res.id.clone(),
                     })),
                 }).root,
                 style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: format!("Delete"),
-                    link: ministate_octothorpe(&Ministate::ChannelInviteDelete(MinistateChannelInvite {
+                    link: ministate_octothorpe(&Ministate::ChannelMemberDelete(MinistateChannelMember {
                         channel: channel.clone(),
-                        invite: local.res.id.clone(),
+                        identity: local.res.id.clone(),
                     })),
                 }).root,
             ],

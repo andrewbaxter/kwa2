@@ -17,7 +17,7 @@ use {
 
 pub fn build(identity: &Identity) -> El {
     return build_nol_menu(&Ministate::Identities, get_or_req_api_identity(identity, true), |local| LazyPage {
-        center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+        center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
             text: local.res.memo_short.clone(),
             link: None,
         }).root,

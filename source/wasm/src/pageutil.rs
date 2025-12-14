@@ -238,9 +238,9 @@ pub fn build_form(
         edit_bar_children: vec![button_ok],
         children: vec![
             //. .
-            style_export::cont_menu_bar(style_export::ContMenuBarArgs {
+            style_export::cont_head_bar(style_export::ContHeadBarArgs {
                 back_link: ministate_octothorpe(&back_link),
-                center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+                center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
                     text: title,
                     link: None,
                 }).root,
@@ -274,9 +274,9 @@ pub fn build_nol_form<
     }
     return style_export::cont_page_form(style_export::ContPageFormArgs {
         edit_bar_children: vec![button_ok],
-        children: [style_export::cont_menu_bar(style_export::ContMenuBarArgs {
+        children: [style_export::cont_head_bar(style_export::ContHeadBarArgs {
             back_link: ministate_octothorpe(&back_link),
-            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+            center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
                 text: title.to_string(),
                 link: None,
             }).root,
@@ -302,7 +302,7 @@ pub fn build_nol_menu<
             body = r.body;
         },
         NowOrLater::Later(v) => {
-            center = style_export::leaf_menu_bar_center_placeholder().root;
+            center = style_export::leaf_head_bar_center_placeholder().root;
             body = vec![el_async({
                 let center = center.clone();
                 async move {
@@ -317,7 +317,7 @@ pub fn build_nol_menu<
         },
     }
     return style_export::cont_page_menu(
-        style_export::ContPageMenuArgs { children: [style_export::cont_menu_bar(style_export::ContMenuBarArgs {
+        style_export::ContPageMenuArgs { children: [style_export::cont_head_bar(style_export::ContHeadBarArgs {
             back_link: ministate_octothorpe(&back_link),
             center: center,
             right: None,
@@ -345,9 +345,9 @@ pub fn build_nol_menu_title<
         },
     }
     return style_export::cont_page_menu(
-        style_export::ContPageMenuArgs { children: [style_export::cont_menu_bar(style_export::ContMenuBarArgs {
+        style_export::ContPageMenuArgs { children: [style_export::cont_head_bar(style_export::ContHeadBarArgs {
             back_link: ministate_octothorpe(&back_link),
-            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+            center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
                 text: title.to_string(),
                 link: None,
             }).root,

@@ -1,9 +1,7 @@
 use {
     crate::{
         api::req_post_json,
-        js::{
-            LogJsErr,
-        },
+        js::LogJsErr,
         state::state,
     },
     flowcontrol::shed,
@@ -15,9 +13,9 @@ use {
     jiff::Timestamp,
     rooting::spawn_rooted,
     serde::{
-        de::DeserializeOwned,
         Deserialize,
         Serialize,
+        de::DeserializeOwned,
     },
     shared::interface::{
         shared::{
@@ -31,6 +29,7 @@ use {
             ChannelGroupRes,
             ChannelInviteRes,
             ChannelRes,
+            ContactRes,
             IdentityInviteRes,
             IdentityRes,
         },
@@ -43,6 +42,7 @@ use {
     wasm_bindgen_futures::spawn_local,
 };
 
+// # Generic
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct LocalValue<T> {
@@ -54,7 +54,7 @@ fn get_stored_values<
     'de,
     V: Serialize + DeserializeOwned,
     K: PartialEq,
->(k: &'static str, access_id: fn(&V) -> K, touch: Option<&K>) -> Vec<LocalValue<V>> {
+>(k: &str, access_id: fn(&V) -> K, touch: Option<&K>) -> Vec<LocalValue<V>> {
     let mut out = match LocalStorage::get::<Vec<LocalValue<V>>>(k) {
         Ok(identities) => identities,
         Err(e) => {
@@ -87,7 +87,7 @@ async fn req_api_values<
     V: Serialize + DeserializeOwned,
     R: c2s::proto::ReqTrait<Resp = Vec<V>>,
     K: Eq + Hash,
->(k: &'static str, r: R, access_id: fn(&V) -> K, touch: Option<&K>) -> Result<Vec<LocalValue<V>>, String> {
+>(k: &str, r: R, access_id: fn(&V) -> K, touch: Option<&K>) -> Result<Vec<LocalValue<V>>, String> {
     let old_vs =
         get_stored_values(k, access_id, None)
             .into_iter()
@@ -147,7 +147,7 @@ fn get_or_req_api_value<
     V: 'static + Serialize + DeserializeOwned,
     R: 'static + c2s::proto::ReqTrait<Resp = Vec<V>>,
     K: 'static + Eq + Hash,
->(cat_key: &'static str, r: R, access_id: fn(&V) -> K, id: K, touch: bool) -> NowOrLater<LocalValue<V>> {
+>(cat_key: &str, r: R, access_id: fn(&V) -> K, id: K, touch: bool) -> NowOrLater<LocalValue<V>> {
     match get_stored_values(cat_key, access_id, if touch {
         Some(&id)
     } else {
@@ -157,21 +157,24 @@ fn get_or_req_api_value<
             return NowOrLater::Now(local);
         },
         None => {
-            return NowOrLater::Later(spawn_rooted(async move {
-                let local = match req_api_values(cat_key, r, access_id, if touch {
-                    Some(&id)
-                } else {
-                    None
-                }).await {
-                    Ok(v) => v,
-                    Err(e) => {
-                        return Err(e);
-                    },
-                };
-                let Some(local) = local.into_iter().find(|x| access_id(&x.res) == id) else {
-                    return Ok(None);
-                };
-                return Ok(Some(local));
+            return NowOrLater::Later(spawn_rooted({
+                let cat_key = cat_key.to_string();
+                async move {
+                    let local = match req_api_values(&cat_key, r, access_id, if touch {
+                        Some(&id)
+                    } else {
+                        None
+                    }).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return Err(e);
+                        },
+                    };
+                    let Some(local) = local.into_iter().find(|x| access_id(&x.res) == id) else {
+                        return Ok(None);
+                    };
+                    return Ok(Some(local));
+                }
             }));
         },
     }
@@ -181,7 +184,7 @@ async fn ensure_api_value<
     'de,
     V: Serialize + DeserializeOwned,
     K: PartialEq,
->(k: &'static str, access_id: fn(&V) -> K, v: V) {
+>(k: &str, access_id: fn(&V) -> K, v: V) {
     let mut values = get_stored_values(k, access_id, None);
     let found = values.iter().enumerate().find_map(|(i, x)| if access_id(&x.res) == access_id(&v) {
         Some(i)
@@ -204,7 +207,7 @@ async fn delete_api_value<
     'de,
     V: Serialize + DeserializeOwned,
     K: PartialEq,
->(k: &'static str, access_id: fn(&V) -> K, v: V) {
+>(k: &str, access_id: fn(&V) -> K, v: V) {
     let values = get_stored_values(k, access_id, None);
     let values = values.iter().filter(|x| access_id(&x.res) != access_id(&v)).collect::<Vec<_>>();
     LocalStorage::set(k, values).log(&state().log, &format_args!("Failed to set local storage at key [{}]", k));
@@ -299,15 +302,15 @@ const LOCALSTORAGE_CHANNELS: &str = "channels";
 pub type LocalChannel = LocalValue<ChannelRes>;
 
 pub fn get_stored_api_channels(touch: Option<&QualifiedChannelId>) -> Vec<LocalChannel> {
-    return get_stored_values(LOCALSTORAGE_IDENTITIES, |x| x.id.clone(), touch);
+    return get_stored_values(LOCALSTORAGE_CHANNELS, |x| x.id.clone(), touch);
 }
 
 pub async fn req_api_channels(touch: Option<&QualifiedChannelId>) -> Result<Vec<LocalChannel>, String> {
-    return req_api_values(LOCALSTORAGE_IDENTITIES, c2s::ChannelList, |x| x.id.clone(), touch).await;
+    return req_api_values(LOCALSTORAGE_CHANNELS, c2s::ChannelList, |x| x.id.clone(), touch).await;
 }
 
 pub fn get_or_req_api_channel(id: &QualifiedChannelId, touch: bool) -> NowOrLater<LocalChannel> {
-    return get_or_req_api_value(LOCALSTORAGE_IDENTITIES, c2s::ChannelList, |x| x.id.clone(), id.clone(), touch);
+    return get_or_req_api_value(LOCALSTORAGE_CHANNELS, c2s::ChannelList, |x| x.id.clone(), id.clone(), touch);
 }
 
 pub async fn ensure_channel(v: ChannelRes) {
@@ -318,7 +321,39 @@ pub async fn delete_channel(v: ChannelRes) {
     delete_api_value(LOCALSTORAGE_CHANNELS, |x| x.id.clone(), v).await;
 }
 
-// Identity invites
+// ChannelMember
+const PREFIX_LOCALSTORAGE_CHANNELMEMBERS: &str = "channelmembers";
+
+fn key_localstorage_channelmembers(channel: &QualifiedChannelId) -> String {
+    return format!("{}__{}__{}", PREFIX_LOCALSTORAGE_CHANNELMEMBERS, channel.identity.to_string(), channel.channel.0);
+}
+
+pub type LocalChannelMember = LocalValue<Identity>;
+
+pub fn get_stored_api_channelmembers(
+    channel: &QualifiedChannelId,
+    touch: Option<&Identity>,
+) -> Vec<LocalChannelMember> {
+    return get_stored_values(&key_localstorage_channelmembers(channel), |x| x.clone(), touch);
+}
+
+pub async fn req_api_channelmembers(
+    channel: &QualifiedChannelId,
+    touch: Option<&Identity>,
+) -> Result<Vec<LocalChannelMember>, String> {
+    return req_api_values(
+        &key_localstorage_channelmembers(channel),
+        c2s::ChannelMemberList { channel: channel.clone() },
+        |x| x.clone(),
+        touch,
+    ).await;
+}
+
+pub async fn delete_channelmember(channel: &QualifiedChannelId, v: Identity) {
+    delete_api_value(&key_localstorage_channelmembers(channel), |x| x.clone(), v).await;
+}
+
+// Channel invites
 const LOCALSTORAGE_CHANNEL_INVITES: &str = "channel_invites";
 pub type LocalChannelInvite = LocalValue<ChannelInviteRes>;
 
@@ -346,4 +381,28 @@ pub async fn ensure_channelinvite(v: ChannelInviteRes) {
 
 pub async fn delete_channelinvite(v: ChannelInviteRes) {
     delete_api_value(LOCALSTORAGE_CHANNEL_INVITES, |x| x.id.clone(), v).await;
+}
+
+// Contacts
+const LOCALSTORAGE_CONTACTS: &str = "contacts";
+pub type LocalContact = LocalValue<ContactRes>;
+
+pub fn get_stored_api_contacts(touch: Option<&Identity>) -> Vec<LocalContact> {
+    return get_stored_values(LOCALSTORAGE_CONTACTS, |x| x.id.clone(), touch);
+}
+
+pub async fn req_api_contacts(touch: Option<&Identity>) -> Result<Vec<LocalContact>, String> {
+    return req_api_values(LOCALSTORAGE_CONTACTS, c2s::ContactList, |x| x.id, touch).await;
+}
+
+pub fn get_or_req_api_contact(id: &Identity, touch: bool) -> NowOrLater<LocalContact> {
+    return get_or_req_api_value(LOCALSTORAGE_CONTACTS, c2s::ContactList, |x| x.id.clone(), id.clone(), touch);
+}
+
+pub async fn ensure_contact(v: ContactRes) {
+    ensure_api_value(LOCALSTORAGE_CONTACTS, |x| x.id, v).await;
+}
+
+pub async fn delete_contact(v: ContactRes) {
+    delete_api_value(LOCALSTORAGE_CONTACTS, |x| x.id, v).await;
 }

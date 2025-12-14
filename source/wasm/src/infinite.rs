@@ -88,12 +88,12 @@ use {
         ProcessingContext,
     },
     rooting::{
-        el,
         Container,
         ContainerEntry,
         El,
         ObserveHandle,
         ResizeObserver,
+        el,
     },
     std::{
         cell::{
@@ -115,12 +115,14 @@ use {
         },
     },
     wasm_bindgen::JsCast,
-    web_sys::HtmlElement,
+    web_sys::{
+        CssStyleDeclaration,
+        HtmlElement,
+    },
 };
 
 const PX_PER_CM: f64 = 96. / 2.54;
 const BUFFER: f64 = PX_PER_CM * 40.;
-const CSS_HIDE: &'static str = "hide";
 const MIN_RESERVE: usize = 50;
 const MAX_RESERVE: usize = MIN_RESERVE + 2 * 50;
 
@@ -136,6 +138,19 @@ impl ElExt for El {
 
     fn offset_height(&self) -> f64 {
         return self.raw().dyn_ref::<HtmlElement>().unwrap().offset_height() as f64;
+    }
+}
+
+fn el_style(el: &El) -> CssStyleDeclaration {
+    return el.raw().dyn_into::<HtmlElement>().unwrap().style();
+}
+
+fn set_el_hide(el: &El, hide: bool) {
+    let el = el_style(el);
+    if hide {
+        el.set_property("display", "none").unwrap();
+    } else {
+        el.remove_property("display").unwrap();
     }
 }
 
@@ -213,7 +228,7 @@ struct Infiniscroll_<E: Entry> {
     padding_pre: El,
     padding_post: El,
     outer_stack: El,
-    frame: El,
+    scroll_outer: El,
     cached_frame_height: Cell<f64>,
     content: El,
     content_layout: El,
@@ -450,28 +465,114 @@ impl<E: Entry> Clone for Infinite<E> {
     }
 }
 
+pub struct InfiniteEls {
+    pub center_spinner: El,
+    pub early_spinner: El,
+    pub late_spinner: El,
+}
+
 impl<E: 'static + Entry> Infinite<E> {
-    pub fn new(eg: &EventGraph) -> Self {
+    pub fn new(eg: &EventGraph, els: InfiniteEls) -> Self {
         let outer_stack = el("div").classes(&["infinite"]);
-        let frame = el("div").classes(&["frame"]);
-        let padding_pre = el("div").classes(&["inf_group"]);
-        let padding_post = el("div").classes(&["inf_group"]);
-        let content = el("div").classes(&["content"]);
-        let content_layout = el("div").classes(&["content_layout"]);
-        let content_lines_early_sticky = el("div").classes(&["sticky"]);
-        let content_lines_real = Container::new(el("div").classes(&["real"]));
-        let content_lines_late_sticky = el("div").classes(&["sticky"]);
-        let center_spinner = el("div").classes(&["center_spinner"]);
-        let early_spinner = el("div").classes(&["early_spinner", CSS_HIDE]);
-        let late_spinner = el("div").classes(&["late_spinner", CSS_HIDE]);
+        {
+            let s = el_style(&outer_stack);
+            s.set_property("flex-grow", "1").unwrap();
+            s.set_property("display", "grid").unwrap();
+            s.set_property("grid-template-rows", "1fr").unwrap();
+            s.set_property("max-height", "100%").unwrap();
+            s.set_property("max-width", "100%").unwrap();
+            s.set_property("justify-content", "stretch").unwrap();
+            s.set_property("align-items", "stretch").unwrap();
+        }
+        let scroll_outer = el("div").classes(&["scroll_outer"]);
+        {
+            let s = el_style(&scroll_outer);
+            s.set_property("flex-grow", "1").unwrap();
+            s.set_property("overflow-y", "scroll").unwrap();
+            s.set_property("scrollbar-width", "none").unwrap();
+            s.set_property("max-height", "100%").unwrap();
+            s.set_property("pointer-events", "initial").unwrap();
+            //. s.set_property("transition", "padding-top 0.2s ease-out, padding-bottom 0.2s ease-out").unwrap();
+        }
+
+        fn style_padding(e: El) -> El {
+            let s = el_style(&e);
+            s.set_property("display", "flex").unwrap();
+            s.set_property("flex-direction", "column").unwrap();
+            return e;
+        }
+
+        let padding_pre = style_padding(el("div"));
+        let padding_post = style_padding(el("div"));
+        let scroll_inner = el("div").classes(&["scroll_inner"]);
+        {
+            let s = el_style(&scroll_inner);
+            s.set_property("display", "flex").unwrap();
+            s.set_property("flex-direction", "column").unwrap();
+            s.set_property("position", "relative").unwrap();
+        }
+        let content_layout = el("div");
+        {
+            let s = el_style(&content_layout);
+            s.set_property("position", "absolute").unwrap();
+            s.set_property("display", "flex").unwrap();
+            s.set_property("flex-direction", "column").unwrap();
+        }
+
+        fn style_sticky(e: El) -> El {
+            e.ref_classes(&["real"]);
+            let s = el_style(&e);
+            s.set_property("position", "sticky").unwrap();
+            s.set_property("top", "0px").unwrap();
+            s.set_property("bottom", "0px").unwrap();
+            s.set_property("display", "flex").unwrap();
+            s.set_property("flex-direction", "column").unwrap();
+            return e;
+        }
+
+        let content_lines_early_sticky = style_sticky(el("div"));
+        let content_lines_real = Container::new({
+            let e = el("div").classes(&["real"]);
+            let s = el_style(&e);
+            s.set_property("display", "flex").unwrap();
+            s.set_property("flex-direction", "column").unwrap();
+            e
+        });
+        let content_lines_late_sticky = style_sticky(el("div"));
+
+        fn wrap_spinner(e: El) -> El {
+            let out = el("div").push(e);
+            let s = el_style(&out);
+            s.set_property("display", "flex").unwrap();
+            s.set_property("justify-content", "center").unwrap();
+            s.set_property("align-items", "center").unwrap();
+            return out;
+        }
+
+        let center_spinner = wrap_spinner(els.center_spinner);
+        let early_spinner = wrap_spinner(els.early_spinner);
+        let late_spinner = wrap_spinner(els.late_spinner);
+        set_el_hide(&early_spinner, true);
+        set_el_hide(&late_spinner, true);
+
+        fn set_el_col(e: El, col: &str) -> El {
+            let s = el_style(&e);
+            s.set_property("grid-column", col).unwrap();
+            s.set_property("grid-row", col).unwrap();
+            return e;
+        }
+
         outer_stack.ref_extend(
             vec![
-                frame.clone(),
-                el("div").extend(vec![padding_pre.clone(), center_spinner.clone(), padding_post.clone()])
+                set_el_col(scroll_outer.clone(), "1"),
+                set_el_col(
+                    el("div").extend(vec![padding_pre.clone(), center_spinner.clone(), padding_post.clone()]),
+                    "1",
+                )
             ],
         );
-        frame.ref_push(content.clone());
-        content.ref_push(content_layout.clone());
+        scroll_outer.ref_push(scroll_inner.clone());
+        scroll_inner.ref_push(content_layout.clone());
         content_layout.ref_extend(
             vec![
                 early_spinner.clone(),
@@ -485,11 +586,11 @@ impl<E: 'static + Entry> Infinite<E> {
             eg: eg.clone(),
             reset_time: Default::default(),
             outer_stack: outer_stack,
-            frame: frame.clone(),
+            scroll_outer: scroll_outer.clone(),
             cached_frame_height: Cell::new(0.),
             padding_pre: padding_pre.clone(),
             padding_post: padding_post.clone(),
-            content: content.clone(),
+            content: scroll_inner.clone(),
             content_layout: content_layout,
             logical_content_height: Cell::new(0.),
             logical_content_layout_offset: Cell::new(0.),
@@ -524,7 +625,7 @@ impl<E: 'static + Entry> Infinite<E> {
                 }
             }));
         }
-        frame.ref_on("scroll", {
+        scroll_outer.ref_on("scroll", {
             let state = state.weak();
             move |_event| {
                 let Some(state) = state.upgrade() else {
@@ -533,14 +634,14 @@ impl<E: 'static + Entry> Infinite<E> {
                 if state.0.mute_scroll.get() >= Instant::now() {
                     return;
                 }
-                state.0.logical_scroll_top.set(state.0.frame.raw().scroll_top() as f64);
+                state.0.logical_scroll_top.set(state.0.scroll_outer.raw().scroll_top() as f64);
                 state.0.scroll_reanchor();
                 state.0.transition_alignment_reanchor();
                 state.0.delay_shake.set(200);
                 state.shake();
             }
         });
-        frame.ref_on_resize({
+        scroll_outer.ref_on_resize({
             // Frame height change
             let state = state.weak();
             move |_, _, frame_height| {
@@ -555,7 +656,7 @@ impl<E: 'static + Entry> Infinite<E> {
                 state.shake();
             }
         });
-        content.ref_on_resize({
+        scroll_inner.ref_on_resize({
             // Content height change
             let state = state.weak();
             let old_content_height = Cell::new(-1.0f64);
@@ -567,7 +668,7 @@ impl<E: 'static + Entry> Infinite<E> {
                     return;
                 }
                 old_content_height.set(content_height);
-                state.0.frame.raw().set_scroll_top(state.0.logical_scroll_top.get().round() as i32);
+                state.0.scroll_outer.raw().set_scroll_top(state.0.logical_scroll_top.get().round() as i32);
                 state.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
             }
         });
@@ -579,7 +680,7 @@ impl<E: 'static + Entry> Infinite<E> {
                 };
                 state
                     .0
-                    .frame
+                    .scroll_outer
                     .raw()
                     .dyn_ref::<HtmlElement>()
                     .unwrap()
@@ -596,7 +697,7 @@ impl<E: 'static + Entry> Infinite<E> {
                 };
                 state
                     .0
-                    .frame
+                    .scroll_outer
                     .raw()
                     .dyn_ref::<HtmlElement>()
                     .unwrap()
@@ -967,18 +1068,9 @@ impl<E: 'static + Entry> Infinite<E> {
                     }
                 }
             }
-            self
-                .0
-                .center_spinner
-                .ref_modify_classes(&[(CSS_HIDE, !(self.0.real.borrow().is_empty() && requesting_early))]);
-            self
-                .0
-                .early_spinner
-                .ref_modify_classes(&[(CSS_HIDE, !(!self.0.real.borrow().is_empty() && requesting_early))]);
-            self
-                .0
-                .late_spinner
-                .ref_modify_classes(&[(CSS_HIDE, !(!self.0.real.borrow().is_empty() && requesting_late))]);
+            set_el_hide(&self.0.center_spinner, !(self.0.real.borrow().is_empty() && requesting_early));
+            set_el_hide(&self.0.early_spinner, !(!self.0.real.borrow().is_empty() && requesting_early));
+            set_el_hide(&self.0.late_spinner, !(!self.0.real.borrow().is_empty() && requesting_late));
             self.0.cached_real_offset.set(self.0.real.borrow().el().offset_top());
 
             // # Update alignment based on used space, stop states
@@ -1051,7 +1143,7 @@ impl<E: 'static + Entry> Infinite<E> {
                         )
                         .max(0.),
                 );
-            self.0.frame.raw().set_scroll_top(self.0.logical_scroll_top.get().round() as i32);
+            self.0.scroll_outer.raw().set_scroll_top(self.0.logical_scroll_top.get().round() as i32);
             self.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
         });
     }

@@ -19,12 +19,14 @@ use {
             Feed,
             WeakInfinite,
         },
+        opfs::{
+            opfs_list_dir,
+            opfs_read_json,
+        },
         outbox::{
             OPFS_FILENAME_MAIN,
             OutboxMessage,
-            opfs_list_dir,
             opfs_outbox_channel_dir,
-            opfs_read_json,
         },
         state::{
             spawn_rooted_log,

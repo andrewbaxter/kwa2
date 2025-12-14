@@ -4,14 +4,16 @@ use {
             req_get,
             req_post_json,
         },
+        opfs::{
+            opfs_delete,
+            opfs_list_dir,
+            opfs_read_json,
+        },
         outbox::{
             OPFS_FILENAME_MAIN,
             OutboxMessage,
             opfs_channel_dir_entries,
-            opfs_delete,
-            opfs_list_dir,
             opfs_outbox,
-            opfs_read_json,
         },
         state::{
             spawn_rooted_log,
@@ -21,9 +23,7 @@ use {
     flowcontrol::ta_return,
     futures::future::join_all,
     gloo::timers::callback::Interval,
-    lunk::{
-        EventGraph,
-    },
+    lunk::EventGraph,
     rooting::spawn_rooted,
     shared::interface::{
         shared::{

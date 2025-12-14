@@ -111,15 +111,15 @@ pub fn build(channel: &QualifiedChannelId) -> El {
     // Other widgets, assemble and return
     let out = style_export::cont_page_menu(style_export::ContPageMenuArgs { children: vec![
         //. .
-        style_export::cont_menu_bar(style_export::ContMenuBarArgs {
+        style_export::cont_head_bar(style_export::ContHeadBarArgs {
             back_link: ministate_octothorpe(&Ministate::Top),
-            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+            center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
                 text: format!("Invites"),
                 link: None,
             }).root,
             right: Some(
-                style_export::leaf_menu_bar_add(
-                    style_export::LeafMenuBarAddArgs {
+                style_export::leaf_menu_head_bar_right_add(
+                    style_export::LeafMenuHeadBarRightAddArgs {
                         link: ministate_octothorpe(&Ministate::ChannelInviteNew(channel.clone())),
                     },
                 ).root,

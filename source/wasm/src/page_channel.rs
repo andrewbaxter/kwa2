@@ -20,6 +20,7 @@ use {
         infinite::{
             Entry,
             Infinite,
+            InfiniteEls,
         },
         js::{
             LogJsErr,
@@ -90,7 +91,11 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
             entry_outbox_lookup: Default::default(),
             mode: mode.clone(),
         });
-        inf = Infinite::new(&pc.eg());
+        inf = Infinite::new(&pc.eg(), InfiniteEls {
+            center_spinner: style_export::leaf_chat_spinner_center().root,
+            early_spinner: style_export::leaf_chat_spinner_early().root,
+            late_spinner: style_export::leaf_chat_spinner_late().root,
+        });
         inf.add_feed(ChatFeedId::Controls, FeedControls::new(mode.clone(), chat_state.clone()));
         let f_c = ChannelFeed::new(chat_state.clone(), m.id.clone());
         inf.add_feed(ChatFeedId::Channel(m.id.clone()), f_c.clone());

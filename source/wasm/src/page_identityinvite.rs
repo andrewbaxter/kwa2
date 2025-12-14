@@ -21,7 +21,7 @@ pub fn build(identity: &Identity, id: &IdentityInviteId) -> El {
     return build_nol_menu(&Ministate::IdentityInvites(identity.clone()), greq_api_identityinvites(id, true), {
         let identity = identity.clone();
         move |local| LazyPage {
-            center: style_export::leaf_menu_bar_center(style_export::LeafMenuBarCenterArgs {
+            center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
                 text: local.res.memo_short.clone(),
                 link: None,
             }).root,

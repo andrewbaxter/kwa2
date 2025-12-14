@@ -30,6 +30,10 @@ use {
         page_channelinvite_edit,
         page_channelinvite_new,
         page_channelinvites,
+        page_channelmember,
+        page_channelmember_delete,
+        page_channelmember_edit,
+        page_channelmembers,
         page_identities,
         page_identity,
         page_identity_delete,
@@ -116,6 +120,13 @@ pub struct MinistateChannelSub {
     pub own_identity: Identity,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateChannelMember {
+    pub channel: QualifiedChannelId,
+    pub identity: Identity,
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MinistateChannelGroupResetId {
@@ -151,6 +162,10 @@ pub enum Ministate {
     IdentityInviteDelete(MinistateIdentityInvite),
     Channel(MinistateChannel),
     ChannelMenu(MinistateChannelSub),
+    ChannelMembers(QualifiedChannelId),
+    ChannelMember(MinistateChannelMember),
+    ChannelMemberEdit(MinistateChannelMember),
+    ChannelMemberDelete(MinistateChannelMember),
     ChannelEdit(MinistateChannelSub),
     ChannelDelete(MinistateChannelSub),
     ChannelInvites(QualifiedChannelId),
@@ -308,6 +323,18 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
         },
         Ministate::ChannelDelete(s) => {
             body = page_channel_delete::build(pc, s);
+        },
+        Ministate::ChannelMembers(s) => {
+            body = page_channelmembers::build(&s);
+        },
+        Ministate::ChannelMember(s) => {
+            body = page_channelmember::build(s);
+        },
+        Ministate::ChannelMemberEdit(s) => {
+            body = page_channelmember_edit::build(pc, s);
+        },
+        Ministate::ChannelMemberDelete(s) => {
+            body = page_channelmember_delete::build(pc, s);
         },
         Ministate::ChannelInvites(s) => {
             body = page_channelinvites::build(s);

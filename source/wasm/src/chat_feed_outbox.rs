@@ -11,12 +11,12 @@ use {
             Feed,
             WeakInfinite,
         },
+        opfs::opfs_read_json,
         outbox::{
             OPFS_FILENAME_MAIN,
             OutboxMessage,
             opfs_channel_dir_entries,
             opfs_outbox_channel_dir,
-            opfs_read_json,
         },
         state::{
             spawn_rooted_log,

@@ -274,7 +274,7 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
         identities_link: ministate_octothorpe(&Ministate::Identities),
         settings_link: ministate_octothorpe(&Ministate::Settings),
         add_link: ministate_octothorpe(&Ministate::TopAdd),
-        body: channel_elements,
+        body: vec![channel_elements],
     });
 
     // Assemble and return

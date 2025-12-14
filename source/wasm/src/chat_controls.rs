@@ -15,13 +15,13 @@ use {
             configure_async_button_once,
             style_export,
         },
+        opfs::opfs_write_json,
         outbox::{
             OPFS_FILENAME_MAIN,
             OutboxMessage,
             OutboxMessageReplyTo,
             opfs_outbox_channel_dir,
             opfs_outbox_message_dir,
-            opfs_write_json,
         },
         state::state,
     },
@@ -36,9 +36,9 @@ use {
 };
 
 pub fn build_chat_entry_controls(pc: &mut ProcessingContext, m: &ChatEntryControls) -> El {
-    let out = style_export::leaf_chat_entry_controls();
+    let out = style_export::cont_chat_controls_as_entry();
     if !m.state.channels_meta.borrow().is_empty() {
-        out.root.ref_push(style_export::leaf_chat_entry_control_new_message().root.on("click", {
+        out.root.ref_push(style_export::leaf_chat_controls_as_entry_button_new_message().root.on("click", {
             let eg = pc.eg();
             let channels = m.state.channels_meta.clone();
             let mode = m.mode.clone();
@@ -73,14 +73,17 @@ pub fn build_controls(
             (chat_state = chat_state, chat_state2 = chat_state2, inf_post = inf_post.weak()) {
                 let inf_post = inf_post.upgrade()?;
                 inf_post.ref_clear();
+                let inf_post_replace;
                 match &*mode.borrow() {
-                    ChatMode::None => { },
+                    ChatMode::None => {
+                        inf_post_replace = vec![];
+                    },
                     ChatMode::MessageChannelSelect => {
                         let mut children = vec![];
                         for channel in &*chat_state.channels_meta.borrow() {
                             children.push(
-                                style_export::leaf_chat_controls_menu_button(
-                                    style_export::LeafChatControlsMenuButtonArgs { text: channel.0.clone() },
+                                style_export::leaf_chat_controls_mode_menu_button(
+                                    style_export::LeafChatControlsModeMenuButtonArgs { text: channel.0.clone() },
                                 )
                                     .root
                                     .on("click", {
@@ -97,9 +100,15 @@ pub fn build_controls(
                                     }),
                             );
                         }
+                        inf_post_replace =
+                            vec![
+                                style_export::cont_chat_controls_mode_menu(
+                                    style_export::ContChatControlsModeMenuArgs { children: children },
+                                ).root
+                            ];
                     },
                     ChatMode::TopMessage(c) => {
-                        let controls = style_export::leaf_chat_controls_message();
+                        let controls = style_export::leaf_chat_controls_mode_message();
                         controls.close.ref_on("click", {
                             let mode = mode.clone();
                             let eg = pc.eg();
@@ -147,10 +156,10 @@ pub fn build_controls(
                                 }).unwrap();
                             }
                         });
-                        inf_post.ref_push(controls.root);
+                        inf_post_replace = vec![controls.root];
                     },
                     ChatMode::ReplyMessage(c) => {
-                        let controls = style_export::leaf_chat_controls_message();
+                        let controls = style_export::leaf_chat_controls_mode_message();
                         controls.close.ref_on("click", {
                             let mode = mode.clone();
                             let eg = pc.eg();
@@ -209,9 +218,10 @@ pub fn build_controls(
                                 }).unwrap();
                             }
                         });
-                        inf_post.ref_push(controls.root);
+                        inf_post_replace = vec![controls.root];
                     },
                 }
+                inf_post.ref_extend(inf_post_replace);
             }
         ),
     );

@@ -23,10 +23,10 @@ pub fn build_chat_entry_message(pc: &mut ProcessingContext, m: &ChatEntryMessage
                 root.ref_push(style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root);
             },
             ChatEntryMessageInternal::Deleted => {
-                root.ref_push(style_export::leaf_chat_entry_message_deleted().root);
+                root.ref_push(style_export::leaf_chat_entry_mode_deleted().root);
             },
             ChatEntryMessageInternal::Message(m) => {
-                let m_el = style_export::leaf_chat_entry_message();
+                let m_el = style_export::leaf_chat_entry_mode_message();
                 m_el.root.ref_own(|_| link!((_pc = pc), (body = m.body.clone()), (), (body_el = m_el.body.clone()) {
                     body_el.ref_text(&*body.borrow());
                 }));

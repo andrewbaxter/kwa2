@@ -43,3 +43,6 @@ http-body-util = "0.1"
 
 [build-dependencies]
 good-ormning = { version = "0.4", features = ["jiff", "sqlite"] }
+
+[lints.clippy]
+all = "allow"
