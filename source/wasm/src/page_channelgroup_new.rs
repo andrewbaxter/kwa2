@@ -1,16 +1,12 @@
 use {
     crate::{
         api::req_post_json,
-        pageutil::{
-            build_form,
-        },
-        localdata::{
-            self,
-        },
+        pageutil::build_form,
         state::{
-            goto_replace_ministate,
-            state,
             Ministate,
+            goto_replace_ministate,
+            pull_top,
+            state,
         },
     },
     lunk::ProcessingContext,
@@ -41,12 +37,12 @@ pub fn build(pc: &mut ProcessingContext) -> El {
             let Ok(new_values) = form_state.parse() else {
                 return Ok(());
             };
-            let res = req_post_json(&state().env.base_url, c2s::ChannelGroupCreate {
+            req_post_json(&state().env.base_url, c2s::ChannelGroupCreate {
                 idem: Some(idem.to_string()),
                 memo_short: new_values.memo_short,
                 memo_long: new_values.memo_long,
             }).await?;
-            localdata::ensure_channelgroup(res).await;
+            pull_top(&eg).await;
             eg.event(|pc| {
                 goto_replace_ministate(pc, &state().log, &Ministate::Top);
             }).unwrap();

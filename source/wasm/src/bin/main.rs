@@ -16,6 +16,13 @@ use {
     lunk::EventGraph,
     rooting::set_root,
     serde::Deserialize,
+    shared::interface::{
+        shared::QualifiedChannelId,
+        wire::{
+            c2s::ActivityOffset,
+            s2c,
+        },
+    },
     std::{
         cell::RefCell,
         panic,
@@ -36,6 +43,11 @@ use {
                 self,
             },
         },
+        localdata::{
+            get_stored_api_channelgroups,
+            get_stored_api_channels,
+        },
+        page_top,
         serviceworker_proto::FromSw,
         state::{
             LOCALSTORAGE_PWA_MINISTATE,
@@ -44,10 +56,13 @@ use {
             STATE,
             State_,
             build_ministate,
+            get_setting_wide_view,
             read_ministate,
             record_replace_ministate,
             state,
+            merge_top,
         },
+        websocket::Ws,
     },
     wasm_bindgen::{
         JsCast,
@@ -67,6 +82,7 @@ pub fn main() {
     let log = log1.clone() as Rc<dyn Log>;
     eg.event(|pc| {
         let env = scan_env(&log);
+        let wide_view = get_setting_wide_view();
         let service_worker = bg_val(async {
             let sw =
                 JsFuture::from(window().navigator().service_worker().register("./serviceworker.js"))
@@ -81,7 +97,9 @@ pub fn main() {
             eg: pc.eg(),
             current_chat: Default::default(),
             service_worker: service_worker,
-            root: root.clone(),
+            page_root: root.clone(),
+            wide_view: wide_view,
+            top: lunk::List::new(vec![]),
             ministate: RefCell::new(shed!{
                 'found _;
                 shed!{
@@ -132,6 +150,9 @@ pub fn main() {
             bg_pulling_interval: Default::default(),
             bg_pulling: Default::default(),
         })));
+        let cs = get_stored_api_channels(None);
+        let cgs = get_stored_api_channelgroups(None);
+        merge_top(pc, cs, cgs);
 
         // Load initial view
         build_ministate(pc, &state().ministate.borrow());
@@ -149,6 +170,19 @@ pub fn main() {
                 build_ministate(pc, &ministate);
             }).unwrap()
         }).forget();
+
+        fn handle_notification(eg: &EventGraph, channel: &QualifiedChannelId, offset: ActivityOffset) {
+            let state = state();
+            let current_chat = state.current_chat.borrow();
+            let Some(c) = &*current_chat else {
+                return;
+            };
+            let cf = c.chat_state2.channel_lookup.borrow();
+            if let Some(f) = cf.get(channel) {
+                f.channel.notify(eg, offset);
+            }
+        }
+
         EventListener::new(&window().navigator().service_worker(), "message", {
             let eg = pc.eg();
             move |ev| {
@@ -165,36 +199,42 @@ pub fn main() {
                         document().location().unwrap().reload().expect("Error triggering reload");
                     },
                     FromSw::Notification(n) => {
-                        let state = state();
-                        let current_chat = state.current_chat.borrow();
-                        let Some(c) = &*current_chat else {
-                            return;
-                        };
-                        let cf = c.chat_state2.channel_lookup.borrow();
-                        if let Some(f) = cf.get(&n.channel) {
-                            f.channel.notify(&eg, n.offset);
-                        }
+                        handle_notification(&eg, &n.channel, n.offset);
                     },
                 }
                 ev.data();
             }
         }).forget();
         schedule_trigger_pull(pc.eg());
+        let ws: Rc<RefCell<Option<Ws<(), s2c::Notification>>>> = Rc::new(RefCell::new(None));
+        let create_ws = {
+            let ws = ws.clone();
+            let eg = pc.eg();
+            move || {
+                *ws.borrow_mut() = Some(Ws::new(state().log.clone(), &state().env.base_url, "", {
+                    let eg = eg.clone();
+                    move |_ws, m: s2c::Notification| {
+                        handle_notification(&eg, &m.channel, m.offset);
+                    }
+                }));
+            }
+        };
+        create_ws();
         EventListener::new(&window(), "focus", {
             let eg = pc.eg();
             move |_| {
                 schedule_trigger_pull(eg.clone());
+                create_ws();
             }
         }).forget();
         EventListener::new(&window(), "blur", {
             move |_| {
                 *state().bg_pulling_interval.borrow_mut() = None;
+                *ws.borrow_mut() = None;
             }
         }).forget();
         trigger_push();
-
-        // Root and display
-        set_root(vec![root.own(|_| (
+        root.ref_own(|_| (
             //. .
             EventListener::new(&window(), "message", |ev| {
                 let ev = ev.dyn_ref::<MessageEvent>().unwrap();
@@ -225,6 +265,16 @@ pub fn main() {
                     },
                 }
             }),
-        ))]);
+        ));
+
+        // Root and display
+        if wide_view {
+            set_root(vec![style_export::cont_root_wide(style_export::ContRootWideArgs {
+                menu: page_top::build(pc),
+                page: root,
+            }).root]);
+        } else {
+            set_root(vec![root]);
+        }
     });
 }

@@ -1,16 +1,16 @@
 use {
     crate::{
         api::req_post_json,
-        localdata,
         pageutil::{
-            build_form,
             FormIdentity,
+            build_form,
         },
         state::{
-            goto_replace_ministate,
-            state,
             Ministate,
             MinistateChannel,
+            goto_replace_ministate,
+            pull_top,
+            state,
         },
     },
     lunk::ProcessingContext,
@@ -118,7 +118,7 @@ pub fn build(pc: &mut ProcessingContext) -> El {
                     }).await?;
                 },
             }
-            localdata::ensure_channel(res.clone()).await;
+            pull_top(&eg).await;
             eg.event(|pc| {
                 goto_replace_ministate(pc, &state().log, &Ministate::Channel(MinistateChannel {
                     id: res.id.clone(),

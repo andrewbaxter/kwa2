@@ -1,21 +1,26 @@
 use {
     crate::{
-        api::req_post_json, localdata::{
-            self,
+        api::req_post_json,
+        localdata::{
             get_or_req_api_channelgroup,
-        }, pageutil::build_nol_form, state::{
+        },
+        pageutil::build_nol_form,
+        state::{
+            Ministate,
+            MinistateChannelGroup,
             goto_replace_ministate,
+            pull_top,
             state,
-            Ministate, MinistateChannelGroup,
-        }
+        },
     },
     lunk::ProcessingContext,
     rooting::El,
     rooting_forms::Form,
     shared::interface::{
-        shared::ChannelGroupId, wire::c2s::{
-                self,
-            }
+        shared::ChannelGroupId,
+        wire::c2s::{
+            self,
+        },
     },
     std::rc::Rc,
 };
@@ -29,7 +34,7 @@ struct Form_ {
 }
 
 pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
-    return build_nol_form(&Ministate::ChannelGroup(MinistateChannelGroup{
+    return build_nol_form(&Ministate::ChannelGroup(MinistateChannelGroup {
         id: id.clone(),
         reset_id: None,
     }), "Edit group", get_or_req_api_channelgroup(id, false).map({
@@ -57,9 +62,12 @@ pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
                         Some(new_values.memo_long)
                     },
                 }).await?;
-                localdata::ensure_channelgroup(res.clone()).await;
+                pull_top(&eg).await;
                 eg.event(|pc| {
-                    goto_replace_ministate(pc, &state().log, &Ministate::ChannelGroup(MinistateChannelGroup { id: res.id, reset_id: None }));
+                    goto_replace_ministate(pc, &state().log, &Ministate::ChannelGroup(MinistateChannelGroup {
+                        id: res.id,
+                        reset_id: None,
+                    }));
                 }).unwrap();
                 return Ok(());
             });

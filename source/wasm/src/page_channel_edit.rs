@@ -2,7 +2,6 @@ use {
     crate::{
         api::req_post_json,
         localdata::{
-            self,
             get_or_req_api_channel,
         },
         pageutil::{
@@ -14,16 +13,15 @@ use {
             MinistateChannel,
             MinistateChannelSub,
             goto_replace_ministate,
+            pull_top,
             state,
         },
     },
     lunk::ProcessingContext,
     rooting::El,
     rooting_forms::Form,
-    shared::interface::{
-        wire::c2s::{
-            self,
-        },
+    shared::interface::wire::c2s::{
+        self,
     },
     std::rc::Rc,
 };
@@ -76,7 +74,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                         Some(c2s::ModifyOption { value: new_values.group.0 })
                     },
                 }).await?;
-                localdata::ensure_channel(res.clone()).await;
+                pull_top(&eg).await;
                 eg.event(|pc| {
                     goto_replace_ministate(pc, &state().log, &&Ministate::Channel(MinistateChannel {
                         id: res.id.clone(),

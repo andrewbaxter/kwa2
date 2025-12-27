@@ -3,7 +3,6 @@ use {
         api::req_post_json,
         js::style_export,
         localdata::{
-            self,
             get_or_req_api_channel,
         },
         pageutil::build_nol_form,
@@ -12,6 +11,7 @@ use {
             MinistateChannel,
             MinistateChannelSub,
             goto_replace_ministate,
+            pull_top,
             state,
         },
     },
@@ -20,10 +20,8 @@ use {
         El,
         el,
     },
-    shared::interface::{
-        wire::c2s::{
-            self,
-        },
+    shared::interface::wire::c2s::{
+        self,
     },
 };
 
@@ -45,7 +43,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
             ],
             async move |_idem| {
                 req_post_json(&state().env.base_url, c2s::ChannelDelete { id: local.res.id.clone() }).await?;
-                localdata::delete_channel(local.res.clone()).await;
+                pull_top(&eg).await;
                 eg.event(|pc| {
                     goto_replace_ministate(pc, &state().log, &Ministate::Top);
                 }).unwrap();

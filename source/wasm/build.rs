@@ -114,6 +114,18 @@ fn main() {
             returns: vec![("root", &el_)],
         },
         // /////////////////////////////////////////////////////////////////////////////
+        // xx Components, styles: root
+        Func {
+            name: "contRootWide",
+            args: vec![("menu", &el_), ("page", &el_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contPageBlank",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        // /////////////////////////////////////////////////////////////////////////////
         // xx Components, styles: menu, form, top
         Func {
             name: "leafMenuLink",

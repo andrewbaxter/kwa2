@@ -289,14 +289,6 @@ pub fn get_or_req_api_channelgroup(id: &ChannelGroupId, touch: bool) -> NowOrLat
     );
 }
 
-pub async fn ensure_channelgroup(v: ChannelGroupRes) {
-    ensure_api_value(LOCALSTORAGE_CHANNELGROUPS, |x| x.id, v).await;
-}
-
-pub async fn delete_channelgroup(v: ChannelGroupRes) {
-    delete_api_value(LOCALSTORAGE_CHANNELGROUPS, |x| x.id, v).await;
-}
-
 // Channel
 const LOCALSTORAGE_CHANNELS: &str = "channels";
 pub type LocalChannel = LocalValue<ChannelRes>;
@@ -311,14 +303,6 @@ pub async fn req_api_channels(touch: Option<&QualifiedChannelId>) -> Result<Vec<
 
 pub fn get_or_req_api_channel(id: &QualifiedChannelId, touch: bool) -> NowOrLater<LocalChannel> {
     return get_or_req_api_value(LOCALSTORAGE_CHANNELS, c2s::ChannelList, |x| x.id.clone(), id.clone(), touch);
-}
-
-pub async fn ensure_channel(v: ChannelRes) {
-    ensure_api_value(LOCALSTORAGE_CHANNELS, |x| x.id.clone(), v).await;
-}
-
-pub async fn delete_channel(v: ChannelRes) {
-    delete_api_value(LOCALSTORAGE_CHANNELS, |x| x.id.clone(), v).await;
 }
 
 // ChannelMember

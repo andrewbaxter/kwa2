@@ -13,6 +13,7 @@ use {
         state::{
             Ministate,
             ministate_octothorpe,
+            set_setting_wide_view,
             state,
         },
     },
@@ -20,6 +21,7 @@ use {
         superif,
         ta_return,
     },
+    gloo::utils::window,
     js_sys::JSON,
     rooting::El,
     shared::interface::wire::c2s,
@@ -45,6 +47,27 @@ pub fn build() -> El {
             }).root,
             right: None,
         }).root,
+        if state().wide_view {
+            let button =
+                style_export::leaf_menu_button(
+                    style_export::LeafMenuButtonArgs { text: "Use mobile view".to_string() },
+                ).root;
+            button.ref_on("click", |_| {
+                set_setting_wide_view(false);
+                window().location().reload().unwrap();
+            });
+            button
+        } else {
+            let button =
+                style_export::leaf_menu_button(
+                    style_export::LeafMenuButtonArgs { text: "Use desktop view".to_string() },
+                ).root;
+            button.ref_on("click", |_| {
+                set_setting_wide_view(true);
+                window().location().reload().unwrap();
+            });
+            button
+        },
         el_async(async move {
             ta_return!(Vec < El >, String);
             if state().env.engine == Some(Engine::IosSafari) && !state().env.pwa {

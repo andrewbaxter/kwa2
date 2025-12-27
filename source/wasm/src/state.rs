@@ -13,6 +13,13 @@ use {
             LogJsErr,
             VecLog,
             get_dom_octothorpe,
+            style_export,
+        },
+        localdata::{
+            LocalChannel,
+            LocalChannelGroup,
+            req_api_channelgroups,
+            req_api_channels,
         },
         page_channel,
         page_channel_delete,
@@ -48,6 +55,11 @@ use {
         page_top,
         page_top_add,
     },
+    flowcontrol::{
+        exenum,
+        shed,
+        ta_return,
+    },
     futures::channel::oneshot,
     gloo::{
         storage::{
@@ -80,15 +92,18 @@ use {
     spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
+        collections::HashMap,
         future::Future,
         rc::Rc,
     },
+    tokio::join,
     wasm_bindgen::JsValue,
     wasm_bindgen_futures::spawn_local,
     web_sys::ServiceWorkerRegistration,
 };
 
 pub const LOCALSTORAGE_PWA_MINISTATE: &str = "pwa_ministate";
+pub const LOCALSTORAGE_WIDE_VIEW: &str = "wide_view";
 pub const SESSIONSTORAGE_POST_REDIRECT_MINISTATE: &str = "post_redirect";
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -236,14 +251,28 @@ pub struct CurrentChat {
     pub chat_state2: Rc<ChatState2>,
 }
 
+#[derive(Clone)]
+pub struct LocalChannelGroup1 {
+    pub v: LocalChannelGroup,
+    pub children: lunk::List<LocalChannel>,
+}
+
+#[derive(Clone)]
+pub enum LocalCocg {
+    Channel(LocalChannel),
+    ChannelGroup(LocalChannelGroup1),
+}
+
 pub struct State_ {
     pub eg: EventGraph,
     pub service_worker: BgVal<Result<ServiceWorkerRegistration, String>>,
-    pub root: El,
+    pub page_root: El,
     pub ministate: RefCell<Ministate>,
     pub env: Env,
     pub log: Rc<dyn Log>,
     pub log1: Rc<VecLog>,
+    pub wide_view: bool,
+    pub top: lunk::List<LocalCocg>,
     pub current_chat: RefCell<Option<CurrentChat>>,
     pub bg_pushing: RefCell<Option<oneshot::Receiver<()>>>,
     pub bg_pulling_interval: RefCell<Option<Interval>>,
@@ -259,7 +288,7 @@ pub fn state() -> Rc<State_> {
 }
 
 pub fn set_page(body: El) {
-    let r = &state().root;
+    let r = &state().page_root;
     r.ref_clear();
     r.ref_push(body);
 }
@@ -268,7 +297,11 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
     let body;
     match s {
         Ministate::Top => {
-            body = page_top::build(pc);
+            if state().wide_view {
+                body = style_export::cont_page_blank().root;
+            } else {
+                body = page_top::build(pc);
+            }
         },
         Ministate::Settings => {
             body = page_settings::build();
@@ -404,4 +437,158 @@ pub struct SessionStorageChatResetChannelGroup {
 pub enum SessionStorageChatReset {
     Channel(QualifiedMessageId),
     ChannelGroup(SessionStorageChatResetChannelGroup),
+}
+
+// Settings
+pub fn set_setting_wide_view(v: bool) {
+    LocalStorage::set(LOCALSTORAGE_WIDE_VIEW, if v {
+        "true"
+    } else {
+        "false"
+    }).unwrap();
+}
+
+pub fn get_setting_wide_view() -> bool {
+    return exenum!(LocalStorage::get::<String>(LOCALSTORAGE_WIDE_VIEW), Ok(x) => x).as_ref().map(|x| x.as_str()) ==
+        Some("true");
+}
+
+pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<LocalChannelGroup>) {
+    let mut lookup_new_child_cs = HashMap::<ChannelGroupId, HashMap<QualifiedChannelId, LocalChannel>>::new();
+    let mut lookup_new_top_cs = HashMap::new();
+    let mut lookup_new_top_cgs = HashMap::new();
+    for cg in cgs {
+        lookup_new_top_cgs.insert(cg.res.id.clone(), cg);
+    }
+    for channel in cs {
+        if let Some(g) = &channel.res.group {
+            lookup_new_child_cs.entry(*g).or_default().insert(channel.res.id.clone(), channel);
+        } else {
+            lookup_new_top_cs.insert(channel.res.id.clone(), channel);
+        }
+    }
+
+    struct RemoveChange {
+        offset: usize,
+        count: usize,
+    }
+
+    let mut top_removals: Vec<RemoveChange> = vec![];
+    for (top_i, old_top) in state().top.borrow_values().iter().enumerate().rev() {
+        let top_remove;
+        match old_top {
+            LocalCocg::Channel(old_top_c) => match lookup_new_top_cs.remove(&old_top_c.res.id) {
+                Some(_new_top_c) => {
+                    top_remove = false;
+                    // TODO sync values
+                },
+                None => {
+                    top_remove = true;
+                },
+            },
+            LocalCocg::ChannelGroup(old_top_cg) => match lookup_new_top_cgs.remove(&old_top_cg.v.res.id) {
+                Some(new_top_cg) => {
+                    top_remove = false;
+
+                    // TODO sync values
+                    if let Some(mut lookup_new_group_cs) = lookup_new_child_cs.remove(&new_top_cg.res.id) {
+                        let mut group_removals: Vec<RemoveChange> = vec![];
+                        for (group_i, old_group_c) in old_top_cg.children.borrow_values().iter().enumerate().rev() {
+                            let group_remove;
+                            match lookup_new_group_cs.remove(&old_group_c.res.id) {
+                                Some(_new_top_c) => {
+                                    group_remove = false;
+                                    // TODO sync values
+                                },
+                                None => {
+                                    group_remove = true;
+                                },
+                            }
+                            shed!{
+                                if !group_remove {
+                                    break;
+                                }
+                                if let Some(last) = group_removals.last_mut() {
+                                    if group_i + 1 == last.offset {
+                                        last.offset = group_i;
+                                        last.count += 1;
+                                        break;
+                                    }
+                                }
+                                group_removals.push(RemoveChange {
+                                    offset: group_i,
+                                    count: 1,
+                                });
+                            }
+                        }
+                        for removal in group_removals {
+                            old_top_cg.children.splice(pc, removal.offset, removal.count, vec![]);
+                        }
+                        let mut add = vec![];
+                        for (_, new_group_c) in lookup_new_group_cs {
+                            add.push(new_group_c)
+                        }
+                        old_top_cg.children.splice(pc, 0, 0, add);
+                    }
+                },
+                None => {
+                    top_remove = true;
+                },
+            },
+        }
+        shed!{
+            if !top_remove {
+                break;
+            }
+            if let Some(last) = top_removals.last_mut() {
+                if top_i + 1 == last.offset {
+                    last.offset = top_i;
+                    last.count += 1;
+                    break;
+                }
+            }
+            top_removals.push(RemoveChange {
+                offset: top_i,
+                count: 1,
+            });
+        }
+    }
+    for removal in top_removals {
+        state().top.splice(pc, removal.offset, removal.count, vec![]);
+    }
+    let mut add = vec![];
+    for (_, new_cg) in lookup_new_top_cgs {
+        let mut add_children = vec![];
+        if let Some(children) = lookup_new_child_cs.remove(&new_cg.res.id) {
+            for (_, child) in children {
+                add_children.push(child);
+            }
+        }
+        add.push(LocalCocg::ChannelGroup(LocalChannelGroup1 {
+            v: new_cg,
+            children: lunk::List::new(add_children),
+        }));
+    }
+    for (_, new_c) in lookup_new_top_cs {
+        add.push(LocalCocg::Channel(new_c));
+    }
+    state().top.splice(pc, 0, 0, add);
+}
+
+pub async fn pull_top(eg: &EventGraph) {
+    match async {
+        ta_return!((), String);
+        let (cs, cgs) = join!(req_api_channels(None), req_api_channelgroups(None));
+        let cs = cs?;
+        let cgs = cgs?;
+        eg.event(move |pc| {
+            merge_top(pc, cs, cgs);
+        }).unwrap();
+        return Ok(());
+    }.await {
+        Ok(_) => { },
+        Err(e) => {
+            state().log.log(&format!("Error pulling new top data: {}", e));
+        },
+    }
 }

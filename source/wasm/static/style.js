@@ -13,16 +13,6 @@
     return x;
   };
 
-  const uniq = /** @type {(...args: string[]) => string} */ (...args) => {
-    const lines = [];
-    for (const e of notnull(new Error().stack).matchAll(/(\d+):\d+/g)) {
-      lines.push(`${e[1]}`);
-    }
-    let uniq = [lines[1]];
-    uniq.push(...args);
-    return `r${uniq.join("_")}`;
-  };
-
   const e = /** @type {
     <N extends keyof HTMLElementTagNameMap>(
       name: N,
@@ -136,12 +126,22 @@
     id: string|[string],
     f: { [s: string]: (r: CSSStyleDeclaration) => void }
   ) => string} */ (id, f) => {
+    const uniq = /** @type {(...args: string[]) => string} */ (...args) => {
+      const lines = [];
+      for (const e of notnull(new Error().stack).matchAll(/(\d+):\d+/g)) {
+        lines.push(`${e[1]}`);
+      }
+      let uniq = [lines[1]];
+      uniq.push(...args);
+      return `r${uniq.join("_")}`;
+    };
+
     let id1 = typeof id == "string" ? uniq(id) : uniq(...id);
     if (staticStyles.has(id1)) {
       return id1;
     }
     for (const [suffix, f1] of Object.entries(f)) {
-      globalStyle.insertRule(`.${id}${suffix} {}`, 0);
+      globalStyle.insertRule(`.${id1}${suffix} {}`, 0);
       f1(/** @type { CSSStyleRule } */ (globalStyle.cssRules[0]).style);
     }
     staticStyles.add(id1);
@@ -161,8 +161,7 @@
   const textIconCopy = "\ue14d";
   const textIconLogin = "\uea77";
   const textIconLogout = "\ue9ba";
-  const textIconFoldClosed = "\ue316";
-  const textIconFoldOpened = "\ue313";
+  const textIconFoldArrow = "\ue5e1";
   const textIconClose = "\ue5cd";
   const textIconSend = "\ue163";
   const textIconEdit = "\ue3c9";
@@ -170,7 +169,7 @@
   // xx Variables
   const varCBackground = vs(
     "background",
-    "rgb(230, 232, 238)",
+    "rgb(242, 243, 249)",
     "rgb(70, 73, 77)"
   );
   const varCForeground = vs(
@@ -183,6 +182,9 @@
     "rgb(154, 60, 74)",
     "rgb(243, 69, 95)"
   );
+
+  const varFMenu = "16pt";
+  const varSTopButtonGeneric = "1.5cm";
 
   // xx State classes
 
@@ -305,31 +307,162 @@
   };
 
   // /////////////////////////////////////////////////////////////////////////////
+  // xx Components, styles: root
+
+  presentation.contRootWide = /** @type { Presentation["contRootWide"] } */ (
+    args
+  ) => {
+    return {
+      root: e(
+        "div",
+        {},
+        {
+          styles_: [
+            s("cont_root_wide", {
+              "": (s) => {
+                s.display = "grid";
+                s.gridTemplateColumns = "min(25dvw, 8cm) auto";
+              },
+            }),
+          ],
+          children_: [
+            e(
+              "div",
+              {},
+              {
+                styles_: [
+                  s("cont_root_wide_menu", {
+                    "": (s) => {
+                      s.gridColumn = "1";
+                    },
+                  }),
+                ],
+                children_: [args.menu],
+              }
+            ),
+            e(
+              "div",
+              {},
+              {
+                styles_: [
+                  s("cont_root_wide_page", {
+                    "": (s) => {
+                      s.gridColumn = "2";
+                    },
+                  }),
+                ],
+                children_: [args.page],
+              }
+            ),
+          ],
+        }
+      ),
+    };
+  };
+  presentation.contPageBlank = /** @type { Presentation["contPageBlank"] } */ (
+    args
+  ) => {
+    return { root: e("div", {}, {}) };
+  };
+
+  // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: menu, form, top
+
+  const menuItemStyle = s("leaf_menu_item", {
+    "": (s) => {
+      s.fontSize = varFMenu;
+      s.display = "flex";
+      s.alignItems = "center";
+      s.height = "1cm";
+    },
+  });
 
   presentation.leafMenuLink = /** @type { Presentation["leafMenuLink"] } */ (
     args
   ) => {
-    return { root: e("a", { textContent: args.text, href: args.link }, {}) };
+    return {
+      root: e(
+        "a",
+        { textContent: args.text, href: args.link },
+        { styles_: [menuItemStyle] }
+      ),
+    };
   };
 
   presentation.leafMenuButton =
     /** @type { Presentation["leafMenuButton"] } */ (args) => {
-      return { root: e("button", { textContent: args.text }, {}) };
+      return {
+        root: e(
+          "button",
+          { textContent: args.text },
+          { styles_: [menuItemStyle] }
+        ),
+      };
     };
 
+  const varMenuGroupIconSize = "1cm";
   presentation.leafMenuGroup = /** @type { Presentation["leafMenuGroup"] } */ (
     args
   ) => {
-    let groupEl = e("summary", {}, { children_: args.children });
+    const groupEl = e(
+      "div",
+      {},
+      {
+        styles_: [
+          contVboxStyle,
+          s("leaf_menu_group_group", {
+            "": (s) => {
+              s.marginLeft = "0.5cm";
+            },
+          }),
+        ],
+        children_: args.children,
+      }
+    );
     return {
       root: e(
         "details",
         {},
         {
+          styles_: [
+            s("leaf_menu_group_details", {
+              "": (s) => {},
+              ">summary:before": (s) => {
+                s.content = JSON.stringify(textIconFoldArrow);
+                s.pointerEvents = "initial";
+                s.fontFamily = "I";
+                s.flexGrow = "0";
+                s.display = "flex";
+                s.justifyContent = "center";
+                s.alignItems = "center";
+                s.width = varMenuGroupIconSize;
+                s.height = varMenuGroupIconSize;
+                s.marginLeft = `-${varMenuGroupIconSize}`;
+                s.fontSize = "0.7cm";
+              },
+              "[open]>summary:before": (s) => {
+                s.rotate = "90deg";
+              },
+              ">summary::marker": (s) => {
+                s.display = "none";
+                s.content = '""';
+              },
+            }),
+          ],
           children_: [
-            presentation.leafMenuLink({ text: args.text, link: args.link })
-              .root,
+            e(
+              "summary",
+              {},
+              {
+                styles_: [contHboxStyle],
+                children_: [
+                  presentation.leafMenuLink({
+                    text: args.text,
+                    link: args.link,
+                  }).root,
+                ],
+              }
+            ),
             groupEl,
           ],
         }
@@ -406,9 +539,20 @@
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: top
 
+  const paperStyle = s("paper", {
+    "": (s) => {
+      s.maskSize = "3cm, 3cm";
+      s.maskRepeat = "repeat";
+      s.maskPosition = "center";
+      s.maskImage = `url("paper_mask.png")`;
+      s.maskMode = "luminance";
+    },
+  });
+
   presentation.contPageTop = /** @type { Presentation["contPageTop"] } */ (
     args
   ) => {
+    const appiconSize = `min(20dvw, 1.5cm)`;
     const topButton =
       /** @type { (icon: string, link: string)=>HTMLElement} */ (
         icon,
@@ -417,7 +561,20 @@
         return e(
           "a",
           { href: link },
-          { children_: [leafIcon({ text: icon })] }
+          {
+            children_: [
+              leafIcon({
+                text: icon,
+                extraStyles: [
+                  s("cont_page_top_generic_button", {
+                    "": (s) => {
+                      s.height = "100%";
+                    },
+                  }),
+                ],
+              }),
+            ],
+          }
         );
       };
     return {
@@ -431,12 +588,66 @@
               "div",
               {},
               {
+                styles_: [
+                  contHboxStyle,
+                  s("cont_page_top_hbox_outer", {
+                    "": (s) => {
+                      s.padding = "0.2cm";
+                      s.gap = "0.2cm";
+                      s.alignItems = "center";
+                      s.justifyContent = "space-between";
+                    },
+                  }),
+                ],
                 children_: [
+                  e(
+                    "img",
+                    { src: "inapp_icon.svg" },
+                    {
+                      styles_: [
+                        paperStyle,
+                        s("cont_page_top_appicon", {
+                          "": (s) => {
+                            s.width = appiconSize;
+                            s.height = appiconSize;
+                          },
+                        }),
+                      ],
+                    }
+                  ),
                   e(
                     "div",
                     {},
                     {
+                      styles_: [
+                        contHboxStyle,
+                        s("page_top_menu_generic", {
+                          "": (s) => {
+                            s.position = "relative";
+                            s.height = `calc(${appiconSize} - 0.1cm)`;
+                            s.padding = "0.13cm";
+                            s.gap = "0.13cm";
+                          },
+                        }),
+                      ],
                       children_: [
+                        e(
+                          "div",
+                          {},
+                          {
+                            styles_: [
+                              paperStyle,
+                              s("cont_page_top_icons", {
+                                "": (s) => {
+                                  s.position = "absolute";
+                                  s.inset = "0";
+                                  s.border = `0.07cm solid ${varCForeground}`;
+                                  s.borderRadius = `0.3cm`;
+                                },
+                              }),
+                            ],
+                          }
+                        ),
                         topButton(textIconSettings, args.settingsLink),
                         topButton(textIconIdentities, args.identitiesLink),
                         topButton(textIconAdd, args.addLink),
@@ -446,7 +657,14 @@
                 ],
               }
             ),
-            ...args.body,
+            e(
+              "div",
+              {},
+              {
+                styles_: [contVboxStyle, nonchatPageStyle],
+                children_: args.body,
+              }
+            ),
           ],
         }
       ),
@@ -456,6 +674,13 @@
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: menu
 
+  const nonchatPageStyle = s("nonchat_cont_page", {
+    "": (s) => {
+      const padding = "0.3cm";
+      s.padding = padding;
+      s.paddingLeft = `calc(${padding} + ${varMenuGroupIconSize})`;
+    },
+  });
   presentation.contPageMenu = /** @type { Presentation["contPageMenu"] } */ (
     args
   ) => {
@@ -463,14 +688,18 @@
       root: e(
         "div",
         {},
-        { styles_: [contVboxStyle], children_: args.children }
+        {
+          styles_: [contVboxStyle, nonchatPageStyle],
+          children_: args.children,
+        }
       ),
     };
   };
 
   const leafIconStyle = s("icon", {
     "": (s) => {
-      s.display = "inline-grid";
+      //s.display = "inline-grid";
+      s.display = "grid";
       s.fontFamily = "I";
       s.gridTemplateColumns = "1fr";
       s.gridTemplateRows = "1fr";
@@ -545,6 +774,7 @@
         "div",
         {},
         {
+          styles_: [contVboxStyle, nonchatPageStyle],
           children_: [
             e(
               "div",
@@ -775,21 +1005,22 @@
 
   window.kwaPresentation = presentation;
 
-  addEventListener("DOMContentLoaded", async (_) => {
+  addEventListener("DOMContentLoaded", (_) => {
     const resetStyle = e(
       "link",
       { rel: "stylesheet", href: "style_reset.css" },
       {}
     );
     document.head.appendChild(resetStyle);
-    const htmlStyle = s(uniq("html"), {
-      "": (s) => {
-        s.fontFamily = "X";
-        s.backgroundColor = varCBackground;
-        s.color = varCForeground;
-      },
-    });
-    notnull(document.body.parentElement).classList.add(htmlStyle);
+    notnull(document.body.parentElement).classList.add(
+      s("html", {
+        "": (s) => {
+          s.fontFamily = "X";
+          s.backgroundColor = varCBackground;
+          s.color = varCForeground;
+        },
+      })
+    );
     document.body.classList.add(contStackStyle);
   });
 }
