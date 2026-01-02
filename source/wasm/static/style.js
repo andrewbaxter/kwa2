@@ -156,7 +156,7 @@
   const textIconSettings = "\ue8b8";
   const textIconIdentities = "\ue7fd";
   const textIconContacts = "\uf4ca";
-  const textIconBack = "\ue5e0";
+  const textIconBack = "\ue2ea";
   const textIconLink = "\ue157";
   const textIconCopy = "\ue14d";
   const textIconLogin = "\uea77";
@@ -172,19 +172,45 @@
     "rgb(242, 243, 249)",
     "rgb(70, 73, 77)"
   );
+  const varCBackgroundPageNonchat = vs(
+    "background-page",
+    "whitesmoke",
+    "rgb(70, 73, 77)"
+  );
+  const varCBackgroundPageChat = vs(
+    "background-chat",
+    "white",
+    "rgb(70, 73, 77)"
+  );
+  const varCBackgroundPageChatFade = `color-mix(in srgb, ${varCBackgroundPageChat} 50%, transparent)`;
   const varCForeground = vs(
     "c-foreground",
     "rgb(0, 0, 0)",
     "rgb(244, 255, 255)"
   );
+  const varCForegroundLight = `color-mix(in srgb, ${varCForeground} 80%, transparent)`;
+  const varCForegroundVeryLight = `color-mix(in srgb, ${varCForeground} 50%, transparent)`;
   const varCForegroundError = vs(
     "c-foreground-error",
     "rgb(154, 60, 74)",
     "rgb(243, 69, 95)"
   );
 
-  const varFMenu = "16pt";
-  const varSTopButtonGeneric = "1.5cm";
+  const varFMenu = "20pt";
+  const varFHeadBar = "16pt";
+
+  const varSHeadButton = "0.8cm";
+
+  const varPPage = "0.3cm";
+
+  const varWHead = "600";
+  const varWIconMenuDecor = "300";
+  const varWIconHead = "200";
+
+  const varLAsyncSvg = "0.02";
+  const varLThin = "0.06cm";
+
+  const varRHeadBarCenter = "1cm";
 
   // xx State classes
 
@@ -206,23 +232,37 @@
     root: e("div", {}, { styles_: [contGroupStyle], children_: args.children }),
   });
 
-  const spinnerStyle = s("spinner", {
+  const menuItemLineHeight = "1cm";
+  const paperStyle = s("paper", {
     "": (s) => {
-      s.color = `color-mix(in srgb, ${varCForeground} 70%, transparent)`;
-      s.width = "3cm";
-    },
-    " path": (s) => {
-      s.strokeDasharray = "1";
-      s.strokeDashoffset = "1";
+      s.maskSize = "3cm, 3cm";
+      s.maskRepeat = "repeat";
+      s.maskPosition = "center";
+      s.maskImage = `url("paper_mask.png")`;
+      s.maskMode = "luminance";
+      s.opacity = "0.8";
     },
   });
-  const varLAsync = "0.015";
+
+  const spinnerStyles = [
+    s("spinner", {
+      "": (s) => {
+        s.height = menuItemLineHeight;
+        //s.width = "3cm";
+      },
+      " path": (s) => {
+        s.strokeDasharray = "1";
+        s.strokeDashoffset = "1";
+      },
+    }),
+    paperStyle,
+  ];
   document.addEventListener("DOMContentLoaded", () => {
     /*
 CSS was designed by monkeys. In any other animation system, for 1. each property you'd define
 2. frame times (segments) and then 3. interpolation functions between them.
 
-In CSS, hierarchy wise, it seems like you define 1. a an interpolation function an animation time, and then
+In CSS, syntax/hierarchy wise, you'd expect to define 1. a an interpolation function an animation time, and then
 modify 2. properties over 3. segments of the curve. This is less useful and more painful but okay, whatever.
 
 The absurdly unintuitive truth, _counterindicated_ by the syntax: for 1. each property, 2. for each segment
@@ -319,32 +359,40 @@ svg.spinner4 path {
     if (sel < 0.25) {
       return et(
         `
-      <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${spinnerStyle} spinner1 ${paperStyle}">
-        <path fill="none" stroke="currentColor" stroke-width="${varLAsync}" pathLength="1" d="m 0.04276819,0.30609795 c 0.02501087,-0.0621192 0.02587843,-0.26140339 0.07010972,-0.25775973 0.0442308,0.0036438 0.0392081,0.24571051 0.0949588,0.24268559 0.0557507,-0.003024 0.044678,-0.19950842 0.10249788,-0.1955405 0.0578198,0.0039683 0.0658219,0.15775144 0.13449927,0.15586294 0.0686774,-0.001889 0.10746733,-0.0981084 0.17282507,-0.095961 0.0653576,0.002148 0.11054793,0.0614271 0.1828686,0.0649971 0.0723208,0.00357 0.0987762,-0.0464728 0.16302072,-0.0447597" />
+      <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${spinnerStyles.join(
+        " "
+      )} spinner1">
+        <path fill="none" stroke="currentColor" stroke-width="${varLAsyncSvg}" pathLength="1" d="m 0.04276819,0.30609795 c 0.02501087,-0.0621192 0.02587843,-0.26140339 0.07010972,-0.25775973 0.0442308,0.0036438 0.0392081,0.24571051 0.0949588,0.24268559 0.0557507,-0.003024 0.044678,-0.19950842 0.10249788,-0.1955405 0.0578198,0.0039683 0.0658219,0.15775144 0.13449927,0.15586294 0.0686774,-0.001889 0.10746733,-0.0981084 0.17282507,-0.095961 0.0653576,0.002148 0.11054793,0.0614271 0.1828686,0.0649971 0.0723208,0.00357 0.0987762,-0.0464728 0.16302072,-0.0447597" />
       </svg>
     `
       );
     } else if (sel < 0.5) {
       return et(
         `
-      <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${spinnerStyle} spinner2 ${paperStyle}">
-        <path fill="none" stroke="currentColor" stroke-width="${varLAsync}" pathLength="1" d="M 0.14254063,0.2938125 C 0.10301621,0.2571751 0.0885351,0.17576883 0.12872349,0.11336434 c 0.0401883,-0.06240458 0.17293408,-0.08274137 0.25797572,-0.003932 0.0850417,0.0788098 0.0269571,0.13671136 -0.039893,0.13923062 -0.0668499,0.002519 -0.0812133,-0.0627161 -0.0300127,-0.0891682 0.0512009,-0.0264521 0.15399772,0.020863 0.23776893,0.0435695 0.0837712,0.0227066 0.19943644,0.028629 0.27049542,4.1993e-4 0.0710589,-0.0282097 0.0922414,-0.0677874 0.0456478,-0.0856104" />
+      <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${spinnerStyles.join(
+        " "
+      )} spinner2">
+        <path fill="none" stroke="currentColor" stroke-width="${varLAsyncSvg}" pathLength="1" d="M 0.14254063,0.2938125 C 0.10301621,0.2571751 0.0885351,0.17576883 0.12872349,0.11336434 c 0.0401883,-0.06240458 0.17293408,-0.08274137 0.25797572,-0.003932 0.0850417,0.0788098 0.0269571,0.13671136 -0.039893,0.13923062 -0.0668499,0.002519 -0.0812133,-0.0627161 -0.0300127,-0.0891682 0.0512009,-0.0264521 0.15399772,0.020863 0.23776893,0.0435695 0.0837712,0.0227066 0.19943644,0.028629 0.27049542,4.1993e-4 0.0710589,-0.0282097 0.0922414,-0.0677874 0.0456478,-0.0856104" />
       </svg>
     `
       );
     } else if (sel < 0.75) {
       return et(
         `
-      <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${spinnerStyle} spinner3 ${paperStyle}">
-        <path fill="none" stroke="currentColor" stroke-width="${varLAsync}" pathLength="1" d="M 0.05805971,0.13660498 C 0.10797019,0.26193567 0.35525482,0.19161688 0.38586466,0.11202727 0.41647444,0.03243767 0.3367885,0.0220047 0.31256276,0.08803155 0.28833702,0.1540584 0.27688391,0.22803629 0.38859489,0.24382805 0.50030587,0.2596199 0.66125404,0.11789295 0.71967761,0.22511469 0.77810135,0.3323364 0.59090405,0.3361921 0.60743783,0.21194022 0.62397152,0.08768833 0.8381139,0.13047976 0.94682009,0.15652352" />
+      <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${spinnerStyles.join(
+        " "
+      )} spinner3">
+        <path fill="none" stroke="currentColor" stroke-width="${varLAsyncSvg}" pathLength="1" d="M 0.05805971,0.13660498 C 0.10797019,0.26193567 0.35525482,0.19161688 0.38586466,0.11202727 0.41647444,0.03243767 0.3367885,0.0220047 0.31256276,0.08803155 0.28833702,0.1540584 0.27688391,0.22803629 0.38859489,0.24382805 0.50030587,0.2596199 0.66125404,0.11789295 0.71967761,0.22511469 0.77810135,0.3323364 0.59090405,0.3361921 0.60743783,0.21194022 0.62397152,0.08768833 0.8381139,0.13047976 0.94682009,0.15652352" />
       </svg>
     `
       );
     } else {
       return et(
         `
-      <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${spinnerStyle} spinner4 ${paperStyle}">
-        <path fill="none" stroke="currentColor" stroke-width="${varLAsync}" pathLength="1" d="m 0.06717016,0.19875525 c 0.04590072,0.0640954 0.09986502,0.0862412 0.14118426,0.0637398 0.0413194,-0.0225014 0.0786624,-0.0661734 0.0763519,-0.12579028 -0.002313,-0.05961708 -0.0802163,-0.07410729 -0.0724987,0.0114052 0.007718,0.0855125 0.0981388,0.10332275 0.14289414,0.10209764 0.0447553,-0.001225 0.14567377,-0.0514403 0.14452406,-0.11976192 -0.001152,-0.06832152 -0.0713155,-0.06170884 -0.077116,0.006882 -0.0058,0.0685904 0.079857,0.11707331 0.13892941,0.11242721 0.0590725,-0.004646 0.14949369,-0.0504459 0.14921933,-0.11892872 -2.7486e-4,-0.06848265 -0.0729905,-0.07196589 -0.0718564,0.006953 0.001134,0.0789188 0.0699061,0.11761026 0.12504166,0.11801568 0.0551356,4.0553e-4 0.1429375,-0.0578232 0.16859285,-0.10290166" />
+      <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${spinnerStyles.join(
+        " "
+      )} spinner4">
+        <path fill="none" stroke="currentColor" stroke-width="${varLAsyncSvg}" pathLength="1" d="m 0.06717016,0.19875525 c 0.04590072,0.0640954 0.09986502,0.0862412 0.14118426,0.0637398 0.0413194,-0.0225014 0.0786624,-0.0661734 0.0763519,-0.12579028 -0.002313,-0.05961708 -0.0802163,-0.07410729 -0.0724987,0.0114052 0.007718,0.0855125 0.0981388,0.10332275 0.14289414,0.10209764 0.0447553,-0.001225 0.14567377,-0.0514403 0.14452406,-0.11976192 -0.001152,-0.06832152 -0.0713155,-0.06170884 -0.077116,0.006882 -0.0058,0.0685904 0.079857,0.11707331 0.13892941,0.11242721 0.0590725,-0.004646 0.14949369,-0.0504459 0.14921933,-0.11892872 -2.7486e-4,-0.06848265 -0.0729905,-0.07196589 -0.0718564,0.006953 0.001134,0.0789188 0.0699061,0.11761026 0.12504166,0.11801568 0.0551356,4.0553e-4 0.1429375,-0.0578232 0.16859285,-0.10290166" />
       </svg>
     `
       );
@@ -416,21 +464,6 @@ svg.spinner4 path {
     };
   };
 
-  ///////////////////////////////////////////////////////////////////////////////
-  // xx
-
-  const leafTitleTop = /** @type { (_: {}) => {root: HTMLElement} } */ (
-    args
-  ) => {
-    return {
-      root: e(
-        "div",
-        {},
-        { children_: [e("div", {}, {}), e("div", {}, {}), e("div", {}, {})] }
-      ),
-    };
-  };
-
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: root
 
@@ -459,6 +492,11 @@ svg.spinner4 path {
                   s("cont_root_wide_menu", {
                     "": (s) => {
                       s.gridColumn = "1";
+
+                      s.display = "flex";
+                      s.flexDirection = "column";
+                      s.justifyContent = "stretch";
+                      s.overflowY = "scroll";
                     },
                   }),
                 ],
@@ -473,6 +511,15 @@ svg.spinner4 path {
                   s("cont_root_wide_page", {
                     "": (s) => {
                       s.gridColumn = "2";
+
+                      s.filter =
+                        "drop-shadow(-0.25cm 0 0.1cm rgba(47, 54, 83, 0.06))";
+                      s.marginLeft = "0.35cm";
+
+                      s.display = "flex";
+                      s.flexDirection = "column";
+                      s.justifyContent = "stretch";
+                      s.overflowY = "scroll";
                     },
                   }),
                 ],
@@ -493,14 +540,25 @@ svg.spinner4 path {
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: menu, form, top
 
-  const menuItemStyle = s("leaf_menu_item", {
-    "": (s) => {
-      s.fontSize = varFMenu;
-      s.display = "flex";
-      s.alignItems = "center";
-      s.height = "1cm";
+  const buttonStyle = s("button", {
+    "": (s) => {},
+    ":hover": (s) => {
+      s.opacity = "0.5";
     },
   });
+  const menuItemStyles = [
+    s("leaf_menu_item", {
+      "": (s) => {
+        s.fontSize = varFMenu;
+        s.display = "flex";
+        s.alignItems = "center";
+        s.height = menuItemLineHeight;
+        s.fontWeight = "600";
+        s.lineHeight = menuItemLineHeight;
+      },
+    }),
+    buttonStyle,
+  ];
 
   presentation.leafMenuLink = /** @type { Presentation["leafMenuLink"] } */ (
     args
@@ -509,7 +567,7 @@ svg.spinner4 path {
       root: e(
         "a",
         { textContent: args.text, href: args.link },
-        { styles_: [menuItemStyle] }
+        { styles_: [...menuItemStyles] }
       ),
     };
   };
@@ -520,7 +578,7 @@ svg.spinner4 path {
         root: e(
           "button",
           { textContent: args.text },
-          { styles_: [menuItemStyle] }
+          { styles_: [...menuItemStyles] }
         ),
       };
     };
@@ -544,6 +602,23 @@ svg.spinner4 path {
         children_: args.children,
       }
     );
+    const toggleStyle = s("leaf_menu_group_toggle", {
+      "": (s) => {
+        s.pointerEvents = "initial";
+        s.cursor = "pointer";
+        s.userSelect = "none";
+        s.fontFamily = "I";
+        s.fontWeight = varWIconMenuDecor;
+        s.flexGrow = "0";
+        s.display = "flex";
+        s.justifyContent = "center";
+        s.alignItems = "center";
+        s.width = varMenuGroupIconSize;
+        s.height = varMenuGroupIconSize;
+        s.marginLeft = `-${varMenuGroupIconSize}`;
+        s.fontSize = "0.7cm";
+      },
+    });
     return {
       root: e(
         "details",
@@ -552,20 +627,7 @@ svg.spinner4 path {
           styles_: [
             s("leaf_menu_group_details", {
               "": (s) => {},
-              ">summary:before": (s) => {
-                s.content = JSON.stringify(textIconFoldArrow);
-                s.pointerEvents = "initial";
-                s.fontFamily = "I";
-                s.flexGrow = "0";
-                s.display = "flex";
-                s.justifyContent = "center";
-                s.alignItems = "center";
-                s.width = varMenuGroupIconSize;
-                s.height = varMenuGroupIconSize;
-                s.marginLeft = `-${varMenuGroupIconSize}`;
-                s.fontSize = "0.7cm";
-              },
-              "[open]>summary:before": (s) => {
+              [`[open]>summary>.${toggleStyle}`]: (s) => {
                 s.rotate = "90deg";
               },
               ">summary::marker": (s) => {
@@ -581,6 +643,11 @@ svg.spinner4 path {
               {
                 styles_: [contHboxStyle],
                 children_: [
+                  e(
+                    "div",
+                    { textContent: textIconFoldArrow },
+                    { styles_: [toggleStyle, buttonStyle] }
+                  ),
                   presentation.leafMenuLink({
                     text: args.text,
                     link: args.link,
@@ -601,22 +668,80 @@ svg.spinner4 path {
   ) => {
     return { root: e("code", { textContent: args.text }, {}) };
   };
+
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: menu, form
+  const headIconButton =
+    /** @type { (_:{link: string, icon: string, extraStyles?: string[]}) => HTMLElement } */ (
+      args
+    ) => {
+      return e(
+        "a",
+        { href: args.link },
+        {
+          styles_: [buttonStyle, ...(args.extraStyles || [])],
+          children_: [
+            leafIcon({
+              text: args.icon,
+              weight: varWIconHead,
+              extraStyles: [
+                s("head_icon_button", {
+                  "": (s) => {
+                    s.height = varSHeadButton;
+                    s.width = varSHeadButton;
+                  },
+                }),
+              ],
+            }),
+          ],
+        }
+      );
+    };
+
   presentation.contHeadBar = /** @type { Presentation["contHeadBar"] } */ (
     args
   ) => {
     const children = [];
-    children.push(headIconButton({ icon: textIconBack, link: args.backLink }));
     children.push(
       e(
         "div",
         {},
         {
           styles_: [
-            s("cont_menu_bar_center", {
+            s("cont_head_bar_left", {
+              "": (s) => {
+                s.gridColumn = "1";
+
+                s.display = "flex";
+                s.flexDirection = "row";
+                s.justifyContent = "start";
+                s.alignItems = "center";
+              },
+            }),
+          ],
+          children_: [
+            headIconButton({
+              icon: textIconBack,
+              link: args.backLink,
+            }),
+          ],
+        }
+      )
+    );
+    children.push(
+      e(
+        "div",
+        {},
+        {
+          styles_: [
+            s("cont_head_bar_center", {
               "": (s) => {
                 s.gridColumn = "2";
+
+                s.display = "flex";
+                s.flexDirection = "row";
+                s.justifyContent = "center";
+                s.alignItems = "center";
               },
             }),
           ],
@@ -631,9 +756,14 @@ svg.spinner4 path {
           {},
           {
             styles_: [
-              s("cont_menu_bar_right", {
+              s("cont_head_bar_right", {
                 "": (s) => {
                   s.gridColumn = "3";
+
+                  s.display = "flex";
+                  s.flexDirection = "row";
+                  s.justifyContent = "end";
+                  s.alignItems = "center";
                 },
               }),
             ],
@@ -648,8 +778,9 @@ svg.spinner4 path {
         {},
         {
           styles_: [
-            s("cont_menu_bar", {
+            s("cont_head_bar", {
               "": (s) => {
+                s.margin = varPPage;
                 s.display = "grid";
                 s.gridTemplateColumns = "1fr auto 1fr";
               },
@@ -664,22 +795,6 @@ svg.spinner4 path {
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: top
 
-  const paperStyle = s("paper", {
-    "": (s) => {
-      s.maskSize = "3cm, 3cm";
-      s.maskRepeat = "repeat";
-      s.maskPosition = "center";
-      s.maskImage = `url("paper_mask.png")`;
-      s.maskMode = "luminance";
-    },
-  });
-
-  const buttonStyle = s("button", {
-    "": (s) => {},
-    ":hover": (s) => {
-      s.opacity = "0.5";
-    },
-  });
   presentation.contPageTop = /** @type { Presentation["contPageTop"] } */ (
     args
   ) => {
@@ -701,6 +816,7 @@ svg.spinner4 path {
                   s("cont_page_top_generic_button", {
                     "": (s) => {
                       s.height = "100%";
+                      s.opacity = "0.75";
                     },
                   }),
                 ],
@@ -808,9 +924,18 @@ svg.spinner4 path {
 
   const nonchatPageStyle = s("nonchat_cont_page", {
     "": (s) => {
-      const padding = "0.3cm";
-      s.padding = padding;
-      s.paddingLeft = `calc(${padding} + ${varMenuGroupIconSize})`;
+      s.margin = varPPage;
+      s.marginLeft = `calc(${varPPage} + ${varMenuGroupIconSize})`;
+      s.position = "relative";
+    },
+    ":before": (s) => {
+      s.content = JSON.stringify("");
+      s.display = "block";
+      s.position = "absolute";
+      s.inset = "0";
+      s.backgroundColor = varCForegroundLight;
+      s.maskImage = `url("linedpaper.svg")`;
+      s.maskSize = `auto ${menuItemLineHeight}`;
     },
   });
   presentation.contPageMenu = /** @type { Presentation["contPageMenu"] } */ (
@@ -821,8 +946,35 @@ svg.spinner4 path {
         "div",
         {},
         {
-          styles_: [contVboxStyle, nonchatPageStyle],
-          children_: args.children,
+          styles_: [
+            contVboxStyle,
+            s("cont_page_menu", {
+              "": (s) => {
+                s.flexGrow = "1";
+                s.backgroundColor = varCBackgroundPageNonchat;
+              },
+            }),
+          ],
+          children_: [
+            args.headBar,
+            e(
+              "div",
+              {},
+              {
+                styles_: [
+                  contVboxStyle,
+                  nonchatPageStyle,
+                  s("cont_page_menu_inner", {
+                    "": (s) => {
+                      s.width = "16cm";
+                      s.alignSelf = "center";
+                    },
+                  }),
+                ],
+                children_: args.children,
+              }
+            ),
+          ],
         }
       ),
     };
@@ -844,7 +996,7 @@ svg.spinner4 path {
     },
   });
   const leafIcon =
-    /** @type {(args: {text: string, extraStyles?: string[]})=>HTMLElement} */ (
+    /** @type {(args: {text: string, weight?: string, extraStyles?: string[]})=>HTMLElement} */ (
       args
     ) =>
       et(
@@ -855,6 +1007,7 @@ svg.spinner4 path {
             dominant-baseline: central;
             font-family: I;
             font-size: 90px;
+            font-weight: ${args.weight || 400};
           ">${args.text}</text></g>
         </svg>
       `,
@@ -863,32 +1016,45 @@ svg.spinner4 path {
         }
       );
 
-  const headIconButton =
-    /** @type { (_:{link: string, icon: string}) => HTMLElement } */ (args) => {
-      return e(
-        "a",
-        { href: args.link },
-        { styles_: [buttonStyle], children_: [leafIcon({ text: args.icon })] }
-      );
-    };
-
   presentation.leafHeadBarCenterPlaceholder =
     /** @type { Presentation["leafHeadBarCenterPlaceholder"] } */ (args) => {
       return { root: e("span", { textContent: "..." }, {}) };
     };
 
+  const leafHeadBarCenterStyle = s("leaf_head_bar_center", {
+    "": (s) => {
+      s.fontWeight = "600";
+      s.fontSize = varFHeadBar;
+    },
+  });
   presentation.leafHeadBarCenter =
     /** @type { Presentation["leafHeadBarCenter"] } */ (args) => {
       if (args.link == null) {
         return {
-          root: e("span", { textContent: args.text }, {}),
+          root: e(
+            "span",
+            { textContent: args.text },
+            { styles_: [leafHeadBarCenterStyle] }
+          ),
         };
       } else {
         return {
           root: e(
             "a",
             { textContent: args.text, href: args.link },
-            { styles_: [buttonStyle] }
+            {
+              styles_: [
+                buttonStyle,
+                leafHeadBarCenterStyle,
+                s("leaf_head_bar_center_link", {
+                  "": (s) => {
+                    s.border = `${varLThin} solid ${varCForegroundVeryLight}`;
+                    s.borderRadius = varRHeadBarCenter;
+                    s.padding = `0 0.3cm`;
+                  },
+                }),
+              ],
+            }
           ),
         };
       }
@@ -910,26 +1076,44 @@ svg.spinner4 path {
         "div",
         {},
         {
-          styles_: [contVboxStyle, nonchatPageStyle],
+          styles_: [
+            contVboxStyle,
+            s("cont_page_form", {
+              "": (s) => {
+                s.flexGrow = "1";
+                s.backgroundColor = varCBackgroundPageNonchat;
+              },
+            }),
+          ],
           children_: [
+            args.headBar,
             e(
               "div",
               {},
               {
-                styles_: [
-                  s("cont_page_form_edit_bar", {
-                    "": (s) => {
-                      s.position = "fixed";
-                      s.left = "0";
-                      s.right = "0";
-                      s.bottom = "0.3cm";
-                      s.height = "0.8cm";
-                    },
-                  }),
+                styles_: [contVboxStyle, nonchatPageStyle],
+                children_: [
+                  e(
+                    "div",
+                    {},
+                    {
+                      styles_: [
+                        s("cont_page_form_edit_bar", {
+                          "": (s) => {
+                            s.position = "fixed";
+                            s.left = "0";
+                            s.right = "0";
+                            s.bottom = "0.3cm";
+                            s.height = "0.8cm";
+                          },
+                        }),
+                      ],
+                    }
+                  ),
+                  ...args.children,
                 ],
               }
             ),
-            ...args.children,
           ],
         }
       ),
@@ -954,6 +1138,31 @@ svg.spinner4 path {
 
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: chat
+
+  presentation.contPageChat = /** @type { Presentation["contPageChat"] } */ (
+    args
+  ) => {
+    return {
+      root: e(
+        "div",
+        {},
+        {
+          styles_: [
+            contVboxStyle,
+            s("cont_page_chat", {
+              "": (s) => {
+                s.flexGrow = "1";
+                s.backgroundColor = varCBackgroundPageChat;
+                s.padding = varPPage;
+                s.position = "relative";
+              },
+            }),
+          ],
+          children_: args.children,
+        }
+      ),
+    };
+  };
 
   presentation.leafChatSpinnerCenter =
     /** @type { Presentation["leafChatSpinnerCenter"] } */ (args) => {
@@ -982,17 +1191,28 @@ svg.spinner4 path {
     const children = [];
     children.push(
       e(
-        "a",
-        { href: args.backLink },
+        "div",
+        {},
         {
           styles_: [
             s("cont_chat_bar_left", {
               "": (s) => {
                 s.gridColumn = "1";
+
+                s.display = "flex";
+                s.flexDirection = "row";
+                s.justifyContent = "start";
+                s.alignItems = "center";
               },
             }),
           ],
-          children_: [leafIcon({ text: textIconBack })],
+          children_: [
+            headIconButton({
+              link: args.backLink,
+              icon: textIconBack,
+              extraStyles: [],
+            }),
+          ],
         }
       )
     );
@@ -1005,6 +1225,11 @@ svg.spinner4 path {
             s("cont_chat_bar_center", {
               "": (s) => {
                 s.gridColumn = "2";
+
+                s.display = "flex";
+                s.flexDirection = "row";
+                s.justifyContent = "center";
+                s.alignItems = "center";
               },
             }),
           ],
@@ -1022,6 +1247,11 @@ svg.spinner4 path {
               s("cont_chat_bar_right", {
                 "": (s) => {
                   s.gridColumn = "3";
+
+                  s.display = "flex";
+                  s.flexDirection = "row";
+                  s.justifyContent = "end";
+                  s.alignItems = "center";
                 },
               }),
             ],
@@ -1037,6 +1267,8 @@ svg.spinner4 path {
           styles_: [
             s("cont_chat_bar", {
               "": (s) => {
+                s.backgroundColor = varCBackgroundPageChatFade;
+
                 s.display = "grid";
                 s.gridTemplateColumns = "1fr auto 1fr";
               },
@@ -1048,15 +1280,43 @@ svg.spinner4 path {
     };
   };
 
+  const leafChatCenterStyle = s("leaf_chat_center", {
+    "": (s) => {
+      s.fontWeight = varWHead;
+      s.fontSize = varFHeadBar;
+    },
+  });
   presentation.leafChatBarCenterPlaceholder =
     /** @type { Presentation["leafChatBarCenterPlaceholder"] } */ (args) => {
-      return { root: e("span", { textContent: "..." }, {}) };
+      return {
+        root: e(
+          "span",
+          { textContent: "..." },
+          { styles_: [leafChatCenterStyle] }
+        ),
+      };
     };
 
   presentation.leafChatBarCenter =
     /** @type { Presentation["leafChatBarCenter"] } */ (args) => {
       return {
-        root: e("a", { textContent: args.text, href: args.link }, {}),
+        root: e(
+          "a",
+          { textContent: args.text, href: args.link },
+          {
+            styles_: [
+              leafChatCenterStyle,
+              buttonStyle,
+              s("leaf_chat_bar_center_link", {
+                "": (s) => {
+                  s.border = `${varLThin} solid ${varCForegroundVeryLight}`;
+                  s.borderRadius = varRHeadBarCenter;
+                  s.padding = `0 0.3cm`;
+                },
+              }),
+            ],
+          }
+        ),
       };
     };
 

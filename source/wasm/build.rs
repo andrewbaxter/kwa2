@@ -180,7 +180,7 @@ fn main() {
         // xx Components, styles: menu
         Func {
             name: "contPageMenu",
-            args: vec![("children", &arrel_)],
+            args: vec![("headBar", &el_), ("children", &arrel_)],
             returns: vec![("root", &el_)],
         },
         Func {
@@ -192,7 +192,7 @@ fn main() {
         // xx Components, styles: form
         Func {
             name: "contPageForm",
-            args: vec![("editBarChildren", &arrel_), ("children", &arrel_)],
+            args: vec![("headBar", &el_), ("editBarChildren", &arrel_), ("children", &arrel_)],
             returns: vec![("root", &el_)],
         },
         Func {
@@ -212,6 +212,11 @@ fn main() {
         },
         // /////////////////////////////////////////////////////////////////////////////
         // xx Components, styles: chat
+        Func {
+            name: "contPageChat",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
         Func {
             name: "leafChatSpinnerCenter",
             args: vec![],

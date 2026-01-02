@@ -86,6 +86,14 @@
     };
     const buildMenu = /** @type {() => HTMLElement} */ () => {
       return presentation.contPageMenu({
+        headBar: presentation.contHeadBar({
+          backLink: "abcd",
+          center: presentation.leafHeadBarCenter({
+            text: "Some menu",
+            link: "abcd",
+          }).root,
+          right: undefined,
+        }).root,
         children: [
           presentation.leafMenuLink({ text: "Sub 1", link: "abcd" }).root,
           presentation.leafMenuButton({ text: "Sub 2" }).root,
@@ -94,6 +102,14 @@
     };
     const buildForm = /** @type {() => HTMLElement} */ () => {
       return presentation.contPageForm({
+        headBar: presentation.contHeadBar({
+          backLink: "abcd",
+          center: presentation.leafHeadBarCenter({
+            text: "Some menu",
+            link: "abcd",
+          }).root,
+          right: undefined,
+        }).root,
         editBarChildren: [presentation.leafPageFormButtonSubmit({}).root],
         children: [
           // todo
@@ -143,7 +159,7 @@
       controlsMessage.text.textContent =
         "This is a message to a distant thing.";
       root.appendChild(controlsMessage.root);
-      return root;
+      return presentation.contPageChat({ children: [root] }).root;
     };
 
     const hash = location.hash;
