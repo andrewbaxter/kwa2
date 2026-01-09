@@ -72,6 +72,11 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     //. .
+    let bool_ = Type {
+        mod_: TypeMod::None,
+        rust_type: quote!(bool),
+        ts_type: "boolean".to_string(),
+    };
     let string_ = Type {
         mod_: TypeMod::None,
         rust_type: quote!(String),
@@ -93,6 +98,11 @@ fn main() {
     for method in [
         Func {
             name: "classStateThinking",
+            args: vec![],
+            returns: vec![("value", &string_)],
+        },
+        Func {
+            name: "classStateSelected",
             args: vec![],
             returns: vec![("value", &string_)],
         },
@@ -130,7 +140,7 @@ fn main() {
         Func {
             name: "leafMenuLink",
             args: vec![("text", &string_), ("link", &string_)],
-            returns: vec![("root", &el_)],
+            returns: vec![("root", &el_), ("unread", &el_)],
         },
         Func {
             name: "leafMenuButton",
@@ -140,7 +150,7 @@ fn main() {
         Func {
             name: "leafMenuGroup",
             args: vec![("text", &string_), ("link", &string_), ("children", &arrel_)],
-            returns: vec![("root", &el_), ("groupEl", &el_)],
+            returns: vec![("root", &el_), ("groupEl", &el_), ("unread", &el_)],
         },
         Func {
             name: "leafMenuCode",
@@ -157,22 +167,22 @@ fn main() {
                 ("addLink", &string_),
                 ("settingsLink", &string_)
             ],
-            returns: vec![("root", &el_)],
+            returns: vec![("root", &el_), ("identitiesLink", &el_), ("addLink", &el_), ("settingsLink", &el_)],
         },
         // /////////////////////////////////////////////////////////////////////////////
         // xx Components, styles: menu, form
         Func {
-            name: "contHeadBar",
+            name: "contNonchatHeadBar",
             args: vec![("backLink", &string_), ("center", &el_), ("right", &optel_)],
-            returns: vec![("root", &el_)],
+            returns: vec![("root", &el_), ("backUnread", &el_)],
         },
         Func {
-            name: "leafHeadBarCenterPlaceholder",
+            name: "leafNonchatHeadBarCenterPlaceholder",
             args: vec![],
             returns: vec![("root", &el_)],
         },
         Func {
-            name: "leafHeadBarCenter",
+            name: "leafNonchatHeadBarCenter",
             args: vec![("text", &string_), ("link", &optstring_)],
             returns: vec![("root", &el_)],
         },
@@ -192,18 +202,8 @@ fn main() {
         // xx Components, styles: form
         Func {
             name: "contPageForm",
-            args: vec![("headBar", &el_), ("editBarChildren", &arrel_), ("children", &arrel_)],
-            returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "contPageFormErrors",
-            args: vec![],
-            returns: vec![("root", &el_)],
-        },
-        Func {
-            name: "leafPageFormButtonSubmit",
-            args: vec![],
-            returns: vec![("root", &el_)],
+            args: vec![("headBar", &el_), ("children", &arrel_)],
+            returns: vec![("root", &el_), ("errors", &el_), ("submit", &el_)],
         },
         Func {
             name: "leafFormText",
@@ -233,52 +233,62 @@ fn main() {
             returns: vec![("root", &el_)],
         },
         Func {
-            name: "contChatBar",
+            name: "contChatHeadBar",
             args: vec![("backLink", &string_), ("center", &el_), ("right", &optel_)],
-            returns: vec![("root", &el_)],
+            returns: vec![("root", &el_), ("backUnread", &el_)],
         },
         Func {
-            name: "leafChatBarCenterPlaceholder",
+            name: "leafChatHeadBarCenterPlaceholder",
             args: vec![],
             returns: vec![("root", &el_)],
         },
         Func {
-            name: "leafChatBarCenter",
+            name: "leafChatHeadBarCenter",
             args: vec![("text", &string_), ("link", &optstring_)],
             returns: vec![("root", &el_)],
         },
+        // Entry - controls
         Func {
-            name: "contChatControlsAsEntry",
+            name: "contChatEntryModeControls",
             args: vec![],
             returns: vec![("root", &el_)],
         },
         Func {
-            name: "leafChatControlsAsEntryButtonNewMessage",
+            name: "leafChatEntryModeControlsButtonNewMessage",
             args: vec![],
             returns: vec![("root", &el_)],
         },
+        // Entry - deleted
         Func {
-            name: "leafChatEntryModeDeleted",
-            args: vec![],
+            name: "contChatEntryModeDeleted",
+            args: vec![("left", &bool_)],
             returns: vec![("root", &el_)],
         },
+        // Entry - message
         Func {
-            name: "leafChatEntryModeMessage",
-            args: vec![],
+            name: "contChatEntryModeMessage",
+            args: vec![("left", &bool_), ("date", &string_)],
             returns: vec![("root", &el_), ("body", &el_)],
         },
         Func {
-            name: "contChatControlsModeMenu",
+            name: "leafChatEntryModeMessageTextBlock",
+            args: vec![("text", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        // Controls - menu
+        Func {
+            name: "contChatControlsBarModeMenu",
             args: vec![("children", &arrel_)],
             returns: vec![("root", &el_)],
         },
         Func {
-            name: "leafChatControlsModeMenuButton",
-            args: vec![("text", &string_)],
+            name: "leafChatControlsBarModeMenuButtonNewMessage",
+            args: vec![],
             returns: vec![("root", &el_)],
         },
+        // Controls - message
         Func {
-            name: "leafChatControlsModeMessage",
+            name: "leafChatControlsBarModeMessage",
             args: vec![],
             returns: vec![("root", &el_), ("send", &el_), ("text", &el_), ("close", &el_)],
         },

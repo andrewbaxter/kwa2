@@ -4,7 +4,51 @@
   const presentation = window.kwaPresentation;
   addEventListener("DOMContentLoaded", async (_) => {
     const buildTop = /** @type {()=>HTMLElement} */ () => {
-      return presentation.contPageTop({
+      const link1 = presentation.leafMenuLink({
+        text: "Channel 1",
+        link: "abcd",
+      });
+      link1.unread.textContent = "4";
+      const group1 = presentation.leafMenuGroup({
+        text: "Family",
+        link: "abcd",
+        children: [
+          presentation.leafMenuLink({
+            text: "Channel 1",
+            link: "abcd",
+          }).root,
+          presentation.leafMenuLink({
+            text: "Channel 2",
+            link: "abcd",
+          }).root,
+          presentation.leafMenuLink({
+            text: "Channel 3",
+            link: "abcd",
+          }).root,
+        ],
+      });
+      group1.unread.textContent = "7";
+      const group2 = presentation.leafMenuGroup({
+        text: "Personal",
+        link: "abcd",
+        children: [
+          presentation.leafMenuLink({
+            text: "Channel 1",
+            link: "abcd",
+          }).root,
+          presentation.leafMenuLink({
+            text: "Channel 2",
+            link: "abcd",
+          }).root,
+          presentation.leafMenuLink({
+            text: "Channel 3",
+            link: "abcd",
+          }).root,
+        ],
+      });
+      group2.unread.textContent = "47";
+      group2.root.classList.add(presentation.classStateSelected({}).value);
+      const page = presentation.contPageTop({
         identitiesLink: "abcd",
         addLink: "abcd",
         settingsLink: "abcd",
@@ -13,10 +57,7 @@
             text: "Art",
             link: "abcd",
             children: [
-              presentation.leafMenuLink({
-                text: "Channel 1",
-                link: "abcd",
-              }).root,
+              link1.root,
               presentation.leafMenuLink({
                 text: "Channel 2",
                 link: "abcd",
@@ -27,47 +68,17 @@
               }).root,
             ],
           }).root,
-          presentation.leafMenuGroup({
-            text: "Family",
-            link: "abcd",
-            children: [
-              presentation.leafMenuLink({
-                text: "Channel 1",
-                link: "abcd",
-              }).root,
-              presentation.leafMenuLink({
-                text: "Channel 2",
-                link: "abcd",
-              }).root,
-              presentation.leafMenuLink({
-                text: "Channel 3",
-                link: "abcd",
-              }).root,
-            ],
-          }).root,
-          presentation.leafMenuGroup({
-            text: "Personal",
-            link: "abcd",
-            children: [
-              presentation.leafMenuLink({
-                text: "Channel 1",
-                link: "abcd",
-              }).root,
-              presentation.leafMenuLink({
-                text: "Channel 2",
-                link: "abcd",
-              }).root,
-              presentation.leafMenuLink({
-                text: "Channel 3",
-                link: "abcd",
-              }).root,
-            ],
-          }).root,
+          group1.root,
+          group2.root,
           presentation.leafMenuLink({ text: "Systems", link: "abcd" }).root,
           presentation.leafMenuLink({ text: "News", link: "abcd" }).root,
           presentation.leafAsyncBlock({}).root,
         ],
-      }).root;
+      });
+      page.settingsLink.classList.add(
+        presentation.classStateSelected({}).value
+      );
+      return page.root;
     };
     const buildRoot = /** @type {(wide: Boolean, e: HTMLElement)=>void} */ (
       wide,
@@ -81,19 +92,43 @@
           }).root
         );
       } else {
+        const htmlStyle = /** @type {CSSStyleDeclaration} */ (
+          document.body.parentElement?.style
+        );
+        htmlStyle.backgroundColor = "black";
+        htmlStyle.overflowY = "scroll";
+        const dStyle = document.body.style;
+        dStyle.width = `${828 / 2}px`;
+        dStyle.maxWidth = dStyle.width;
+        dStyle.height = `${1792 / 2}px`;
+        dStyle.maxHeight = dStyle.height;
+        dStyle.margin = "auto";
+        dStyle.overflowX = "hidden";
+        dStyle.overflowY = "scroll";
         document.body.appendChild(e);
       }
     };
-    const buildMenu = /** @type {() => HTMLElement} */ () => {
-      return presentation.contPageMenu({
-        headBar: presentation.contHeadBar({
-          backLink: "abcd",
-          center: presentation.leafHeadBarCenter({
-            text: "Some menu",
-            link: "abcd",
-          }).root,
-          right: undefined,
+    const buildMenu = /** @type {(_:{link: Boolean}) => HTMLElement} */ (
+      args
+    ) => {
+      /** @type { undefined|string } */
+      let centerLink;
+      if (args.link) {
+        centerLink = "abcd";
+      } else {
+        centerLink = undefined;
+      }
+      const head = presentation.contNonchatHeadBar({
+        backLink: "abcd",
+        center: presentation.leafNonchatHeadBarCenter({
+          text: "Some menu",
+          link: centerLink,
         }).root,
+        right: undefined,
+      });
+      head.backUnread.textContent = "11";
+      return presentation.contPageMenu({
+        headBar: head.root,
         children: [
           presentation.leafMenuLink({ text: "Sub 1", link: "abcd" }).root,
           presentation.leafMenuButton({ text: "Sub 2" }).root,
@@ -101,64 +136,131 @@
       }).root;
     };
     const buildForm = /** @type {() => HTMLElement} */ () => {
-      return presentation.contPageForm({
-        headBar: presentation.contHeadBar({
+      const page = presentation.contPageForm({
+        headBar: presentation.contNonchatHeadBar({
           backLink: "abcd",
-          center: presentation.leafHeadBarCenter({
+          center: presentation.leafNonchatHeadBarCenter({
             text: "Some menu",
             link: "abcd",
           }).root,
           right: undefined,
         }).root,
-        editBarChildren: [presentation.leafPageFormButtonSubmit({}).root],
         children: [
           // todo
         ],
-      }).root;
+      });
+      page.errors.textContent = "This is an error. Panic panic panic";
+      return page.root;
     };
-    const buildChat = /** @type {() => HTMLElement} */ () => {
-      const root = document.createElement("div");
-      root.style.display = "flex";
-      root.style.flexDirection = "column";
-      root.appendChild(
-        presentation.contChatBar({
-          backLink: "abcd",
-          center: presentation.leafChatBarCenter({
-            text: "Almonds",
-            link: "abcd",
-          }).root,
-          right: undefined,
-        }).root
-      );
-      root.appendChild(presentation.leafChatSpinnerEarly({}).root);
-      root.appendChild(presentation.leafChatSpinnerCenter({}).root);
-      root.appendChild(presentation.leafChatEntryModeDeleted({}).root);
-      const entryMessage1 = presentation.leafChatEntryModeMessage({});
-      entryMessage1.body.textContent = "This is a short chat message";
-      root.appendChild(entryMessage1.root);
-      const entryMessage2 = presentation.leafChatEntryModeMessage({});
-      entryMessage2.body.textContent =
-        "This is a longer chat message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines.";
-      root.appendChild(entryMessage2.root);
-      const controlsAsEntry = presentation.contChatControlsAsEntry({}).root;
-      controlsAsEntry.appendChild(
-        presentation.leafChatControlsAsEntryButtonNewMessage({}).root
-      );
-      root.appendChild(controlsAsEntry);
-      root.appendChild(presentation.leafChatSpinnerLate({}).root);
-      root.appendChild(
-        presentation.contChatControlsModeMenu({
+    const buildChat = /** @type {(_:{controls: boolean}) => HTMLElement} */ (
+      args
+    ) => {
+      const topLayer = document.createElement("div");
+      topLayer.style.display = "flex";
+      topLayer.style.flexDirection = "column";
+      topLayer.style.justifyContent = "space-between";
+      const bar = presentation.contChatHeadBar({
+        backLink: "abcd",
+        center: presentation.leafChatHeadBarCenter({
+          text: "Almonds",
+          link: "abcd",
+        }).root,
+        right: undefined,
+      }).root;
+      topLayer.appendChild(bar);
+      bar.style.zIndex = "1";
+      if (args.controls) {
+        let controls = presentation.contChatControlsBarModeMenu({
           children: [
-            presentation.leafChatControlsModeMenuButton({
-              text: "This channel",
-            }).root,
+            presentation.leafChatControlsBarModeMenuButtonNewMessage({}).root,
           ],
-        }).root
+        });
+        controls.root.style.zIndex = "1";
+        topLayer.appendChild(controls.root);
+      } else {
+        let controls = presentation.leafChatControlsBarModeMessage({});
+        controls.text.textContent = "This is a message to a distant thing.";
+        controls.root.style.zIndex = "1";
+        topLayer.appendChild(controls.root);
+      }
+
+      const messageLayer = document.createElement("div");
+      messageLayer.style.display = "flex";
+      messageLayer.style.flexDirection = "column";
+      messageLayer.style.overflowY = "scroll";
+      messageLayer.style.height = "100dvh";
+      messageLayer.style.pointerEvents = "initial";
+      messageLayer.style.padding = ``;
+      messageLayer.appendChild(presentation.leafChatSpinnerEarly({}).root);
+      messageLayer.appendChild(presentation.leafChatSpinnerCenter({}).root);
+      messageLayer.appendChild(
+        presentation.contChatEntryModeDeleted({ left: true }).root
       );
-      let controlsMessage = presentation.leafChatControlsModeMessage({});
-      controlsMessage.text.textContent =
-        "This is a message to a distant thing.";
-      root.appendChild(controlsMessage.root);
+      const textMessage =
+        /** @type {(left: Boolean,text: string)=>HTMLElement} */ (
+          left,
+          text
+        ) => {
+          const entryMessage1 = presentation.contChatEntryModeMessage({
+            left: left,
+            date: new Date().toISOString(),
+          });
+          entryMessage1.body.appendChild(
+            presentation.leafChatEntryModeMessageTextBlock({ text: text }).root
+          );
+          return entryMessage1.root;
+        };
+
+      // Left
+      messageLayer.appendChild(textMessage(true, "Spam"));
+      messageLayer.appendChild(textMessage(true, "Spam"));
+      messageLayer.appendChild(textMessage(true, "Spam"));
+      messageLayer.appendChild(textMessage(true, "Spam"));
+      messageLayer.appendChild(textMessage(true, "Spam"));
+      messageLayer.appendChild(
+        textMessage(true, "This is a short chat message")
+      );
+      const selectedMessage = textMessage(
+        true,
+        "This is a longer chat message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines."
+      );
+      selectedMessage.classList.add(presentation.classStateSelected({}).value);
+      messageLayer.appendChild(selectedMessage);
+
+      // Right
+      messageLayer.appendChild(textMessage(false, "This is a reply 1"));
+      messageLayer.appendChild(
+        presentation.contChatEntryModeDeleted({ left: false }).root
+      );
+      messageLayer.appendChild(
+        textMessage(
+          false,
+          "This is a longer reply 1 message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines."
+        )
+      );
+      messageLayer.appendChild(textMessage(false, "Spam"));
+      messageLayer.appendChild(textMessage(false, "Spam"));
+      messageLayer.appendChild(textMessage(false, "Spam"));
+      messageLayer.appendChild(textMessage(false, "Spam"));
+      messageLayer.appendChild(textMessage(false, "Spam"));
+      messageLayer.appendChild(textMessage(false, "Spam"));
+      messageLayer.appendChild(textMessage(false, "Spam"));
+      messageLayer.appendChild(textMessage(false, "Spam"));
+      messageLayer.appendChild(textMessage(false, "Spam"));
+      messageLayer.appendChild(presentation.leafChatSpinnerLate({}).root);
+
+      // Controls
+      const controlsAsEntry = presentation.contChatEntryModeControls({}).root;
+      controlsAsEntry.appendChild(
+        presentation.leafChatEntryModeControlsButtonNewMessage({}).root
+      );
+      messageLayer.appendChild(controlsAsEntry);
+
+      const root = document.createElement("div");
+      root.classList.add("stack");
+      root.appendChild(messageLayer);
+      root.appendChild(topLayer);
+
       return presentation.contPageChat({ children: [root] }).root;
     };
 
@@ -176,12 +278,17 @@
         break;
       case "#menu":
         {
-          buildRoot(false, buildMenu());
+          buildRoot(false, buildMenu({ link: true }));
+        }
+        break;
+      case "#menu_nolink":
+        {
+          buildRoot(false, buildMenu({ link: false }));
         }
         break;
       case "#wide_menu":
         {
-          buildRoot(true, buildMenu());
+          buildRoot(true, buildMenu({ link: true }));
         }
         break;
       case "#form":
@@ -196,12 +303,17 @@
         break;
       case "#chat":
         {
-          buildRoot(false, buildChat());
+          buildRoot(false, buildChat({ controls: false }));
         }
         break;
       case "#wide_chat":
         {
-          buildRoot(true, buildChat());
+          buildRoot(true, buildChat({ controls: false }));
+        }
+        break;
+      case "#wide_chat_controls":
+        {
+          buildRoot(true, buildChat({ controls: true }));
         }
         break;
       default:
