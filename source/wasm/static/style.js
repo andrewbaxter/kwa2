@@ -76,13 +76,10 @@
   const globalStyleRoot = /** @type { CSSStyleRule } */ (
     globalStyle.cssRules[globalStyle.cssRules.length - 1]
   ).style;
+  const lightClause = "(prefers-color-scheme: light)";
   const globalStyleMediaLight =
     /** @type { CSSMediaRule } */
-    (
-      globalStyle.cssRules[
-        globalStyle.insertRule("@media (prefers-color-scheme: light) {}")
-      ]
-    );
+    (globalStyle.cssRules[globalStyle.insertRule(`@media ${lightClause} {}`)]);
   const globalStyleLight =
     /** @type { CSSStyleRule} */
     (
@@ -94,13 +91,24 @@
     /** @type { CSSMediaRule } */
     (
       globalStyle.cssRules[
-        globalStyle.insertRule("@media not (prefers-color-scheme: light) {}")
+        globalStyle.insertRule(`@media not ${lightClause} {}`)
       ]
     );
   const globalStyleDark =
     /** @type { CSSStyleRule} */
     (globalStyleMediaDark.cssRules[globalStyleMediaDark.insertRule(":root {}")])
       .style;
+  const wideClause = "(width >= 16cm)";
+  const globalStyleMediaWide =
+    /** @type { CSSMediaRule } */
+    (globalStyle.cssRules[globalStyle.insertRule(`@media ${wideClause} {}`)]);
+  const globalStyleMediaNarrow =
+    /** @type { CSSMediaRule } */
+    (
+      globalStyle.cssRules[
+        globalStyle.insertRule(`@media not ${wideClause} {}`)
+      ]
+    );
 
   const v = /** @type {(id: string, v: string) => string} */ (id, val) => {
     const name = `--${id}`;
@@ -119,6 +127,22 @@
     return `var(${name})`;
   };
 
+  const uniq = /** @type {(args: string|string[]) => string} */ (args) => {
+    /** @type {string[]} */
+    var args1;
+    if (typeof args == "string") {
+      args1 = [args];
+    } else {
+      args1 = args;
+    }
+    const lines = [];
+    for (const e of notnull(new Error().stack).matchAll(/(\d+):\d+/g)) {
+      lines.push(`${e[1]}`);
+    }
+    let uniq = [lines[1]];
+    uniq.push(...args1.map((x) => x.replaceAll(/[^_a-zA-Z0-9]/g, "_")));
+    return `r${uniq.join("_")}`;
+  };
   /** @type { Set<string> } */
   const staticStyles = new Set();
   // Static style - the id must be unique for every value closed on (i.e. put all the arguments in the id).
@@ -126,23 +150,51 @@
     id: string|string[],
     f: { [s: string]: (r: CSSStyleDeclaration) => void }
   ) => string} */ (id, f) => {
-    const uniq = /** @type {(...args: string[]) => string} */ (...args) => {
-      const lines = [];
-      for (const e of notnull(new Error().stack).matchAll(/(\d+):\d+/g)) {
-        lines.push(`${e[1]}`);
-      }
-      let uniq = [lines[1]];
-      uniq.push(...args.map((x) => x.replaceAll(/[^_a-zA-Z0-9]/g, "_")));
-      return `r${uniq.join("_")}`;
-    };
-
-    let id1 = typeof id == "string" ? uniq(id) : uniq(...id);
+    let id1 = uniq(id);
     if (staticStyles.has(id1)) {
       return id1;
     }
-    for (const [suffix, f1] of Object.entries(f)) {
+    for (const [p, f1] of Object.entries(f)) {
+      const suffix = p;
       globalStyle.insertRule(`.${id1}${suffix} {}`, 0);
       f1(/** @type { CSSStyleRule } */ (globalStyle.cssRules[0]).style);
+    }
+    staticStyles.add(id1);
+    return id1;
+  };
+  const sm = /** @type {(
+    id: string|string[],
+    f: { [s: string]: { [m in "wide"|"narrow"|""]: (r: CSSStyleDeclaration) => void} }
+  ) => string} */ (id, f) => {
+    let id1 = uniq(id);
+    if (staticStyles.has(id1)) {
+      return id1;
+    }
+    for (const [suffix, f2] of Object.entries(f)) {
+      for (const [m, f1] of Object.entries(f2)) {
+        switch (m) {
+          case "":
+            globalStyle.insertRule(`.${id1}${suffix} {}`, 0);
+            f1(/** @type { CSSStyleRule } */ (globalStyle.cssRules[0]).style);
+            break;
+          case "narrow":
+            globalStyleMediaNarrow.insertRule(`.${id1}${suffix} {}`, 0);
+            f1(
+              /** @type { CSSStyleRule } */ (globalStyleMediaNarrow.cssRules[0])
+                .style
+            );
+            break;
+          case "wide":
+            globalStyleMediaWide.insertRule(`.${id1}${suffix} {}`, 0);
+            f1(
+              /** @type { CSSStyleRule } */ (globalStyleMediaWide.cssRules[0])
+                .style
+            );
+            break;
+          default:
+            throw new Error();
+        }
+      }
     }
     staticStyles.add(id1);
     return id1;
@@ -192,19 +244,28 @@
   );
   const varCForegroundLight = `color-mix(in srgb, ${varCForeground} 80%, transparent)`;
   const varCForegroundVeryLight = `color-mix(in srgb, ${varCForeground} 50%, transparent)`;
+  const varCForegroundUltraLight = `color-mix(in srgb, ${varCForeground} 20%, transparent)`;
   const varCForegroundHeadCenter = `color-mix(in srgb, ${varCForeground} 50%, ${varCBackground})`;
   const varCMutateForeground = "white";
   const varCMutateBackground = vs(
     "c-foreground-mutate",
     //"rgb(164, 32, 73)",
-    "rgb(137, 81, 219)",
+    //"rgb(137, 81, 219)",
+    //"rgba(76, 76, 146, 1)",
+    "rgba(120, 66, 87, 1)",
     "rgb(0,0,0)"
   );
   const varCNotifyForeground = "white";
   const varCNotifyBackground = vs(
-    "c-foreground-mutate",
+    "c-foreground-notify",
     //"rgb(164, 32, 73)",
-    "rgba(76, 76, 146, 1)",
+    "rgba(68, 78, 111, 1)",
+    "rgb(0,0,0)"
+  );
+  const varCNotifyBright = vs(
+    "c-foreground-notify-bright",
+    //"rgb(164, 32, 73)",
+    "rgba(81, 101, 176, 1)",
     "rgb(0,0,0)"
   );
   const varCForegroundError = vs(
@@ -220,7 +281,7 @@
   const varSPageNarrow = "min(100%, 20cm)";
   const varSChatEntry = "16cm";
   const varSPortrait = "1.5cm";
-  const varSChatControlsModeMessageButton = "0.8cm";
+  const varSChatControlsButton = "0.8cm";
 
   const varPPage = "0.3cm";
   const varPSmall = "0.2cm";
@@ -234,6 +295,7 @@
 
   const varLAsyncSvg = "0.02";
   const varLThin = "0.06cm";
+  const varLVeryThin = "0.05cm";
 
   const varRPortrait = "0.2cm";
   const varRBubble = "0.3cm";
@@ -509,20 +571,51 @@ svg.spinner4 path {
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: root
 
-  presentation.contRootWide = /** @type { Presentation["contRootWide"] } */ (
-    args
-  ) => {
+  presentation.contRoot = /** @type { Presentation["contRoot"] } */ (args) => {
+    const page = e(
+      "div",
+      {},
+      {
+        styles_: [
+          sm("cont_root_wide_page", {
+            "": {
+              "": (s) => {
+                s.display = "flex";
+                s.flexDirection = "column";
+                s.justifyContent = "stretch";
+                s.height = "100dvh";
+                s.overflowY = "scroll";
+              },
+              wide: (s) => {
+                s.gridColumn = "3";
+              },
+              narrow: (s) => {
+                s.gridColumn = "1";
+              },
+            },
+          }),
+        ],
+      }
+    );
     return {
+      page: page,
       root: e(
         "div",
         {},
         {
           styles_: [
-            s("cont_root_wide", {
-              "": (s) => {
-                s.display = "grid";
-                s.gridTemplateColumns = "min(25dvw, 8cm) auto";
-                s.columnGap = "0.5cm";
+            sm("cont_root_wide", {
+              "": {
+                "": (s) => {
+                  s.display = "grid";
+                },
+                wide: (s) => {
+                  s.gridTemplateColumns = "8cm 0fr auto";
+                  s.columnGap = "0.5cm";
+                },
+                narrow: (s) => {
+                  s.gridTemplateColumns = "1fr";
+                },
               },
             }),
           ],
@@ -532,7 +625,7 @@ svg.spinner4 path {
               {},
               {
                 styles_: [
-                  s("cont_root_wide_menu", {
+                  s("cont_root_wide_top", {
                     "": (s) => {
                       s.gridColumn = "1";
 
@@ -552,21 +645,26 @@ svg.spinner4 path {
               {},
               {
                 styles_: [
-                  s("cont_root_wide_page", {
-                    "": (s) => {
-                      s.gridColumn = "2";
-
-                      s.display = "flex";
-                      s.flexDirection = "column";
-                      s.justifyContent = "stretch";
-                      s.height = "100dvh";
-                      s.overflowY = "scroll";
+                  sm("cont_root_wide_sep", {
+                    "": {
+                      "": (s) => {},
+                      wide: (s) => {
+                        s.gridColumn = "2";
+                        s.justifySelf = "center";
+                        s.alignSelf = "center";
+                        s.height = "80%";
+                        s.width = varLVeryThin;
+                        s.backgroundColor = varCForegroundUltraLight;
+                      },
+                      narrow: (s) => {
+                        s.display = "none";
+                      },
                     },
                   }),
                 ],
-                children_: [args.page],
               }
             ),
+            page,
           ],
         }
       ),
@@ -1556,7 +1654,7 @@ svg.spinner4 path {
   const chatEntrySelectableStyle = s("chat_entry_selectable", {
     "": (s) => {},
     [`.${classStateSelected} .${chatEntrySelectSpecificStyle}`]: (s) => {
-      s.border = `${varLThin} solid ${varCMutateBackground}`;
+      s.border = `${varLThin} solid ${varCNotifyBright}`;
     },
   });
   presentation.contChatEntryModeMessage =
@@ -1816,7 +1914,35 @@ svg.spinner4 path {
   presentation.contChatControlsBarModeMenu =
     /** @type { Presentation["contChatControlsBarModeMenu"] } */ (args) => {
       return {
-        root: chatControlsBox({ children: args.children, extraStyles: [] }),
+        root: chatControlsBox({
+          children: [
+            e(
+              "div",
+              {},
+              {
+                styles_: [
+                  contHboxStyle,
+                  ...bubbleStyles,
+                  s("leaf_chat_controls_mode_menu_buttons", {
+                    "": (s) => {
+                      s.gap = "0.2cm";
+                    },
+                  }),
+                ],
+                children_: args.children,
+              }
+            ),
+          ],
+          extraStyles: [
+            contHboxStyle,
+            ...floatingBarStyles(varCBackground, "0.0"),
+            s("leaf_chat_controls_mode_menu", {
+              "": (s) => {
+                s.justifyContent = "center";
+              },
+            }),
+          ],
+        }),
       };
     };
 
@@ -1828,7 +1954,22 @@ svg.spinner4 path {
         root: e(
           "button",
           {},
-          { children_: [leafIcon({ text: textIconAddMessage })] }
+          {
+            children_: [
+              leafIcon({
+                text: textIconAddMessage,
+                extraStyles: [
+                  buttonStyle,
+                  s("leaf_chat_controls_bar_mode_menu_button", {
+                    "": (s) => {
+                      s.width = varSChatControlsButton;
+                      s.height = varSChatControlsButton;
+                    },
+                  }),
+                ],
+              }),
+            ],
+          }
         ),
       };
     };
@@ -1837,8 +1978,8 @@ svg.spinner4 path {
     /** @type { Presentation["leafChatControlsBarModeMessage"] } */ (args) => {
       const messageButtonStyle = s("leaf_chat_controls_mode_message_button", {
         "": (s) => {
-          s.width = varSChatControlsModeMessageButton;
-          s.height = varSChatControlsModeMessageButton;
+          s.width = varSChatControlsButton;
+          s.height = varSChatControlsButton;
           s.filter = `drop-shadow(0 0 0.1cm ${varCBackgroundGrad2}) drop-shadow(0 0 0.1cm ${varCBackgroundGrad2})`;
         },
       });

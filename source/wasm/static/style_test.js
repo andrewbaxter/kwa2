@@ -80,33 +80,14 @@
       );
       return page.root;
     };
-    const buildRoot = /** @type {(wide: Boolean, e: HTMLElement)=>void} */ (
-      wide,
-      e
-    ) => {
-      if (wide) {
-        document.body.appendChild(
-          presentation.contRootWide({
-            menu: buildTop(),
-            page: e,
-          }).root
-        );
-      } else {
-        const htmlStyle = /** @type {CSSStyleDeclaration} */ (
-          document.body.parentElement?.style
-        );
-        htmlStyle.backgroundColor = "black";
-        htmlStyle.overflowY = "scroll";
-        const dStyle = document.body.style;
-        dStyle.width = `${828 / 2}px`;
-        dStyle.maxWidth = dStyle.width;
-        dStyle.height = `${1792 / 2}px`;
-        dStyle.maxHeight = dStyle.height;
-        dStyle.margin = "auto";
-        dStyle.overflowX = "hidden";
-        dStyle.overflowY = "scroll";
-        document.body.appendChild(e);
+    const buildRoot = /** @type {( e?: HTMLElement)=>void} */ (e) => {
+      const root = presentation.contRoot({
+        menu: buildTop(),
+      });
+      if (e != null) {
+        root.page.appendChild(e);
       }
+      document.body.appendChild(root.root);
     };
     const buildMenu = /** @type {(_:{link: Boolean}) => HTMLElement} */ (
       args
@@ -268,52 +249,32 @@
     switch (hash) {
       case "#top":
         {
-          buildRoot(false, buildTop());
-        }
-        break;
-      case "#wide_top":
-        {
-          buildRoot(true, presentation.contPageBlank({}).root);
+          buildRoot();
         }
         break;
       case "#menu":
         {
-          buildRoot(false, buildMenu({ link: true }));
+          buildRoot(buildMenu({ link: true }));
         }
         break;
       case "#menu_nolink":
         {
-          buildRoot(false, buildMenu({ link: false }));
-        }
-        break;
-      case "#wide_menu":
-        {
-          buildRoot(true, buildMenu({ link: true }));
+          buildRoot(buildMenu({ link: false }));
         }
         break;
       case "#form":
         {
-          buildRoot(false, buildForm());
-        }
-        break;
-      case "#wide_form":
-        {
-          buildRoot(true, buildForm());
+          buildRoot(buildForm());
         }
         break;
       case "#chat":
         {
-          buildRoot(false, buildChat({ controls: false }));
+          buildRoot(buildChat({ controls: false }));
         }
         break;
-      case "#wide_chat":
+      case "#chat_controls":
         {
-          buildRoot(true, buildChat({ controls: false }));
-        }
-        break;
-      case "#wide_chat_controls":
-        {
-          buildRoot(true, buildChat({ controls: true }));
+          buildRoot(buildChat({ controls: true }));
         }
         break;
       default:

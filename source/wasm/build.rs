@@ -126,9 +126,9 @@ fn main() {
         // /////////////////////////////////////////////////////////////////////////////
         // xx Components, styles: root
         Func {
-            name: "contRootWide",
-            args: vec![("menu", &el_), ("page", &el_)],
-            returns: vec![("root", &el_)],
+            name: "contRoot",
+            args: vec![("menu", &el_)],
+            returns: vec![("root", &el_), ("page", &el_)],
         },
         Func {
             name: "contPageBlank",
