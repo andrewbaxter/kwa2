@@ -20,9 +20,7 @@ use {
     rooting::set_root,
     serde::Deserialize,
     shared::interface::{
-        shared::QualifiedChannelId,
         wire::{
-            c2s::ActivityOffset,
             s2c,
         },
     },
@@ -34,6 +32,7 @@ use {
     wasm::{
         async_::bg_val,
         background::{
+            handle_notification,
             schedule_trigger_pull,
             trigger_push,
         },
@@ -100,9 +99,9 @@ pub fn main() {
             current_chat: Default::default(),
             service_worker: service_worker,
             page_root: root.clone(),
-            top_lookup_channel: Default::default(),
-            top_lookup_channelgroup: Default::default(),
-            unread: Prim::new(0),
+            lookup_channel: Default::default(),
+            lookup_channelgroup: Default::default(),
+            unread_any: Prim::new(false),
             top: lunk::List::new(vec![]),
             ministate: RefCell::new(shed!{
                 'found _;
@@ -174,19 +173,6 @@ pub fn main() {
                 build_ministate(pc, &ministate);
             }).unwrap()
         }).forget();
-
-        fn handle_notification(eg: &EventGraph, channel: &QualifiedChannelId, offset: ActivityOffset) {
-            let state = state();
-            let current_chat = state.current_chat.borrow();
-            let Some(c) = &*current_chat else {
-                return;
-            };
-            let cf = c.chat_state2.channel_lookup.borrow();
-            if let Some(f) = cf.get(channel) {
-                f.channel.notify(eg, offset);
-            }
-        }
-
         EventListener::new(&window().navigator().service_worker(), "message", {
             let eg = pc.eg();
             move |ev| {
@@ -203,7 +189,7 @@ pub fn main() {
                         document().location().unwrap().reload().expect("Error triggering reload");
                     },
                     FromSw::Notification(n) => {
-                        handle_notification(&eg, &n.channel, n.offset);
+                        handle_notification(&eg, vec![(n.channel, n.offset)]);
                     },
                 }
                 ev.data();
@@ -218,7 +204,7 @@ pub fn main() {
                 *ws.borrow_mut() = Some(Ws::new(state().log.clone(), &state().env.base_url, "", {
                     let eg = eg.clone();
                     move |_ws, m: s2c::Notification| {
-                        handle_notification(&eg, &m.channel, m.offset);
+                        handle_notification(&eg, vec![(m.channel, m.offset)]);
                     }
                 }));
             }

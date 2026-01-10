@@ -53,12 +53,9 @@ fn build_root_children(pc: &mut ProcessingContext) -> El {
                             .unread
                             .ref_own(|el_| link!((_pc = pc), (unread = c.unread.clone()), (), (el_ = el_.weak()) {
                                 let el_ = el_.upgrade()?;
-                                let unread = *unread.borrow();
-                                if unread > 0 {
-                                    el_.ref_text(&unread.to_string());
-                                } else {
-                                    el_.ref_text("");
-                                }
+                                el_.ref_modify_classes(
+                                    &[(&style_export::class_state_hidden().value, !*unread.borrow())]
+                                );
                             }));
                         child.root
                     },
@@ -75,12 +72,9 @@ fn build_root_children(pc: &mut ProcessingContext) -> El {
                             .unread
                             .ref_own(|el_| link!((_pc = pc), (unread = cg.unread.clone()), (), (el_ = el_.weak()) {
                                 let el_ = el_.upgrade()?;
-                                let unread = *unread.borrow();
-                                if unread > 0 {
-                                    el_.ref_text(&unread.to_string());
-                                } else {
-                                    el_.ref_text("");
-                                }
+                                el_.ref_modify_classes(
+                                    &[(&style_export::class_state_hidden().value, !*unread.borrow())]
+                                );
                             }));
                         out.group_el.ref_own(|e| link!((pc = pc), (children = cg.children.clone()), (), (e = e.weak()) {
                             let e = e.upgrade()?;
@@ -105,12 +99,14 @@ fn build_root_children(pc: &mut ProcessingContext) -> El {
                                                 (),
                                                 (el_ = el_.weak()) {
                                                     let el_ = el_.upgrade()?;
-                                                    let unread = *unread.borrow();
-                                                    if unread > 0 {
-                                                        el_.ref_text(&unread.to_string());
-                                                    } else {
-                                                        el_.ref_text("");
-                                                    }
+                                                    el_.ref_modify_classes(
+                                                        &[
+                                                            (
+                                                                &style_export::class_state_hidden().value,
+                                                                !*unread.borrow(),
+                                                            )
+                                                        ]
+                                                    );
                                                 }
                                             )
                                         );

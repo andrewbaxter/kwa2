@@ -2,6 +2,7 @@
 declare type Presentation = {
     classStateThinking: (args: {  }) => { value: string };
     classStateSelected: (args: {  }) => { value: string };
+    classStateHidden: (args: {  }) => { value: string };
     contGroup: (args: { children: HTMLElement[] }) => { root: HTMLElement };
     leafAsyncBlock: (args: {  }) => { root: HTMLElement };
     leafErrBlock: (args: { data: string }) => { root: HTMLElement };

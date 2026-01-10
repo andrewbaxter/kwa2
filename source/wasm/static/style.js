@@ -228,6 +228,7 @@
   );
   //const varCBackgroundGrad2 = vs("background-end", "#9ab0c4", "rgb(0,0,0)");
   const varCBackgroundGrad2 = varCBackground;
+  const varCFullBackground = `linear-gradient(to bottom, ${varCBackground}, ${varCBackgroundGrad2})`;
   const varCBackgroundBubble = vs(
     "background-bubble",
     "whitesmoke",
@@ -314,6 +315,11 @@
   presentation.classStateSelected =
     /** @type { Presentation["classStateSelected"]} */ () => ({
       value: classStateSelected,
+    });
+  const classStateHidden = "hidden";
+  presentation.classStateHidden =
+    /** @type { Presentation["classStateHidden"]} */ () => ({
+      value: classStateHidden,
     });
 
   ///////////////////////////////////////////////////////////////////////////////
@@ -583,11 +589,14 @@ svg.spinner4 path {
           sm("cont_root_wide_page", {
             "": {
               "": (s) => {
+                s.position = "relative";
+                s.background = varCFullBackground;
                 s.display = "flex";
                 s.flexDirection = "column";
                 s.justifyContent = "stretch";
                 s.height = "100dvh";
                 s.overflowY = "scroll";
+                s.gridRow = "1";
               },
               wide: (s) => {
                 s.gridColumn = "3";
@@ -631,6 +640,10 @@ svg.spinner4 path {
                   s("cont_root_wide_top", {
                     "": (s) => {
                       s.gridColumn = "1";
+                      s.gridRow = "1";
+
+                      s.position = "relative";
+                      s.background = varCFullBackground;
 
                       s.display = "flex";
                       s.flexDirection = "column";
@@ -749,10 +762,34 @@ svg.spinner4 path {
     return e("div", {}, { styles_: [topSelectBgStyle] });
   };
 
+  const unreadStyle = sm("unread", {
+    "": {
+      "": (s) => {
+        s.backgroundColor = varCNotifyBright;
+        s.backgroundBlendMode = "multiply";
+        s.color = varCNotifyForeground;
+        s.borderRadius = "999cm";
+        s.width = "0.3cm";
+        s.height = "0.3cm";
+        s.margin = "0.2cm";
+      },
+      narrow: (s) => {},
+      wide: (s) => {
+        s.display = "none";
+      },
+    },
+    [`.${classStateHidden}`]: {
+      "": (s) => {
+        s.display = "none";
+      },
+      narrow: (s) => {},
+      wide: (s) => {},
+    },
+  });
   presentation.leafMenuLink = /** @type { Presentation["leafMenuLink"] } */ (
     args
   ) => {
-    const unread = e("div", {}, { styles_: [unreadStyle] });
+    const unread = e("div", {}, { styles_: [unreadStyle, classStateHidden] });
     /** @type { HTMLElement[] } */
     const children = [createTopItemSelectBg()];
     if (args.image != null) {
@@ -1533,23 +1570,7 @@ svg.spinner4 path {
         }),
       ];
     };
-  const unreadStyle = s("unread", {
-    "": (s) => {
-      s.backgroundColor = varCNotifyBackground;
-      s.backgroundBlendMode = "multiply";
-      s.color = varCNotifyForeground;
-      s.borderRadius = "999cm";
-      s.fontFamily = "sans-serif";
-      s.padding = "0.2cm";
-      s.padding = "0.2cm 0.3cm";
-      s.fontSize = "10pt";
-      s.lineHeight = "initial";
-    },
-    ":empty": (s) => {
-      s.display = "none";
-    },
-  });
-  const backUnreadStyles = [unreadStyle];
+  const backUnreadStyles = [unreadStyle, classStateHidden];
   presentation.contChatHeadBar =
     /** @type { Presentation["contChatHeadBar"] } */ (args) => {
       const children = [];
@@ -2105,7 +2126,7 @@ svg.spinner4 path {
         "": (s) => {
           s.fontFamily = "X";
           //s.backgroundColor = varCBackground;
-          s.background = `linear-gradient(to bottom, ${varCBackground}, ${varCBackgroundGrad2})`;
+          s.background = varCFullBackground;
           s.color = varCForeground;
         },
       })

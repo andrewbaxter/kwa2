@@ -106,6 +106,11 @@ fn main() {
             args: vec![],
             returns: vec![("value", &string_)],
         },
+        Func {
+            name: "classStateHidden",
+            args: vec![],
+            returns: vec![("value", &string_)],
+        },
         // /////////////////////////////////////////////////////////////////////////////
         // xx Components, styles: all
         Func {

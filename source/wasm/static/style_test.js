@@ -14,7 +14,7 @@
         text: "Channel 1",
         link: "abcd",
       });
-      link2.unread.textContent = "4";
+      link2.unread.classList.remove(presentation.classStateHidden({}).value);
       const group1 = presentation.leafMenuGroup({
         text: "Family",
         link: "abcd",
@@ -30,7 +30,7 @@
           }).root,
         ],
       });
-      group1.unread.textContent = "7";
+      group1.unread.classList.remove(presentation.classStateHidden({}).value);
       const group2 = presentation.leafMenuGroup({
         text: "Personal this is a long group",
         link: "abcd",
@@ -51,7 +51,7 @@
           }).root,
         ],
       });
-      group2.unread.textContent = "47";
+      group2.unread.classList.remove(presentation.classStateHidden({}).value);
       group2.root.classList.add(presentation.classStateSelected({}).value);
       const page = presentation.contPageTop({
         identitiesLink: "abcd",
@@ -122,7 +122,7 @@
         }).root,
         right: undefined,
       });
-      head.backUnread.textContent = "11";
+      head.backUnread.classList.remove(presentation.classStateHidden({}).value);
       return presentation.contPageMenu({
         headBar: head.root,
         children: [

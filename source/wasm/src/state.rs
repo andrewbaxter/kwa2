@@ -4,10 +4,7 @@ use {
             BgVal,
             bg_val,
         },
-        chat::{
-            ChatState,
-            ChatState2,
-        },
+        chat::ChatState2,
         chat_entry::ChatEntry,
         infinite::Infinite,
         js::{
@@ -87,17 +84,25 @@ use {
         Deserialize,
         Serialize,
     },
-    shared::interface::shared::{
-        ChannelGroupId,
-        ChannelInviteId,
-        IdentityInviteId,
-        QualifiedChannelId,
-        QualifiedMessageId,
+    shared::interface::{
+        shared::{
+            ChannelGroupId,
+            ChannelInviteId,
+            IdentityInviteId,
+            QualifiedChannelId,
+            QualifiedMessageId,
+        },
+        wire::c2s::ActivityOffset,
     },
     spaghettinuum::interface::identity::Identity,
     std::{
-        cell::RefCell,
-        collections::HashMap,
+        cell::{
+            Cell,
+            RefCell,
+        },
+        collections::{
+            HashMap,
+        },
         future::Future,
         mem::swap,
         rc::Rc,
@@ -108,6 +113,7 @@ use {
     web_sys::ServiceWorkerRegistration,
 };
 
+pub const LOCALSTORAGE_UNREAD: &str = "unread";
 pub const LOCALSTORAGE_PWA_MINISTATE: &str = "pwa_ministate";
 pub const SESSIONSTORAGE_POST_REDIRECT_MINISTATE: &str = "post_redirect";
 
@@ -252,14 +258,14 @@ pub enum CurrentChatSource {
 pub struct CurrentChat {
     pub source: CurrentChatSource,
     pub inf: Infinite<ChatEntry>,
-    pub chat_state: Rc<ChatState>,
     pub chat_state2: Rc<ChatState2>,
 }
 
 #[derive(Clone)]
 pub struct LocalChannel1 {
     pub id: QualifiedChannelId,
-    pub unread: Prim<usize>,
+    pub last_offset: Cell<Option<ActivityOffset>>,
+    pub unread: Prim<bool>,
     pub memo_short: HistPrim<String>,
     pub memo_long: HistPrim<String>,
     pub group: HistPrim<Option<ChannelGroupId>>,
@@ -269,7 +275,7 @@ pub struct LocalChannel1 {
 #[derive(Clone)]
 pub struct LocalChannelGroup1 {
     pub id: ChannelGroupId,
-    pub unread: Prim<usize>,
+    pub unread: Prim<bool>,
     pub memo_short: HistPrim<String>,
     pub memo_long: HistPrim<String>,
     pub children: lunk::List<Rc<LocalChannel1>>,
@@ -289,9 +295,9 @@ pub struct State_ {
     pub env: Env,
     pub log: Rc<dyn Log>,
     pub log1: Rc<VecLog>,
-    pub unread: Prim<usize>,
-    pub top_lookup_channel: RefCell<HashMap<QualifiedChannelId, Rc<LocalChannel1>>>,
-    pub top_lookup_channelgroup: RefCell<HashMap<ChannelGroupId, Rc<LocalChannelGroup1>>>,
+    pub unread_any: Prim<bool>,
+    pub lookup_channel: RefCell<HashMap<QualifiedChannelId, Rc<LocalChannel1>>>,
+    pub lookup_channelgroup: RefCell<HashMap<ChannelGroupId, Rc<LocalChannelGroup1>>>,
     pub top: lunk::List<LocalCocg>,
     pub current_chat: RefCell<Option<CurrentChat>>,
     pub bg_pushing: RefCell<Option<oneshot::Receiver<()>>>,
@@ -455,9 +461,34 @@ pub enum SessionStorageChatReset {
     ChannelGroup(SessionStorageChatResetChannelGroup),
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct SerialUnreadValue {
+    pub offset: Option<ActivityOffset>,
+    pub unread: bool,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct SerialUnread(pub Vec<(QualifiedChannelId, SerialUnreadValue)>);
+
+pub fn save_unread() {
+    LocalStorage::set(
+        LOCALSTORAGE_UNREAD,
+        SerialUnread(state().lookup_channel.borrow().iter().map(|(k, v)| (k.clone(), SerialUnreadValue {
+            offset: v.last_offset.get(),
+            unread: *v.unread.borrow(),
+        })).collect()),
+    ).log(&state().log, &"Failed to save unread state in local storage");
+}
+
 // Settings
 pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<LocalChannelGroup>) {
     let mut top_add = vec![];
+    let unread =
+        LocalStorage::get::<SerialUnread>(LOCALSTORAGE_UNREAD)
+            .unwrap_or_default()
+            .0
+            .into_iter()
+            .collect::<HashMap<_, _>>();
 
     // Sort data, do lookup removals
     let mut lookup_cs = HashMap::new();
@@ -466,7 +497,7 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
         HashMap::<ChannelGroupId, HashMap<QualifiedChannelId, Rc<LocalChannel1>>>::new();
     let mut lookup_received_top_cs = HashMap::new();
     for received_cg in cgs {
-        let cg1 = match state().top_lookup_channelgroup.borrow_mut().remove(&received_cg.res.id) {
+        let cg1 = match state().lookup_channelgroup.borrow_mut().remove(&received_cg.res.id) {
             Some(existing) => {
                 existing.memo_long.set(pc, received_cg.res.memo_long.clone());
                 existing.memo_short.set(pc, received_cg.res.memo_short.clone());
@@ -475,7 +506,7 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
             None => {
                 let new_cg = Rc::new(LocalChannelGroup1 {
                     id: received_cg.res.id.clone(),
-                    unread: Prim::new(0),
+                    unread: Prim::new(false),
                     memo_long: HistPrim::new(pc, received_cg.res.memo_long.clone()),
                     memo_short: HistPrim::new(pc, received_cg.res.memo_short.clone()),
                     children: lunk::List::new(vec![]),
@@ -486,9 +517,10 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
         };
         lookup_cgs.insert(cg1.id.clone(), cg1.clone());
     }
+    let mut unread_any = false;
     for received_c in cs {
         let group = received_c.res.group;
-        let c1 = match state().top_lookup_channel.borrow_mut().remove(&received_c.res.id) {
+        let c1 = match state().lookup_channel.borrow_mut().remove(&received_c.res.id) {
             Some(existing_c) => {
                 // TODO make `set_if_not` for prim, don't use histprim here
                 existing_c.memo_long.set(pc, received_c.res.memo_long.clone());
@@ -496,22 +528,36 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
                 existing_c.group.set(pc, received_c.res.group);
                 existing_c
             },
-            None => Rc::new(LocalChannel1 {
-                id: received_c.res.id.clone(),
-                own_identity: received_c.res.own_identity.clone(),
-                unread: Prim::new(0),
-                memo_long: HistPrim::new(pc, received_c.res.memo_long.clone()),
-                memo_short: HistPrim::new(pc, received_c.res.memo_short.clone()),
-                group: HistPrim::new(pc, received_c.res.group.clone()),
-            }),
+            None => {
+                let c_unread = unread.get(&received_c.res.id);
+                Rc::new(LocalChannel1 {
+                    id: received_c.res.id.clone(),
+                    own_identity: received_c.res.own_identity.clone(),
+                    last_offset: Cell::new(c_unread.as_ref().and_then(|x| x.offset)),
+                    unread: Prim::new(c_unread.map(|x| x.unread).unwrap_or(false)),
+                    memo_long: HistPrim::new(pc, received_c.res.memo_long.clone()),
+                    memo_short: HistPrim::new(pc, received_c.res.memo_short.clone()),
+                    group: HistPrim::new(pc, received_c.res.group.clone()),
+                })
+            },
         };
         lookup_cs.insert(c1.id.clone(), c1.clone());
         if let Some(g) = &group {
+            if let Some(cg) = state().lookup_channelgroup.borrow().get(g) {
+                if *c1.unread.borrow() {
+                    cg.unread.set(pc, true);
+                    unread_any = true;
+                }
+            }
             lookup_received_child_cs.entry(*g).or_default().insert(c1.id.clone(), c1);
         } else {
+            if *c1.unread.borrow() {
+                unread_any = true;
+            }
             lookup_received_top_cs.insert(c1.id.clone(), c1);
         }
     }
+    state().unread_any.set(pc, unread_any);
 
     // Prep tree additions and removals
     struct RemoveChange {
@@ -600,8 +646,8 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
     for removal in top_removals {
         state().top.splice(pc, removal.offset, removal.count, vec![]);
     }
-    swap(&mut *state().top_lookup_channel.borrow_mut(), &mut lookup_cs);
-    swap(&mut *state().top_lookup_channelgroup.borrow_mut(), &mut lookup_cgs);
+    swap(&mut *state().lookup_channel.borrow_mut(), &mut lookup_cs);
+    swap(&mut *state().lookup_channelgroup.borrow_mut(), &mut lookup_cgs);
 
     // Do tree additions
     for (_, new_c) in lookup_received_top_cs {
@@ -676,7 +722,7 @@ pub async fn pull_top(eg: &EventGraph) {
 }
 
 pub fn get_or_req_channel(eg: &EventGraph, id: &QualifiedChannelId, touch: bool) -> NowOrLater<Rc<LocalChannel1>> {
-    match state().top_lookup_channel.borrow().get(id) {
+    match state().lookup_channel.borrow().get(id) {
         Some(c) => return NowOrLater::Now(c.clone()),
         None => {
             let eg = eg.clone();
@@ -687,7 +733,7 @@ pub fn get_or_req_channel(eg: &EventGraph, id: &QualifiedChannelId, touch: bool)
                 } else {
                     None
                 }, None).await;
-                return Ok(state().top_lookup_channel.borrow().get(&id).cloned());
+                return Ok(state().lookup_channel.borrow().get(&id).cloned());
             }));
         },
     }
@@ -698,7 +744,7 @@ pub fn get_or_req_channelgroup(
     id: &ChannelGroupId,
     touch: bool,
 ) -> NowOrLater<Rc<LocalChannelGroup1>> {
-    match state().top_lookup_channelgroup.borrow().get(id) {
+    match state().lookup_channelgroup.borrow().get(id) {
         Some(c) => return NowOrLater::Now(c.clone()),
         None => {
             let eg = eg.clone();
@@ -709,7 +755,7 @@ pub fn get_or_req_channelgroup(
                 } else {
                     None
                 }).await;
-                return Ok(state().top_lookup_channelgroup.borrow().get(&id).cloned());
+                return Ok(state().lookup_channelgroup.borrow().get(&id).cloned());
             }));
         },
     }

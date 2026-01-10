@@ -243,15 +243,12 @@ pub fn build_form(
         }).root,
         right: None,
     });
-    head_bar.back_unread.ref_own(|el_| link!((_pc = pc), (unread = state().unread.clone()), (), (el_ = el_.weak()), {
-        let el_ = el_.upgrade()?;
-        let unread = *unread.borrow();
-        if unread > 0 {
-            el_.ref_text(&unread.to_string());
-        } else {
-            el_.ref_text("");
-        }
-    }));
+    head_bar
+        .back_unread
+        .ref_own(|el_| link!((_pc = pc), (unread = state().unread_any.clone()), (), (el_ = el_.weak()), {
+            let el_ = el_.upgrade()?;
+            el_.ref_modify_classes(&[(&style_export::class_state_hidden().value, !*unread.borrow())]);
+        }));
     let form = style_export::cont_page_form(style_export::ContPageFormArgs {
         head_bar: head_bar.root,
         children: vec![],
@@ -272,15 +269,12 @@ pub fn build_nol_form<
         }).root,
         right: None,
     });
-    head_bar.back_unread.ref_own(|el_| link!((_pc = pc), (unread = state().unread.clone()), (), (el_ = el_.weak()), {
-        let el_ = el_.upgrade()?;
-        let unread = *unread.borrow();
-        if unread > 0 {
-            el_.ref_text(&unread.to_string());
-        } else {
-            el_.ref_text("");
-        }
-    }));
+    head_bar
+        .back_unread
+        .ref_own(|el_| link!((_pc = pc), (unread = state().unread_any.clone()), (), (el_ = el_.weak()), {
+            let el_ = el_.upgrade()?;
+            el_.ref_modify_classes(&[(&style_export::class_state_hidden().value, !*unread.borrow())]);
+        }));
     let form = style_export::cont_page_form(style_export::ContPageFormArgs {
         head_bar: head_bar.root,
         children: vec![],
@@ -351,15 +345,12 @@ pub fn build_nol_menu<
         center: center,
         right: None,
     });
-    head_bar.back_unread.ref_own(|el_| link!((_pc = pc), (unread = state().unread.clone()), (), (el_ = el_.weak()), {
-        let el_ = el_.upgrade()?;
-        let unread = *unread.borrow();
-        if unread > 0 {
-            el_.ref_text(&unread.to_string());
-        } else {
-            el_.ref_text("");
-        }
-    }));
+    head_bar
+        .back_unread
+        .ref_own(|el_| link!((_pc = pc), (unread = state().unread_any.clone()), (), (el_ = el_.weak()), {
+            let el_ = el_.upgrade()?;
+            el_.ref_modify_classes(&[(&style_export::class_state_hidden().value, !*unread.borrow())]);
+        }));
     return style_export::cont_page_menu(style_export::ContPageMenuArgs {
         head_bar: head_bar.root,
         children: body,
@@ -399,15 +390,12 @@ pub fn build_nol_menu_title<
         }).root,
         right: None,
     });
-    head_bar.back_unread.ref_own(|el_| link!((_pc = pc), (unread = state().unread.clone()), (), (el_ = el_.weak()), {
-        let el_ = el_.upgrade()?;
-        let unread = *unread.borrow();
-        if unread > 0 {
-            el_.ref_text(&unread.to_string());
-        } else {
-            el_.ref_text("");
-        }
-    }));
+    head_bar
+        .back_unread
+        .ref_own(|el_| link!((_pc = pc), (unread = state().unread_any.clone()), (), (el_ = el_.weak()), {
+            let el_ = el_.upgrade()?;
+            el_.ref_modify_classes(&[(&style_export::class_state_hidden().value, !*unread.borrow())]);
+        }));
     return style_export::cont_page_menu(style_export::ContPageMenuArgs {
         head_bar: head_bar.root,
         children: vec![body],

@@ -16,6 +16,8 @@ use {
             opfs_outbox,
         },
         state::{
+            Ministate,
+            save_unread,
             spawn_rooted_log,
             state,
         },
@@ -31,7 +33,10 @@ use {
             MessageClientId,
             QualifiedChannelId,
         },
-        wire::c2s,
+        wire::c2s::{
+            self,
+            ActivityOffset,
+        },
     },
     spaghettinuum::interface::identity::Identity,
     std::str::FromStr,
@@ -161,6 +166,52 @@ pub fn trigger_push() {
     }));
 }
 
+pub fn handle_notification(eg: &EventGraph, notifications: Vec<(QualifiedChannelId, ActivityOffset)>) {
+    let state = state();
+    let current_chat = state.current_chat.borrow();
+    let mut has_feed = false;
+    if let Some(c) = &*current_chat {
+        let cf = c.chat_state2.channel_lookup.borrow();
+        for (channel, offset) in &notifications {
+            if let Some(f) = cf.get(channel) {
+                f.channel.notify(eg, *offset);
+                has_feed = true;
+            }
+        }
+    }
+    if !matches!(&*state.ministate.borrow(), Ministate::Channel(..) | Ministate::ChannelGroup(..)) || !has_feed {
+        eg.event(|pc| {
+            let mut unread_changed = false;
+            for (channel, offset) in &notifications {
+                let lookup_channels = state.lookup_channel.borrow();
+                let Some(lc) = lookup_channels.get(channel) else {
+                    continue;
+                };
+                if lc.last_offset.get().map(|o| o <= *offset).unwrap_or(false) {
+                    continue;
+                }
+                lc.last_offset.set(Some(*offset));
+                lc.unread.set(pc, true);
+                unread_changed = true;
+                if let Some(group) = &*lc.group.borrow() {
+                    if let Some(group) = state.lookup_channelgroup.borrow().get(group) {
+                        group.unread.set(pc, true);
+                        state.unread_any.set(pc, true);
+                    }
+                } else {
+                    state.unread_any.set(pc, true);
+                }
+
+                // Borrow weirdness
+                ();
+            }
+            if unread_changed {
+                save_unread();
+            }
+        }).unwrap();
+    }
+}
+
 pub fn schedule_trigger_pull(eg: EventGraph) {
     fn trigger_pull(eg: &EventGraph) {
         *state().bg_pulling.borrow_mut() = Some(spawn_rooted_log("Pulling fresh messages", {
@@ -168,16 +219,7 @@ pub fn schedule_trigger_pull(eg: EventGraph) {
             async move {
                 ta_return!((), String);
                 let res = req_get(c2s::ActivityLatestAll {}).await?;
-                let Some(chat) = state().current_chat.borrow().clone() else {
-                    return Ok(());
-                };
-                let channel_lookup = chat.chat_state2.channel_lookup.borrow();
-                for (channel, offset) in res {
-                    let Some(feed) = channel_lookup.get(&channel) else {
-                        continue;
-                    };
-                    feed.channel.notify(&eg, offset);
-                }
+                handle_notification(&eg, res.into_iter().collect());
                 return Ok(());
             }
         }));
