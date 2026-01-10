@@ -7,16 +7,19 @@
       const link1 = presentation.leafMenuLink({
         text: "Channel 1",
         link: "abcd",
+        image: "testportrait.jpg",
       });
-      link1.unread.textContent = "4";
+      link1.root.classList.add(presentation.classStateSelected({}).value);
+      const link2 = presentation.leafMenuLink({
+        text: "Channel 1",
+        link: "abcd",
+      });
+      link2.unread.textContent = "4";
       const group1 = presentation.leafMenuGroup({
         text: "Family",
         link: "abcd",
         children: [
-          presentation.leafMenuLink({
-            text: "Channel 1",
-            link: "abcd",
-          }).root,
+          link1.root,
           presentation.leafMenuLink({
             text: "Channel 2",
             link: "abcd",
@@ -29,16 +32,18 @@
       });
       group1.unread.textContent = "7";
       const group2 = presentation.leafMenuGroup({
-        text: "Personal",
+        text: "Personal this is a long group",
         link: "abcd",
         children: [
           presentation.leafMenuLink({
             text: "Channel 1",
             link: "abcd",
+            image: "testportrait.jpg",
           }).root,
           presentation.leafMenuLink({
             text: "Channel 2",
             link: "abcd",
+            image: "testportrait.jpg",
           }).root,
           presentation.leafMenuLink({
             text: "Channel 3",
@@ -57,7 +62,7 @@
             text: "Art",
             link: "abcd",
             children: [
-              link1.root,
+              link2.root,
               presentation.leafMenuLink({
                 text: "Channel 2",
                 link: "abcd",
@@ -70,8 +75,18 @@
           }).root,
           group1.root,
           group2.root,
-          presentation.leafMenuLink({ text: "Systems", link: "abcd" }).root,
-          presentation.leafMenuLink({ text: "News", link: "abcd" }).root,
+          presentation.leafMenuLink({
+            text: "Systems",
+            link: "abcd",
+
+            image: "testportrait.jpg",
+          }).root,
+          presentation.leafMenuLink({
+            text: "News",
+            link: "abcd",
+
+            image: "testportrait.jpg",
+          }).root,
           presentation.leafAsyncBlock({}).root,
         ],
       });
@@ -185,6 +200,7 @@
           const entryMessage1 = presentation.contChatEntryModeMessage({
             left: left,
             date: new Date().toISOString(),
+            image: "testportrait.jpg",
           });
           entryMessage1.body.appendChild(
             presentation.leafChatEntryModeMessageTextBlock({ text: text }).root

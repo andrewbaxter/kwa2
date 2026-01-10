@@ -282,6 +282,8 @@
   const varSChatEntry = "16cm";
   const varSPortrait = "1.5cm";
   const varSChatControlsButton = "0.8cm";
+  const varSMenuIcon = "1cm";
+  const varSMenuIconShiftCalc = `(${varSMenuIcon} + 0.15cm)`;
 
   const varPPage = "0.3cm";
   const varPSmall = "0.2cm";
@@ -735,7 +737,10 @@ svg.spinner4 path {
     "": (s) => {
       s.position = "relative";
     },
-    [`.${classStateSelected} .${topSelectBgStyle}`]: (s) => {
+    [`.${classStateSelected} > summary .${topSelectBgStyle}`]: (s) => {
+      s.display = "initial";
+    },
+    [`.${classStateSelected} > .${topSelectBgStyle}`]: (s) => {
       s.display = "initial";
     },
   });
@@ -747,17 +752,64 @@ svg.spinner4 path {
     args
   ) => {
     const unread = e("div", {}, { styles_: [unreadStyle] });
+    /** @type { HTMLElement[] } */
+    const children = [createTopItemSelectBg()];
+    if (args.image != null) {
+      children.push(
+        e(
+          "img",
+          { src: args.image },
+          {
+            styles_: [
+              s("leaf_menu_link_icon", {
+                "": (s) => {
+                  s.width = varSMenuIcon;
+                  s.height = varSMenuIcon;
+                  s.marginLeft = `calc(-1.0 * ${varSMenuIconShiftCalc})`;
+                  s.borderRadius = varRPortrait;
+                },
+              }),
+            ],
+          }
+        )
+      );
+    }
+    children.push(
+      e(
+        "span",
+        { textContent: args.text },
+        {
+          styles_: [
+            s("leaf_menu_link_text", {
+              "": (s) => {
+                s.flexBasis = "0";
+                s.flexGrow = "1";
+                s.textOverflow = "ellipsis";
+                s.overflowX = "hidden";
+                s.whiteSpace = "nowrap";
+              },
+            }),
+          ],
+        }
+      )
+    );
+    children.push(unread);
     return {
       root: e(
         "a",
         { href: args.link },
         {
-          styles_: [...menuItemStyles, topSelectableStyle],
-          children_: [
-            createTopItemSelectBg(),
-            e("span", { textContent: args.text }, {}),
-            unread,
+          styles_: [
+            ...menuItemStyles,
+            topSelectableStyle,
+            s("leaf_menu_link", {
+              "": (s) => {
+                s.gap = "0.1cm";
+                s.maxWidth = "100%";
+              },
+            }),
           ],
+          children_: children,
         }
       ),
       unread: unread,
@@ -775,7 +827,6 @@ svg.spinner4 path {
       };
     };
 
-  const varMenuGroupIconSize = "1cm";
   presentation.leafMenuGroup = /** @type { Presentation["leafMenuGroup"] } */ (
     args
   ) => {
@@ -809,9 +860,9 @@ svg.spinner4 path {
         s.display = "flex";
         s.justifyContent = "center";
         s.alignItems = "center";
-        s.width = varMenuGroupIconSize;
-        s.height = varMenuGroupIconSize;
-        s.marginLeft = `-${varMenuGroupIconSize}`;
+        s.width = varSMenuIcon;
+        s.height = varSMenuIcon;
+        s.marginLeft = `calc(-1.0 * ${varSMenuIconShiftCalc})`;
         s.fontSize = "0.7cm";
       },
     });
@@ -1108,7 +1159,7 @@ svg.spinner4 path {
   const nonchatPageStyleInner = s("nonchat_cont_page", {
     "": (s) => {
       s.margin = varPPage;
-      s.marginLeft = `calc(${varPPage} + ${varMenuGroupIconSize})`;
+      s.marginLeft = `calc(${varPPage} + ${varSMenuIconShiftCalc})`;
       s.position = "relative";
     },
     ":before": (s) => {
@@ -1738,7 +1789,7 @@ svg.spinner4 path {
           children_: [
             e(
               "img",
-              { src: "testportrait.jpg" },
+              { src: args.image },
               {
                 styles_: [
                   s("chat_portrait", {
@@ -1955,11 +2006,11 @@ svg.spinner4 path {
           "button",
           {},
           {
+            styles_: [buttonStyle],
             children_: [
               leafIcon({
                 text: textIconAddMessage,
                 extraStyles: [
-                  buttonStyle,
                   s("leaf_chat_controls_bar_mode_menu_button", {
                     "": (s) => {
                       s.width = varSChatControlsButton;

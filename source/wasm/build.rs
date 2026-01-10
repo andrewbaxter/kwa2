@@ -139,7 +139,7 @@ fn main() {
         // xx Components, styles: menu, form, top
         Func {
             name: "leafMenuLink",
-            args: vec![("text", &string_), ("link", &string_)],
+            args: vec![("text", &string_), ("link", &string_), ("image", &optstring_)],
             returns: vec![("root", &el_), ("unread", &el_)],
         },
         Func {
@@ -267,7 +267,7 @@ fn main() {
         // Entry - message
         Func {
             name: "contChatEntryModeMessage",
-            args: vec![("left", &bool_), ("date", &string_)],
+            args: vec![("left", &bool_), ("date", &string_), ("image", &string_)],
             returns: vec![("root", &el_), ("body", &el_)],
         },
         Func {
