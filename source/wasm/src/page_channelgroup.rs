@@ -39,6 +39,7 @@ use {
         state::{
             CurrentChat,
             CurrentChatSource,
+            LocalChannelGroup1,
             Ministate,
             MinistateChannelGroup,
             MinistateChannelGroupResetId,
@@ -172,10 +173,42 @@ fn populate(
     return PopulateResult::Ok;
 }
 
-pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
-    let mut own = vec![];
+fn clear_unread(pc: &mut ProcessingContext, channelgroup: &Rc<LocalChannelGroup1>) {
+    // Clear unread status
+    let was_unread = *channelgroup.unread.borrow();
+    channelgroup.unread.set(pc, false);
+    for c in &*channelgroup.children.borrow_values() {
+        c.unread.set(pc, false);
+    }
+    if was_unread {
+        save_unread();
+    }
 
-    // Build inf
+    // Maybe clear global unread
+    shed!{
+        'some_unread _;
+        for cocg in &*state().top.borrow_values() {
+            match cocg {
+                crate::state::LocalCocg::Channel(c) => {
+                    if *c.unread.borrow() {
+                        break 'some_unread;
+                    }
+                },
+                crate::state::LocalCocg::ChannelGroup(cg) => {
+                    if *cg.unread.borrow() {
+                        break 'some_unread;
+                    }
+                },
+            }
+        }
+        state().unread_any.set(pc, false);
+    }
+}
+
+pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
+    if let Some(channelgroup) = state().lookup_channelgroup.borrow().get(&m.id) {
+        clear_unread(pc, channelgroup);
+    }
     let inf;
     superif!({
         let Some(current_chat) = state().current_chat.borrow().as_ref().cloned() else {
@@ -209,6 +242,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
         });
 
         // Populate/extend feeds
+        let mut own = vec![];
         if let PopulateResult::TooMany =
             populate(
                 &m.id,
@@ -462,35 +496,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                     },
                 };
                 eg.event(|pc| {
-                    // Clear unread status
-                    let was_unread = *channelgroup.unread.borrow();
-                    channelgroup.unread.set(pc, false);
-                    for c in &*channelgroup.children.borrow_values() {
-                        c.unread.set(pc, false);
-                    }
-                    if was_unread {
-                        save_unread();
-                    }
-
-                    // Maybe clear global unread
-                    shed!{
-                        'some_unread _;
-                        for cocg in &*state().top.borrow_values() {
-                            match cocg {
-                                crate::state::LocalCocg::Channel(c) => {
-                                    if *c.unread.borrow() {
-                                        break 'some_unread;
-                                    }
-                                },
-                                crate::state::LocalCocg::ChannelGroup(cg) => {
-                                    if *cg.unread.borrow() {
-                                        break 'some_unread;
-                                    }
-                                },
-                            }
-                        }
-                        state().unread_any.set(pc, false);
-                    }
+                    clear_unread(pc, &channelgroup);
 
                     // Link unread status
                     if let Some(back_unread) = back_unread.upgrade() {

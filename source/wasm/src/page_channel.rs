@@ -30,6 +30,7 @@ use {
         state::{
             CurrentChat,
             CurrentChatSource,
+            LocalChannel1,
             Ministate,
             MinistateChannel,
             SESSIONSTORAGE_CHAT_RESET,
@@ -67,7 +68,52 @@ use {
     },
 };
 
+fn clear_unread(pc: &mut ProcessingContext, channel: &Rc<LocalChannel1>) {
+    // Clear unread status
+    let was_unread = *channel.unread.borrow();
+    channel.unread.set(pc, false);
+    if was_unread {
+        save_unread();
+    }
+
+    // Propagate cleared unread status
+    if let Some(group) = &*channel.group.borrow() {
+        if let Some(group) = state().lookup_channelgroup.borrow().get(group) {
+            shed!{
+                'some_unread _;
+                for c in &*group.children.borrow_values() {
+                    if *c.unread.borrow() {
+                        break 'some_unread;
+                    }
+                }
+                group.unread.set(pc, false);
+            }
+        }
+    }
+    shed!{
+        'some_unread _;
+        for cocg in &*state().top.borrow_values() {
+            match cocg {
+                crate::state::LocalCocg::Channel(c) => {
+                    if *c.unread.borrow() {
+                        break 'some_unread;
+                    }
+                },
+                crate::state::LocalCocg::ChannelGroup(cg) => {
+                    if *cg.unread.borrow() {
+                        break 'some_unread;
+                    }
+                },
+            }
+        }
+        state().unread_any.set(pc, false);
+    }
+}
+
 pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
+    if let Some(channel) = state().lookup_channel.borrow().get(&m.id) {
+        clear_unread(pc, channel);
+    }
     let inf;
     superif!({
         let Some(current_chat) = state().current_chat.borrow().as_ref().cloned() else {
@@ -310,45 +356,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
                     },
                 };
                 eg.event(|pc| {
-                    // Clear unread status
-                    let was_unread = *channel.unread.borrow();
-                    channel.unread.set(pc, false);
-                    if was_unread {
-                        save_unread();
-                    }
-
-                    // Propagate cleared unread status
-                    if let Some(group) = &*channel.group.borrow() {
-                        if let Some(group) = state().lookup_channelgroup.borrow().get(group) {
-                            shed!{
-                                'some_unread _;
-                                for c in &*group.children.borrow_values() {
-                                    if *c.unread.borrow() {
-                                        break 'some_unread;
-                                    }
-                                }
-                                group.unread.set(pc, false);
-                            }
-                        }
-                    }
-                    shed!{
-                        'some_unread _;
-                        for cocg in &*state().top.borrow_values() {
-                            match cocg {
-                                crate::state::LocalCocg::Channel(c) => {
-                                    if *c.unread.borrow() {
-                                        break 'some_unread;
-                                    }
-                                },
-                                crate::state::LocalCocg::ChannelGroup(cg) => {
-                                    if *cg.unread.borrow() {
-                                        break 'some_unread;
-                                    }
-                                },
-                            }
-                        }
-                        state().unread_any.set(pc, false);
-                    }
+                    clear_unread(pc, &channel);
 
                     // Link back unread status
                     if let Some(back_unread) = back_unread.upgrade() {
