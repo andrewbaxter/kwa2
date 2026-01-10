@@ -22,7 +22,7 @@ pub fn build(id: &ChannelGroupId) -> El {
         reset_id: None,
     }), get_or_req_api_channelgroup(id, true), {
         move |local| LazyPage {
-            center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
+            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
                 text: local.res.memo_short.clone(),
                 link: None,
             }).root,
@@ -31,10 +31,12 @@ pub fn build(id: &ChannelGroupId) -> El {
                 style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: format!("Edit"),
                     link: ministate_octothorpe(&Ministate::ChannelGroupEdit(local.res.id.clone())),
+                    image: None,
                 }).root,
                 style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: format!("Delete"),
                     link: ministate_octothorpe(&Ministate::ChannelGroupDelete(local.res.id.clone())),
+                    image: None,
                 }).root,
             ],
         }

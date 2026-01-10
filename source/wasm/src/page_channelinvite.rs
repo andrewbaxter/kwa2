@@ -23,7 +23,7 @@ pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
     return build_nol_menu(&Ministate::ChannelInvites(channel.clone()), get_or_req_api_channelinvite(id, true), {
         let channel = channel.clone();
         move |local| LazyPage {
-            center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
+            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
                 text: local.res.memo_short.clone(),
                 link: None,
             }).root,
@@ -35,6 +35,7 @@ pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
                         channel: channel.clone(),
                         invite: local.res.id.clone(),
                     })),
+                    image: None,
                 }).root,
                 style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: format!("Delete"),
@@ -42,6 +43,7 @@ pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
                         channel: channel.clone(),
                         invite: local.res.id.clone(),
                     })),
+                    image: None,
                 }).root,
             ],
         }

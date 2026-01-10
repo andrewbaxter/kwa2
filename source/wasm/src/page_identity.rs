@@ -17,7 +17,7 @@ use {
 
 pub fn build(identity: &Identity) -> El {
     return build_nol_menu(&Ministate::Identities, get_or_req_api_identity(identity, true), |local| LazyPage {
-        center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
+        center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
             text: local.res.memo_short.clone(),
             link: None,
         }).root,
@@ -26,14 +26,17 @@ pub fn build(identity: &Identity) -> El {
             style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                 text: format!("Edit"),
                 link: ministate_octothorpe(&Ministate::IdentityEdit(local.res.id.clone())),
+                image: None,
             }).root,
             style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                 text: format!("Invitations"),
                 link: ministate_octothorpe(&Ministate::IdentityInvites(local.res.id.clone())),
+                image: None,
             }).root,
             style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                 text: format!("Delete"),
                 link: ministate_octothorpe(&Ministate::IdentityDelete(local.res.id.clone())),
+                image: None,
             }).root,
         ],
     });

@@ -172,17 +172,14 @@ impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormOptChannelGroup {
 
 pub fn build_form_inner(
     button_ok: &El,
-    form_err_el: El,
+    errs_el: El,
     form_els: Vec<El>,
     do_send: impl 'static + Clone + AsyncFn(f64) -> Result<(), String>,
 ) -> El {
     let idem = random();
-    let errs_el = style_export::cont_page_form_errors().root;
     let errs_own_el = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
     errs_el.ref_push(errs_own_el.clone());
-    errs_el.ref_push(form_err_el);
     let form_el = el("form");
-    form_el.ref_push(errs_el.clone());
     form_el.ref_extend(form_els);
     button_ok.ref_on("click", {
         let thinking = Rc::new(RefCell::new(None));
@@ -232,33 +229,43 @@ pub fn build_form(
     form_els: Vec<El>,
     do_send: impl 'static + Clone + AsyncFn(f64) -> Result<(), String>,
 ) -> El {
-    let button_ok = style_export::leaf_page_form_button_submit().root;
-    let form_el = build_form_inner(&button_ok, form_err_el, form_els, do_send);
-    return style_export::cont_page_form(style_export::ContPageFormArgs {
-        edit_bar_children: vec![button_ok],
-        children: vec![
-            //. .
-            style_export::cont_head_bar(style_export::ContHeadBarArgs {
-                back_link: ministate_octothorpe(&back_link),
-                center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
-                    text: title,
-                    link: None,
-                }).root,
-                right: None,
+    let form = style_export::cont_page_form(style_export::ContPageFormArgs {
+        head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
+            back_link: ministate_octothorpe(&back_link),
+            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
+                text: title,
+                link: None,
             }).root,
-            form_el,
-        ],
-    }).root;
+            right: None,
+        }).root,
+        children: vec![],
+    });
+    form.errors.ref_push(form_err_el);
+    form.body.ref_push(build_form_inner(&form.submit, form.errors, form_els, do_send));
+    return form.root;
 }
 
 pub fn build_nol_form<
     SEND: 'static + Clone + AsyncFn(f64) -> Result<(), String>,
 >(back_link: &Ministate, title: &str, v: NowOrLater<(El, Vec<El>, SEND)>) -> El {
-    let button_ok = style_export::leaf_page_form_button_submit().root;
+    let form = style_export::cont_page_form(style_export::ContPageFormArgs {
+        head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
+            back_link: ministate_octothorpe(&back_link),
+            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
+                text: title.to_string(),
+                link: None,
+            }).root,
+            right: None,
+        }).root,
+        children: vec![],
+    });
+    let button_ok = form.submit;
+    let errs = form.errors;
     let body;
     match v {
         NowOrLater::Now((form_err_el, form_els, do_send)) => {
-            body = vec![build_form_inner(&button_ok, form_err_el, form_els, do_send)];
+            errs.ref_push(form_err_el);
+            body = vec![build_form_inner(&button_ok, errs, form_els, do_send)];
         },
         NowOrLater::Later(v) => {
             body = vec![el_async({
@@ -267,22 +274,14 @@ pub fn build_nol_form<
                     let Some((form_err_el, form_els, do_send)) = v.await.map_err(|e| e.to_string())?? else {
                         return Err(format!("Could not find object"));
                     };
-                    return Ok(vec![build_form_inner(&button_ok, form_err_el, form_els, do_send)]);
+                    errs.ref_push(form_err_el);
+                    return Ok(vec![build_form_inner(&button_ok, errs, form_els, do_send)]);
                 }
             })];
         },
     }
-    return style_export::cont_page_form(style_export::ContPageFormArgs {
-        edit_bar_children: vec![button_ok],
-        children: [style_export::cont_head_bar(style_export::ContHeadBarArgs {
-            back_link: ministate_octothorpe(&back_link),
-            center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
-                text: title.to_string(),
-                link: None,
-            }).root,
-            right: None,
-        }).root].into_iter().chain(body.into_iter()).collect(),
-    }).root;
+    form.body.ref_extend(body);
+    return form.root;
 }
 
 pub struct LazyPage {
@@ -302,7 +301,7 @@ pub fn build_nol_menu<
             body = r.body;
         },
         NowOrLater::Later(v) => {
-            center = style_export::leaf_head_bar_center_placeholder().root;
+            center = style_export::leaf_nonchat_head_bar_center_placeholder().root;
             body = vec![el_async({
                 let center = center.clone();
                 async move {
@@ -316,13 +315,14 @@ pub fn build_nol_menu<
             })];
         },
     }
-    return style_export::cont_page_menu(
-        style_export::ContPageMenuArgs { children: [style_export::cont_head_bar(style_export::ContHeadBarArgs {
+    return style_export::cont_page_menu(style_export::ContPageMenuArgs {
+        head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
             back_link: ministate_octothorpe(&back_link),
             center: center,
             right: None,
-        }).root].into_iter().chain(body.into_iter()).collect() },
-    ).root;
+        }).root,
+        children: body,
+    }).root;
 }
 
 pub fn build_nol_menu_title<
@@ -344,16 +344,17 @@ pub fn build_nol_menu_title<
             });
         },
     }
-    return style_export::cont_page_menu(
-        style_export::ContPageMenuArgs { children: [style_export::cont_head_bar(style_export::ContHeadBarArgs {
+    return style_export::cont_page_menu(style_export::ContPageMenuArgs {
+        head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
             back_link: ministate_octothorpe(&back_link),
-            center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
+            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
                 text: title.to_string(),
                 link: None,
             }).root,
             right: None,
-        }).root].into_iter().chain([body].into_iter()).collect() },
-    ).root;
+        }).root,
+        children: vec![body],
+    }).root;
 }
 
 pub fn build_nol_chat_bar<
@@ -366,13 +367,13 @@ pub fn build_nol_chat_bar<
             center = build(local);
         },
         NowOrLater::Later(v) => {
-            center = style_export::leaf_chat_bar_center_placeholder().root;
+            center = style_export::leaf_chat_head_bar_center_placeholder().root;
             own.push(spawn_rooted_log("Fetching channel info", {
                 let top_center = center.clone();
                 async move {
                     let Some(local) = v.await.map_err(|e| e.to_string())?? else {
                         top_center.ref_replace(
-                            vec![style_export::leaf_chat_bar_center(style_export::LeafChatBarCenterArgs {
+                            vec![style_export::leaf_chat_head_bar_center(style_export::LeafChatHeadBarCenterArgs {
                                 text: format!("Unknown"),
                                 link: None,
                             }).root],
@@ -385,7 +386,7 @@ pub fn build_nol_chat_bar<
             }));
         },
     }
-    return style_export::cont_chat_bar(style_export::ContChatBarArgs {
+    return style_export::cont_chat_head_bar(style_export::ContChatHeadBarArgs {
         back_link: ministate_octothorpe(&back_link),
         center: center,
         right: None,

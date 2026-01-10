@@ -36,9 +36,9 @@ use {
 };
 
 pub fn build_chat_entry_controls(pc: &mut ProcessingContext, m: &ChatEntryControls) -> El {
-    let out = style_export::cont_chat_controls_as_entry();
+    let out = style_export::cont_chat_entry_mode_controls();
     if !m.state.channels_meta.borrow().is_empty() {
-        out.root.ref_push(style_export::leaf_chat_controls_as_entry_button_new_message().root.on("click", {
+        out.root.ref_push(style_export::leaf_chat_entry_mode_controls_button_new_message().root.on("click", {
             let eg = pc.eg();
             let channels = m.state.channels_meta.clone();
             let mode = m.mode.clone();
@@ -82,33 +82,29 @@ pub fn build_controls(
                         let mut children = vec![];
                         for channel in &*chat_state.channels_meta.borrow() {
                             children.push(
-                                style_export::leaf_chat_controls_mode_menu_button(
-                                    style_export::LeafChatControlsModeMenuButtonArgs { text: channel.0.clone() },
-                                )
-                                    .root
-                                    .on("click", {
-                                        let mode = mode.clone();
-                                        let eg = pc.eg();
-                                        let sender = channel.1.clone();
-                                        let channel = channel.2.clone();
-                                        move |_| eg.event(|pc| {
-                                            mode.set(pc, ChatMode::TopMessage(ChatModeTopMessage {
-                                                channel: channel.clone(),
-                                                own_identity: sender.clone(),
-                                            }));
-                                        }).unwrap()
-                                    }),
+                                style_export::leaf_chat_controls_bar_mode_menu_button_new_message().root.on("click", {
+                                    let mode = mode.clone();
+                                    let eg = pc.eg();
+                                    let sender = channel.1.clone();
+                                    let channel = channel.2.clone();
+                                    move |_| eg.event(|pc| {
+                                        mode.set(pc, ChatMode::TopMessage(ChatModeTopMessage {
+                                            channel: channel.clone(),
+                                            own_identity: sender.clone(),
+                                        }));
+                                    }).unwrap()
+                                }),
                             );
                         }
                         inf_post_replace =
                             vec![
-                                style_export::cont_chat_controls_mode_menu(
-                                    style_export::ContChatControlsModeMenuArgs { children: children },
+                                style_export::cont_chat_controls_bar_mode_menu(
+                                    style_export::ContChatControlsBarModeMenuArgs { children: children },
                                 ).root
                             ];
                     },
                     ChatMode::TopMessage(c) => {
-                        let controls = style_export::leaf_chat_controls_mode_message();
+                        let controls = style_export::leaf_chat_controls_bar_mode_message();
                         controls.close.ref_on("click", {
                             let mode = mode.clone();
                             let eg = pc.eg();
@@ -159,7 +155,7 @@ pub fn build_controls(
                         inf_post_replace = vec![controls.root];
                     },
                     ChatMode::ReplyMessage(c) => {
-                        let controls = style_export::leaf_chat_controls_mode_message();
+                        let controls = style_export::leaf_chat_controls_bar_mode_message();
                         controls.close.ref_on("click", {
                             let mode = mode.clone();
                             let eg = pc.eg();

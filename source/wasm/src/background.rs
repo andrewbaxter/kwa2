@@ -167,7 +167,7 @@ pub fn schedule_trigger_pull(eg: EventGraph) {
             let eg = eg.clone();
             async move {
                 ta_return!((), String);
-                let res = req_get(&state().env.base_url, c2s::ActivityLatestAll {}).await?;
+                let res = req_get(c2s::ActivityLatestAll {}).await?;
                 let Some(chat) = state().current_chat.borrow().clone() else {
                     return Ok(());
                 };

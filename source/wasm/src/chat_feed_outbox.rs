@@ -89,21 +89,27 @@ fn create_entry(
     k: &Timestamp,
     main: OutboxMessage,
 ) -> Rc<ChatEntry> {
-    let entry = ChatEntry::new_message(ChatTime {
-        stamp: *k,
-        id: ChatTimeId::Outbox(main.client_id.clone()),
-    }, main.body, scope_any(defer({
-        let channel = channel.clone();
-        let idem = main.client_id.clone();
-        let sender = sender.clone();
-        let chat_state = Rc::downgrade(chat_state);
-        move || {
-            let Some(chat_state) = chat_state.upgrade() else {
-                return;
-            };
-            chat_state.entry_outbox_lookup.borrow_mut().remove(&(channel.clone(), sender.clone(), idem.clone()));
-        }
-    })));
+    let entry = ChatEntry::new_message(
+        //. .
+        sender.clone(),
+        ChatTime {
+            stamp: *k,
+            id: ChatTimeId::Outbox(main.client_id.clone()),
+        },
+        main.body,
+        scope_any(defer({
+            let channel = channel.clone();
+            let idem = main.client_id.clone();
+            let sender = sender.clone();
+            let chat_state = Rc::downgrade(chat_state);
+            move || {
+                let Some(chat_state) = chat_state.upgrade() else {
+                    return;
+                };
+                chat_state.entry_outbox_lookup.borrow_mut().remove(&(channel.clone(), sender.clone(), idem.clone()));
+            }
+        })),
+    );
     chat_state
         .entry_outbox_lookup
         .borrow_mut()

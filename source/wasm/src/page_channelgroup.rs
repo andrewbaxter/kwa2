@@ -327,10 +327,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                                         async move {
                                             let time = shed!{
                                                 let Some(found) =
-                                                    req_get(
-                                                        &state().env.base_url,
-                                                        c2s::SnapById { id: reset_id.clone() },
-                                                    ).await? else {
+                                                    req_get(c2s::SnapById { id: reset_id.clone() },).await? else {
                                                         break ChatTime {
                                                             stamp: Timestamp::now(),
                                                             id: ChatTimeId::None,
@@ -389,16 +386,15 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                                             let reset_id = target.clone();
                                             async move {
                                                 let time = shed!{
-                                                    let Some(found) =
-                                                        req_get(&state().env.base_url, c2s::SnapByClientId {
-                                                            channel: reset_id.channel.clone(),
-                                                            client_id: reset_id.message.clone(),
-                                                        }).await? else {
-                                                            break ChatTime {
-                                                                stamp: Timestamp::now(),
-                                                                id: ChatTimeId::None,
-                                                            };
+                                                    let Some(found) = req_get(c2s::SnapByClientId {
+                                                        channel: reset_id.channel.clone(),
+                                                        client_id: reset_id.message.clone(),
+                                                    }).await? else {
+                                                        break ChatTime {
+                                                            stamp: Timestamp::now(),
+                                                            id: ChatTimeId::None,
                                                         };
+                                                    };
                                                     break ChatTime {
                                                         stamp: found.original_receive_time,
                                                         id: ChatTimeId::Channel(found.offset),
@@ -441,11 +437,11 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
     );
 
     // Assembly
-    inf.padding_pre_el().ref_push(style_export::cont_chat_bar(style_export::ContChatBarArgs {
+    inf.padding_pre_el().ref_push(style_export::cont_chat_head_bar(style_export::ContChatHeadBarArgs {
         back_link: ministate_octothorpe(&Ministate::Top),
         center: build_nol_chat_bar(&Ministate::Top, get_or_req_api_channelgroup(&m.id, true), {
             let id = m.id.clone();
-            move |local_channel| style_export::leaf_chat_bar_center(style_export::LeafChatBarCenterArgs {
+            move |local_channel| style_export::leaf_chat_head_bar_center(style_export::LeafChatHeadBarCenterArgs {
                 text: local_channel.res.memo_short.clone(),
                 link: Some(ministate_octothorpe(&Ministate::ChannelGroup(MinistateChannelGroup {
                     id: id.clone(),

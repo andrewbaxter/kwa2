@@ -1,6 +1,8 @@
 use {
     crate::{
-        api::req_get,
+        api::{
+            req_get,
+        },
         chat::{
             ChatMode,
             ChatModeReplyMessage,
@@ -123,7 +125,7 @@ impl ChannelFeed {
                             PagePosition::First => ActivityPage(have_data_time.page.0 - 1),
                             _ => have_data_time.page,
                         };
-                        let Some(resp) = req_get(&state().env.base_url, c2s::GetActivityPage {
+                        let Some(resp) = req_get(c2s::GetActivityPage {
                             channel: self1.0.id.clone(),
                             page: next_page,
                         }).await? else {
@@ -267,29 +269,36 @@ async fn create_entries(
         if let Some(client_id) = &e.client_id {
             obviate_outbox_entry(eg, chat_state, &e.original_id.channel, client_id, &e.original_id).await;
         }
-        let entry = ChatEntry::new_message(ChatTime {
-            stamp: e.original_receive_time,
-            id: ChatTimeId::Channel(SnapPageOffsetPos {
-                page: snap_page.clone(),
-                offset_pos: e.offset_pos,
-            }),
-        }, e.message.body, scope_any(defer({
-            let chat_state = Rc::downgrade(chat_state);
-            let id = e.original_id.clone();
-            let client_id = e.client_id.clone();
-            move || {
-                let Some(chat_state) = chat_state.upgrade() else {
-                    return;
-                };
-                chat_state.entry_channel_lookup.borrow_mut().remove(&id);
-                if let Some(client_id) = &client_id {
-                    chat_state
-                        .entry_channel_lookup_by_client_id
-                        .borrow_mut()
-                        .remove(&(id.channel.clone(), id.channel.identity.clone(), client_id.clone()));
+        let message_ident = &e.original_id.message.identity;
+        let entry = ChatEntry::new_message(
+            //. .
+            message_ident.clone(),
+            ChatTime {
+                stamp: e.original_receive_time,
+                id: ChatTimeId::Channel(SnapPageOffsetPos {
+                    page: snap_page.clone(),
+                    offset_pos: e.offset_pos,
+                }),
+            },
+            e.message.body,
+            scope_any(defer({
+                let chat_state = Rc::downgrade(chat_state);
+                let id = e.original_id.clone();
+                let client_id = e.client_id.clone();
+                move || {
+                    let Some(chat_state) = chat_state.upgrade() else {
+                        return;
+                    };
+                    chat_state.entry_channel_lookup.borrow_mut().remove(&id);
+                    if let Some(client_id) = &client_id {
+                        chat_state
+                            .entry_channel_lookup_by_client_id
+                            .borrow_mut()
+                            .remove(&(id.channel.clone(), id.channel.identity.clone(), client_id.clone()));
+                    }
                 }
-            }
-        })));
+            })),
+        );
         out.push(entry.clone());
         chat_state.entry_channel_lookup.borrow_mut().insert(e.original_id.clone(), entry.clone());
         if let Some(client_id) = &e.client_id {
@@ -317,7 +326,7 @@ impl Feed<ChatEntry> for ChannelFeed {
         *self.0.pulling_snap_around.borrow_mut() = Some(spawn_rooted_log("Channel feed - requesting messages around", {
             let self1 = self.clone();
             async move {
-                let Some(page) = req_get(&state().env.base_url, c2s::SnapPageContainingTime {
+                let Some(page) = req_get(c2s::SnapPageContainingTime {
                     channel: self1.0.id.clone(),
                     time: time.stamp.clone(),
                 }).await? else {
@@ -333,7 +342,7 @@ impl Feed<ChatEntry> for ChannelFeed {
                     );
                     return Ok(());
                 };
-                let Some(resp) = req_get(&state().env.base_url, c2s::GetSnapPage {
+                let Some(resp) = req_get(c2s::GetSnapPage {
                     channel: self1.0.id.clone(),
                     page: page,
                 }).await? else {
@@ -384,7 +393,7 @@ impl Feed<ChatEntry> for ChannelFeed {
                     PagePosition::First => SnapPage(offset.page.0 - 1),
                     _ => offset.page,
                 };
-                let Some(mut resp): Option<c2s::SnapPageRes> = req_get(&state().env.base_url, c2s::GetSnapPage {
+                let Some(mut resp): Option<c2s::SnapPageRes> = req_get(c2s::GetSnapPage {
                     channel: self1.0.id.clone(),
                     page: page,
                 }).await? else {
@@ -431,7 +440,7 @@ impl Feed<ChatEntry> for ChannelFeed {
                     PagePosition::Last => SnapPage(offset.page.0 + 1),
                     _ => offset.page,
                 };
-                let Some(mut resp): Option<c2s::SnapPageRes> = req_get(&state().env.base_url, c2s::GetSnapPage {
+                let Some(mut resp): Option<c2s::SnapPageRes> = req_get(c2s::GetSnapPage {
                     channel: self1.0.id.clone(),
                     page: page,
                 }).await? else {

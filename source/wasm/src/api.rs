@@ -1,8 +1,11 @@
 use {
-    crate::state::{
-        state,
-        Ministate,
-        SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
+    crate::{
+        js::LogJsErr,
+        state::{
+            Ministate,
+            SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
+            state,
+        },
     },
     gloo::{
         storage::{
@@ -16,8 +19,11 @@ use {
         Request,
         Response,
     },
-    shared::interface::wire::c2s,
-    crate::js::LogJsErr,
+    shared::interface::wire::c2s::{
+        self,
+        PathReqTrait,
+    },
+    spaghettinuum::interface::identity::Identity,
     wasm_bindgen::UnwrapThrowExt,
     web_sys::Url,
 };
@@ -36,13 +42,14 @@ pub fn unset_want_logged_in() {
     LocalStorage::delete(LOCALSTORAGE_LOGGED_IN);
 }
 
-pub fn redirect_login(base_url: &str) -> ! {
+pub fn redirect_login() -> ! {
     if !SessionStorage::get::<Ministate>(SESSIONSTORAGE_POST_REDIRECT_MINISTATE).is_ok() {
         SessionStorage::set(
             SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
             &*state().ministate.borrow(),
         ).log(&state().log, &"Error storing post-redirect ministate");
     }
+    let base_url = &state().env.base_url;
     window()
         .location()
         .set_href(
@@ -52,13 +59,14 @@ pub fn redirect_login(base_url: &str) -> ! {
     unreachable!();
 }
 
-pub fn redirect_logout(base_url: &str) -> ! {
+pub fn redirect_logout() -> ! {
     if !SessionStorage::get::<Ministate>(SESSIONSTORAGE_POST_REDIRECT_MINISTATE).is_ok() {
         SessionStorage::set(
             SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
             &*state().ministate.borrow(),
         ).log(&state().log, &"Error storing post-redirect ministate");
     }
+    let base_url = &state().env.base_url;
     window()
         .location()
         .set_href(
@@ -68,10 +76,10 @@ pub fn redirect_logout(base_url: &str) -> ! {
     unreachable!();
 }
 
-async fn read_resp(base_url: &str, resp: Response) -> Result<Vec<u8>, String> {
+async fn read_resp(resp: Response) -> Result<Vec<u8>, String> {
     let status = resp.status();
     if status == 401 && want_logged_in() {
-        redirect_login(base_url);
+        redirect_login();
     }
     let body = match resp.binary().await {
         Err(e) => {
@@ -85,14 +93,14 @@ async fn read_resp(base_url: &str, resp: Response) -> Result<Vec<u8>, String> {
     return Ok(body);
 }
 
-async fn post(base_url: &str, req: Request) -> Result<Vec<u8>, String> {
+async fn post(req: Request) -> Result<Vec<u8>, String> {
     let resp = match req.send().await {
         Ok(r) => r,
         Err(e) => {
             return Err(format!("Failed to send request: {}", e));
         },
     };
-    return read_resp(base_url, resp).await;
+    return read_resp(resp).await;
 }
 
 pub async fn req_post_json<T: c2s::proto::ReqTrait>(base_url: &str, req: T) -> Result<T::Resp, String> {
@@ -100,7 +108,7 @@ pub async fn req_post_json<T: c2s::proto::ReqTrait>(base_url: &str, req: T) -> R
         Request::post(&format!("{}api", base_url))
             .header("Content-type", "application/json")
             .body(serde_json::to_string(&req.to_enum()).unwrap_throw());
-    let body = post(base_url, req).await?;
+    let body = post(req).await?;
     return Ok(
         serde_json::from_slice::<T::Resp>(
             &body,
@@ -110,25 +118,25 @@ pub async fn req_post_json<T: c2s::proto::ReqTrait>(base_url: &str, req: T) -> R
     );
 }
 
-pub async fn req_file(base_url: &str, url: &str) -> Result<Vec<u8>, String> {
+pub async fn req_file(url: &str) -> Result<Vec<u8>, String> {
     let resp = match Request::get(url).send().await {
         Ok(r) => r,
         Err(e) => {
             return Err(format!("Failed to send request: {}", e));
         },
     };
-    return read_resp(base_url, resp).await;
+    return read_resp(resp).await;
 }
 
-pub async fn req_get<T: c2s::PathReqTrait>(base_url: &str, req: T) -> Result<T::Resp, String> {
-    let req = Request::get(&format!("{}{}", base_url, req.serialize_path()));
+pub async fn req_get<T: c2s::PathReqTrait>(req: T) -> Result<T::Resp, String> {
+    let req = Request::get(&format!("{}{}", state().env.base_url, req.serialize_path()));
     let body = match req.send().await {
         Ok(r) => r,
         Err(e) => {
             return Err(format!("Failed to send request: {}", e));
         },
     };
-    let body = read_resp(base_url, body).await?;
+    let body = read_resp(body).await?;
     return Ok(
         serde_json::from_slice::<T::Resp>(
             &body,
@@ -140,4 +148,8 @@ pub async fn req_get<T: c2s::PathReqTrait>(base_url: &str, req: T) -> Result<T::
             ),
         )?,
     );
+}
+
+pub fn portrait_url(identity: &Identity) -> String {
+    return format!("{}{}", state().env.base_url, c2s::GetPortrait { identity: identity.clone() }.serialize_path());
 }

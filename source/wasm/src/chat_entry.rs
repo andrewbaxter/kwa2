@@ -8,7 +8,9 @@ use {
         chat_message::build_chat_entry_message,
         infinite,
     },
-    jiff::Timestamp,
+    jiff::{
+        Timestamp,
+    },
     lunk::{
         HistPrim,
         Prim,
@@ -26,9 +28,7 @@ use {
             MessageClientId,
             QualifiedChannelId,
         },
-        wire::c2s::{
-            SnapPageOffsetPos,
-        },
+        wire::c2s::SnapPageOffsetPos,
     },
     spaghettinuum::interface::identity::Identity,
     std::{
@@ -69,6 +69,7 @@ impl Default for ChatTime {
 
 #[derive(Clone)]
 pub struct ChatEntryInternalMessage {
+    pub time: Timestamp,
     pub body: Prim<String>,
 }
 
@@ -82,6 +83,7 @@ pub enum ChatEntryMessageInternal {
 
 pub struct ChatEntryMessage {
     pub on_drop: ScopeValue,
+    pub sender: Identity,
     pub internal: Prim<ChatEntryMessageInternal>,
 }
 
@@ -102,14 +104,16 @@ pub struct ChatEntry {
 }
 
 impl ChatEntry {
-    pub fn new_message(time: ChatTime, text: String, cleanup: ScopeValue) -> Rc<ChatEntry> {
+    pub fn new_message(sender: Identity, time: ChatTime, text: String, cleanup: ScopeValue) -> Rc<ChatEntry> {
         let out = Rc::new(ChatEntry {
-            time: time,
+            time: time.clone(),
             int: ChatEntryInternal::Message(ChatEntryMessage {
                 on_drop: cleanup,
-                internal: Prim::new(
-                    ChatEntryMessageInternal::Message(ChatEntryInternalMessage { body: Prim::new(text) }),
-                ),
+                sender: sender,
+                internal: Prim::new(ChatEntryMessageInternal::Message(ChatEntryInternalMessage {
+                    time: time.stamp,
+                    body: Prim::new(text),
+                })),
             }),
             el: Default::default(),
         });

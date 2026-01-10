@@ -1,5 +1,6 @@
 use {
     crate::{
+        api::portrait_url,
         js::{
             el_async,
             style_export,
@@ -13,9 +14,9 @@ use {
             Ministate,
             MinistateChannel,
             MinistateChannelGroup,
+            merge_top,
             ministate_octothorpe,
             state,
-            merge_top,
         },
     },
     flowcontrol::ta_return,
@@ -45,6 +46,7 @@ fn build_root_children(pc: &mut ProcessingContext) -> El {
                             own_identity: c.res.own_identity.clone(),
                             reset_id: None,
                         })),
+                        image: Some(portrait_url(&c.res.id.identity)),
                     }).root,
                     LocalCocg::ChannelGroup(cg) => {
                         let out = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
@@ -69,6 +71,7 @@ fn build_root_children(pc: &mut ProcessingContext) -> El {
                                                 own_identity: c.res.own_identity.clone(),
                                                 reset_id: None,
                                             })),
+                                            image: Some(portrait_url(&c.res.id.identity)),
                                         }).root;
                                         add.push(child_e);
                                     }

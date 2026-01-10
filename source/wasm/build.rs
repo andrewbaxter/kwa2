@@ -203,7 +203,7 @@ fn main() {
         Func {
             name: "contPageForm",
             args: vec![("headBar", &el_), ("children", &arrel_)],
-            returns: vec![("root", &el_), ("errors", &el_), ("submit", &el_)],
+            returns: vec![("root", &el_), ("body", &el_), ("errors", &el_), ("submit", &el_)],
         },
         Func {
             name: "leafFormText",

@@ -31,11 +31,13 @@ pub fn build(s: &MinistateChannelSub) -> El {
                     id: local.res.id.clone(),
                     own_identity: sender.clone(),
                 })),
+                image: None,
             }).root);
             if local.res.id.identity == sender {
                 children.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: format!("Members"),
                     link: ministate_octothorpe(&Ministate::ChannelMembers(local.res.id.clone())),
+                    image: None,
                 }).root);
             }
             children.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
@@ -44,9 +46,10 @@ pub fn build(s: &MinistateChannelSub) -> El {
                     id: local.res.id.clone(),
                     own_identity: sender.clone(),
                 })),
+                image: None,
             }).root);
             return LazyPage {
-                center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
+                center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
                     text: local.res.memo_short.clone(),
                     link: None,
                 }).root,

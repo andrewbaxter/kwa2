@@ -52,11 +52,9 @@ use {
         page_identityinvite_new,
         page_identityinvites,
         page_settings,
-        page_top,
         page_top_add,
     },
     flowcontrol::{
-        exenum,
         shed,
         ta_return,
     },
@@ -103,7 +101,6 @@ use {
 };
 
 pub const LOCALSTORAGE_PWA_MINISTATE: &str = "pwa_ministate";
-pub const LOCALSTORAGE_WIDE_VIEW: &str = "wide_view";
 pub const SESSIONSTORAGE_POST_REDIRECT_MINISTATE: &str = "post_redirect";
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -271,7 +268,6 @@ pub struct State_ {
     pub env: Env,
     pub log: Rc<dyn Log>,
     pub log1: Rc<VecLog>,
-    pub wide_view: bool,
     pub top: lunk::List<LocalCocg>,
     pub current_chat: RefCell<Option<CurrentChat>>,
     pub bg_pushing: RefCell<Option<oneshot::Receiver<()>>>,
@@ -297,11 +293,7 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
     let body;
     match s {
         Ministate::Top => {
-            if state().wide_view {
-                body = style_export::cont_page_blank().root;
-            } else {
-                body = page_top::build(pc);
-            }
+            body = style_export::cont_page_blank().root;
         },
         Ministate::Settings => {
             body = page_settings::build();
@@ -440,19 +432,6 @@ pub enum SessionStorageChatReset {
 }
 
 // Settings
-pub fn set_setting_wide_view(v: bool) {
-    LocalStorage::set(LOCALSTORAGE_WIDE_VIEW, if v {
-        "true"
-    } else {
-        "false"
-    }).unwrap();
-}
-
-pub fn get_setting_wide_view() -> bool {
-    return exenum!(LocalStorage::get::<String>(LOCALSTORAGE_WIDE_VIEW), Ok(x) => x).as_ref().map(|x| x.as_str()) ==
-        Some("true");
-}
-
 pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<LocalChannelGroup>) {
     let mut lookup_new_child_cs = HashMap::<ChannelGroupId, HashMap<QualifiedChannelId, LocalChannel>>::new();
     let mut lookup_new_top_cs = HashMap::new();

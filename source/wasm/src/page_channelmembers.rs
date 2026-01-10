@@ -54,6 +54,7 @@ fn build_member(
             channel: channel.clone(),
             identity: member.res.clone(),
         })),
+        image: None,
     }).root;
 }
 
@@ -122,11 +123,10 @@ pub fn build(channel: &QualifiedChannelId) -> El {
     }
 
     // Other widgets, assemble and return
-    let out = style_export::cont_page_menu(style_export::ContPageMenuArgs { children: vec![
-        //. .
-        style_export::cont_head_bar(style_export::ContHeadBarArgs {
+    let out = style_export::cont_page_menu(style_export::ContPageMenuArgs {
+        head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
             back_link: ministate_octothorpe(&Ministate::Top),
-            center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
+            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
                 text: format!("Members"),
                 link: None,
             }).root,
@@ -138,8 +138,8 @@ pub fn build(channel: &QualifiedChannelId) -> El {
                 ).root,
             ),
         }).root,
-        contact_elements
-    ] });
+        children: vec![contact_elements],
+    });
 
     // Assemble and return
     return out.root;

@@ -87,6 +87,7 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                     own_identity: old_identity.v.res.id.clone(),
                     reset_id: None,
                 })),
+                image: None,
             }).root;
             lookup_el_channels.borrow_mut().insert(old_channel.res.id, channel_el.clone());
             children.push(channel_el);
@@ -163,6 +164,7 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                                         own_identity: new_identity.v.res.id.clone(),
                                         reset_id: None,
                                     })),
+                                    image: None,
                                 }).root);
                             }
                         }
@@ -198,11 +200,10 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
     }
 
     // Other widgets, assemble and return
-    let out = style_export::cont_page_menu(style_export::ContPageMenuArgs { children: vec![
-        //. .
-        style_export::cont_head_bar(style_export::ContHeadBarArgs {
+    let out = style_export::cont_page_menu(style_export::ContPageMenuArgs {
+        head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
             back_link: ministate_octothorpe(&Ministate::Top),
-            center: style_export::leaf_head_bar_center(style_export::LeafHeadBarCenterArgs {
+            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
                 text: format!("Identities"),
                 link: None,
             }).root,
@@ -214,8 +215,8 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                 ).root,
             ),
         }).root,
-        identity_elements
-    ] });
+        children: vec![identity_elements],
+    });
 
     // Assemble and return
     return out.root;

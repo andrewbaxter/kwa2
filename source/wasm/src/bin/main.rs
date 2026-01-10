@@ -56,7 +56,6 @@ use {
             STATE,
             State_,
             build_ministate,
-            get_setting_wide_view,
             read_ministate,
             record_replace_ministate,
             state,
@@ -82,7 +81,6 @@ pub fn main() {
     let log = log1.clone() as Rc<dyn Log>;
     eg.event(|pc| {
         let env = scan_env(&log);
-        let wide_view = get_setting_wide_view();
         let service_worker = bg_val(async {
             let sw =
                 JsFuture::from(window().navigator().service_worker().register("./serviceworker.js"))
@@ -90,7 +88,8 @@ pub fn main() {
                     .map_err(|e| format!("Error registering service worker: {:?}", e.as_string()))?;
             return Ok(sw.dyn_into::<ServiceWorkerRegistration>().unwrap());
         });
-        let root = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
+        let root0 = style_export::cont_root(style_export::ContRootArgs { menu: page_top::build(pc) });
+        let root = root0.page;
 
         // Build app state
         STATE.with(|s| *s.borrow_mut() = Some(Rc::new(State_ {
@@ -98,7 +97,6 @@ pub fn main() {
             current_chat: Default::default(),
             service_worker: service_worker,
             page_root: root.clone(),
-            wide_view: wide_view,
             top: lunk::List::new(vec![]),
             ministate: RefCell::new(shed!{
                 'found _;
@@ -268,13 +266,6 @@ pub fn main() {
         ));
 
         // Root and display
-        if wide_view {
-            set_root(vec![style_export::cont_root_wide(style_export::ContRootWideArgs {
-                menu: page_top::build(pc),
-                page: root,
-            }).root]);
-        } else {
-            set_root(vec![root]);
-        }
+        set_root(vec![root0.root]);
     });
 }

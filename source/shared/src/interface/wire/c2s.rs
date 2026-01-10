@@ -729,3 +729,26 @@ impl PathReqTrait for GetActivityPage {
         );
     }
 }
+
+pub struct GetPortrait {
+    pub identity: Identity,
+}
+
+const PATH_PREFIX_PORTRAIT: &str = "portrait";
+
+impl PathReqTrait for GetPortrait {
+    type Resp = Vec<u8>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_PORTRAIT)?;
+        let out = GetPortrait { identity: confirm_path_element(&mut parts, "identity")? };
+        confirm_path_empty(&mut parts)?;
+        return Ok(out);
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path([PATH_PREFIX_PORTRAIT.to_string(), self.identity.to_string()]);
+    }
+}
