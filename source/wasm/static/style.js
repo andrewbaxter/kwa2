@@ -762,30 +762,33 @@ svg.spinner4 path {
     return e("div", {}, { styles_: [topSelectBgStyle] });
   };
 
-  const unreadStyle = sm("unread", {
-    "": {
-      "": (s) => {
-        s.backgroundColor = varCNotifyBright;
-        s.backgroundBlendMode = "multiply";
-        s.color = varCNotifyForeground;
-        s.borderRadius = "999cm";
-        s.width = "0.3cm";
-        s.height = "0.3cm";
-        s.margin = "0.2cm";
-      },
-      narrow: (s) => {},
-      wide: (s) => {
-        s.display = "none";
-      },
+  const unreadStyle = s("unread", {
+    "": (s) => {
+      s.backgroundColor = varCNotifyBright;
+      s.backgroundBlendMode = "multiply";
+      s.color = varCNotifyForeground;
+      s.borderRadius = "999cm";
+      s.width = "0.3cm";
+      s.height = "0.3cm";
+      s.margin = "0.2cm";
     },
-    [`.${classStateHidden}`]: {
-      "": (s) => {
-        s.display = "none";
-      },
-      narrow: (s) => {},
-      wide: (s) => {},
+    [`.${classStateHidden}`]: (s) => {
+      s.display = "none";
     },
   });
+  const backUnreadStyles = [
+    unreadStyle,
+    classStateHidden,
+    sm("unread_back", {
+      "": {
+        narrow: (s) => {},
+        wide: (s) => {
+          s.display = "none";
+        },
+        "": (s) => {},
+      },
+    }),
+  ];
   presentation.leafMenuLink = /** @type { Presentation["leafMenuLink"] } */ (
     args
   ) => {
@@ -1570,7 +1573,6 @@ svg.spinner4 path {
         }),
       ];
     };
-  const backUnreadStyles = [unreadStyle, classStateHidden];
   presentation.contChatHeadBar =
     /** @type { Presentation["contChatHeadBar"] } */ (args) => {
       const children = [];
