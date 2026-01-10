@@ -1,17 +1,24 @@
 use {
     crate::{
         api::req_post_json,
+        async_::{
+            BgVal,
+            bg_val,
+        },
         js::LogJsErr,
         state::state,
     },
     flowcontrol::shed,
-    futures::channel::oneshot,
     gloo::storage::{
         LocalStorage,
         Storage,
     },
     jiff::Timestamp,
-    rooting::spawn_rooted,
+    rooting::{
+        ScopeValue,
+        scope_any,
+        spawn_rooted,
+    },
     serde::{
         Deserialize,
         Serialize,
@@ -39,7 +46,6 @@ use {
         collections::HashMap,
         hash::Hash,
     },
-    wasm_bindgen_futures::spawn_local,
 };
 
 // # Generic
@@ -116,35 +122,42 @@ async fn req_api_values<
     return Ok(out);
 }
 
+#[derive(Clone)]
 pub enum NowOrLater<T> {
     Now(T),
-    Later(futures::channel::oneshot::Receiver<Result<Option<T>, String>>),
+    Later(BgVal<Result<Option<T>, String>>),
 }
 
-impl<T: 'static> NowOrLater<T> {
-    pub fn map<U: 'static>(self, f: impl 'static + FnOnce(T) -> U) -> NowOrLater<U> {
+impl<T: 'static + Clone> NowOrLater<T> {
+    pub fn map<U: 'static + Clone>(self, f: impl 'static + FnOnce(T) -> U) -> NowOrLater<U> {
         match self {
             NowOrLater::Now(v) => return NowOrLater::Now(f(v)),
-            NowOrLater::Later(t_rx) => {
-                let (tx, rx) = oneshot::channel();
-                spawn_local(async {
-                    let v = match t_rx.await {
-                        Ok(Ok(Some(v))) => Ok(Some(f(v))),
-                        Ok(Ok(None)) => Ok(None),
-                        Ok(Err(e)) => Err(e),
-                        Err(e) => Err(e.to_string()),
-                    };
-                    _ = tx.send(v);
-                });
-                return NowOrLater::Later(rx);
+            NowOrLater::Later(v) => NowOrLater::Later(bg_val(async move {
+                match v.get().await {
+                    Ok(Some(v)) => Ok(Some(f(v))),
+                    Ok(None) => Ok(None),
+                    Err(e) => Err(e),
+                }
+            })),
+        }
+    }
+
+    pub fn then(self, f: impl 'static + FnOnce(Result<Option<T>, String>)) -> ScopeValue {
+        match self {
+            NowOrLater::Now(v) => {
+                f(Ok(Some(v)));
+                return scope_any(());
             },
+            NowOrLater::Later(v) => return scope_any(spawn_rooted(async move {
+                f(v.get().await);
+            })),
         }
     }
 }
 
 fn get_or_req_api_value<
     'de,
-    V: 'static + Serialize + DeserializeOwned,
+    V: 'static + Serialize + DeserializeOwned + Clone,
     R: 'static + c2s::proto::ReqTrait<Resp = Vec<V>>,
     K: 'static + Eq + Hash,
 >(cat_key: &str, r: R, access_id: fn(&V) -> K, id: K, touch: bool) -> NowOrLater<LocalValue<V>> {
@@ -157,7 +170,7 @@ fn get_or_req_api_value<
             return NowOrLater::Now(local);
         },
         None => {
-            return NowOrLater::Later(spawn_rooted({
+            return NowOrLater::Later(bg_val({
                 let cat_key = cat_key.to_string();
                 async move {
                     let local = match req_api_values(&cat_key, r, access_id, if touch {
@@ -279,7 +292,7 @@ pub async fn req_api_channelgroups(touch: Option<&ChannelGroupId>) -> Result<Vec
     return req_api_values(LOCALSTORAGE_CHANNELGROUPS, c2s::ChannelGroupList, |x| x.id.clone(), touch).await;
 }
 
-pub fn get_or_req_api_channelgroup(id: &ChannelGroupId, touch: bool) -> NowOrLater<LocalChannelGroup> {
+pub fn get_or_req_api_channelgroup_(id: &ChannelGroupId, touch: bool) -> NowOrLater<LocalChannelGroup> {
     return get_or_req_api_value(
         LOCALSTORAGE_CHANNELGROUPS,
         c2s::ChannelGroupList,
@@ -301,7 +314,7 @@ pub async fn req_api_channels(touch: Option<&QualifiedChannelId>) -> Result<Vec<
     return req_api_values(LOCALSTORAGE_CHANNELS, c2s::ChannelList, |x| x.id.clone(), touch).await;
 }
 
-pub fn get_or_req_api_channel(id: &QualifiedChannelId, touch: bool) -> NowOrLater<LocalChannel> {
+pub fn get_or_req_api_channel_(id: &QualifiedChannelId, touch: bool) -> NowOrLater<LocalChannel> {
     return get_or_req_api_value(LOCALSTORAGE_CHANNELS, c2s::ChannelList, |x| x.id.clone(), id.clone(), touch);
 }
 

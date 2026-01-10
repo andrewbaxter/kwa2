@@ -26,6 +26,8 @@ use {
 
 pub fn build(pc: &mut ProcessingContext, id: &Identity) -> El {
     return build_nol_form(
+        //. .
+        pc,
         &Ministate::Identity(id.clone()),
         "Delete identity",
         get_or_req_api_identity(id, false).map({

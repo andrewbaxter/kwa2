@@ -1,6 +1,9 @@
 use {
     crate::{
-        async_::BgVal,
+        async_::{
+            BgVal,
+            bg_val,
+        },
         chat::{
             ChatState,
             ChatState2,
@@ -18,6 +21,7 @@ use {
         localdata::{
             LocalChannel,
             LocalChannelGroup,
+            NowOrLater,
             req_api_channelgroups,
             req_api_channels,
         },
@@ -56,6 +60,7 @@ use {
     },
     flowcontrol::{
         shed,
+        superif,
         ta_return,
     },
     futures::channel::oneshot,
@@ -70,6 +75,8 @@ use {
     js_sys::decode_uri,
     lunk::{
         EventGraph,
+        HistPrim,
+        Prim,
         ProcessingContext,
     },
     rooting::{
@@ -92,6 +99,7 @@ use {
         cell::RefCell,
         collections::HashMap,
         future::Future,
+        mem::swap,
         rc::Rc,
     },
     tokio::join,
@@ -249,15 +257,28 @@ pub struct CurrentChat {
 }
 
 #[derive(Clone)]
+pub struct LocalChannel1 {
+    pub id: QualifiedChannelId,
+    pub unread: Prim<usize>,
+    pub memo_short: HistPrim<String>,
+    pub memo_long: HistPrim<String>,
+    pub group: HistPrim<Option<ChannelGroupId>>,
+    pub own_identity: Identity,
+}
+
+#[derive(Clone)]
 pub struct LocalChannelGroup1 {
-    pub v: LocalChannelGroup,
-    pub children: lunk::List<LocalChannel>,
+    pub id: ChannelGroupId,
+    pub unread: Prim<usize>,
+    pub memo_short: HistPrim<String>,
+    pub memo_long: HistPrim<String>,
+    pub children: lunk::List<Rc<LocalChannel1>>,
 }
 
 #[derive(Clone)]
 pub enum LocalCocg {
-    Channel(LocalChannel),
-    ChannelGroup(LocalChannelGroup1),
+    Channel(Rc<LocalChannel1>),
+    ChannelGroup(Rc<LocalChannelGroup1>),
 }
 
 pub struct State_ {
@@ -268,6 +289,9 @@ pub struct State_ {
     pub env: Env,
     pub log: Rc<dyn Log>,
     pub log1: Rc<VecLog>,
+    pub unread: Prim<usize>,
+    pub top_lookup_channel: RefCell<HashMap<QualifiedChannelId, Rc<LocalChannel1>>>,
+    pub top_lookup_channelgroup: RefCell<HashMap<ChannelGroupId, Rc<LocalChannelGroup1>>>,
     pub top: lunk::List<LocalCocg>,
     pub current_chat: RefCell<Option<CurrentChat>>,
     pub bg_pushing: RefCell<Option<oneshot::Receiver<()>>>,
@@ -308,7 +332,7 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
             body = page_identity_new::build(pc);
         },
         Ministate::Identity(id) => {
-            body = page_identity::build(id);
+            body = page_identity::build(pc, id);
         },
         Ministate::IdentityEdit(id) => {
             body = page_identity_edit::build(pc, id);
@@ -323,7 +347,7 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
             body = page_identityinvite_new::build(pc, id);
         },
         Ministate::IdentityInvite(s) => {
-            body = page_identityinvite::build(&s.identity, &s.invite);
+            body = page_identityinvite::build(pc, &s.identity, &s.invite);
         },
         Ministate::IdentityInviteEdit(s) => {
             body = page_identityinvite_edit::build(pc, &s.identity, &s.invite);
@@ -341,7 +365,7 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
             body = page_channel::build(pc, s);
         },
         Ministate::ChannelMenu(s) => {
-            body = page_channel_menu::build(s);
+            body = page_channel_menu::build(pc, s);
         },
         Ministate::ChannelEdit(s) => {
             body = page_channel_edit::build(pc, s);
@@ -353,7 +377,7 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
             body = page_channelmembers::build(&s);
         },
         Ministate::ChannelMember(s) => {
-            body = page_channelmember::build(s);
+            body = page_channelmember::build(pc, s);
         },
         Ministate::ChannelMemberEdit(s) => {
             body = page_channelmember_edit::build(pc, s);
@@ -368,7 +392,7 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
             body = page_channelinvite_new::build(pc, s);
         },
         Ministate::ChannelInvite(s) => {
-            body = page_channelinvite::build(&s.channel, &s.invite);
+            body = page_channelinvite::build(pc, &s.channel, &s.invite);
         },
         Ministate::ChannelInviteEdit(s) => {
             body = page_channelinvite_edit::build(pc, &s.channel, &s.invite);
@@ -383,7 +407,7 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
             body = page_channelgroup::build(pc, s);
         },
         Ministate::ChannelGroupMenu(s) => {
-            body = page_channelgroup_menu::build(s);
+            body = page_channelgroup_menu::build(pc, s);
         },
         Ministate::ChannelGroupEdit(s) => {
             body = page_channelgroup_edit::build(pc, s);
@@ -433,20 +457,63 @@ pub enum SessionStorageChatReset {
 
 // Settings
 pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<LocalChannelGroup>) {
-    let mut lookup_new_child_cs = HashMap::<ChannelGroupId, HashMap<QualifiedChannelId, LocalChannel>>::new();
-    let mut lookup_new_top_cs = HashMap::new();
-    let mut lookup_new_top_cgs = HashMap::new();
-    for cg in cgs {
-        lookup_new_top_cgs.insert(cg.res.id.clone(), cg);
+    let mut top_add = vec![];
+
+    // Sort data, do lookup removals
+    let mut lookup_cs = HashMap::new();
+    let mut lookup_cgs = HashMap::new();
+    let mut lookup_received_child_cs =
+        HashMap::<ChannelGroupId, HashMap<QualifiedChannelId, Rc<LocalChannel1>>>::new();
+    let mut lookup_received_top_cs = HashMap::new();
+    for received_cg in cgs {
+        let cg1 = match state().top_lookup_channelgroup.borrow_mut().remove(&received_cg.res.id) {
+            Some(existing) => {
+                existing.memo_long.set(pc, received_cg.res.memo_long.clone());
+                existing.memo_short.set(pc, received_cg.res.memo_short.clone());
+                existing
+            },
+            None => {
+                let new_cg = Rc::new(LocalChannelGroup1 {
+                    id: received_cg.res.id.clone(),
+                    unread: Prim::new(0),
+                    memo_long: HistPrim::new(pc, received_cg.res.memo_long.clone()),
+                    memo_short: HistPrim::new(pc, received_cg.res.memo_short.clone()),
+                    children: lunk::List::new(vec![]),
+                });
+                top_add.push(LocalCocg::ChannelGroup(new_cg.clone()));
+                new_cg
+            },
+        };
+        lookup_cgs.insert(cg1.id.clone(), cg1.clone());
     }
-    for channel in cs {
-        if let Some(g) = &channel.res.group {
-            lookup_new_child_cs.entry(*g).or_default().insert(channel.res.id.clone(), channel);
+    for received_c in cs {
+        let group = received_c.res.group;
+        let c1 = match state().top_lookup_channel.borrow_mut().remove(&received_c.res.id) {
+            Some(existing_c) => {
+                // TODO make `set_if_not` for prim, don't use histprim here
+                existing_c.memo_long.set(pc, received_c.res.memo_long.clone());
+                existing_c.memo_short.set(pc, received_c.res.memo_short.clone());
+                existing_c.group.set(pc, received_c.res.group);
+                existing_c
+            },
+            None => Rc::new(LocalChannel1 {
+                id: received_c.res.id.clone(),
+                own_identity: received_c.res.own_identity.clone(),
+                unread: Prim::new(0),
+                memo_long: HistPrim::new(pc, received_c.res.memo_long.clone()),
+                memo_short: HistPrim::new(pc, received_c.res.memo_short.clone()),
+                group: HistPrim::new(pc, received_c.res.group.clone()),
+            }),
+        };
+        lookup_cs.insert(c1.id.clone(), c1.clone());
+        if let Some(g) = &group {
+            lookup_received_child_cs.entry(*g).or_default().insert(c1.id.clone(), c1);
         } else {
-            lookup_new_top_cs.insert(channel.res.id.clone(), channel);
+            lookup_received_top_cs.insert(c1.id.clone(), c1);
         }
     }
 
+    // Prep tree additions and removals
     struct RemoveChange {
         offset: usize,
         count: usize,
@@ -456,28 +523,24 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
     for (top_i, old_top) in state().top.borrow_values().iter().enumerate().rev() {
         let top_remove;
         match old_top {
-            LocalCocg::Channel(old_top_c) => match lookup_new_top_cs.remove(&old_top_c.res.id) {
+            LocalCocg::Channel(old_top_c) => match lookup_received_top_cs.remove(&old_top_c.id) {
                 Some(_new_top_c) => {
                     top_remove = false;
-                    // TODO sync values
                 },
                 None => {
                     top_remove = true;
                 },
             },
-            LocalCocg::ChannelGroup(old_top_cg) => match lookup_new_top_cgs.remove(&old_top_cg.v.res.id) {
+            LocalCocg::ChannelGroup(old_top_cg) => match lookup_cgs.get(&old_top_cg.id) {
                 Some(new_top_cg) => {
                     top_remove = false;
-
-                    // TODO sync values
-                    if let Some(mut lookup_new_group_cs) = lookup_new_child_cs.remove(&new_top_cg.res.id) {
+                    if let Some(mut lookup_received_group_cs) = lookup_received_child_cs.remove(&new_top_cg.id) {
                         let mut group_removals: Vec<RemoveChange> = vec![];
                         for (group_i, old_group_c) in old_top_cg.children.borrow_values().iter().enumerate().rev() {
                             let group_remove;
-                            match lookup_new_group_cs.remove(&old_group_c.res.id) {
+                            match lookup_received_group_cs.remove(&old_group_c.id) {
                                 Some(_new_top_c) => {
                                     group_remove = false;
-                                    // TODO sync values
                                 },
                                 None => {
                                     group_remove = true;
@@ -504,8 +567,8 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
                             old_top_cg.children.splice(pc, removal.offset, removal.count, vec![]);
                         }
                         let mut add = vec![];
-                        for (_, new_group_c) in lookup_new_group_cs {
-                            add.push(new_group_c)
+                        for (_, new_group_c) in lookup_received_group_cs {
+                            add.push(new_group_c);
                         }
                         old_top_cg.children.splice(pc, 0, 0, add);
                     }
@@ -532,42 +595,122 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
             });
         }
     }
+
+    // Do tree+lookup removals
     for removal in top_removals {
         state().top.splice(pc, removal.offset, removal.count, vec![]);
     }
-    let mut add = vec![];
-    for (_, new_cg) in lookup_new_top_cgs {
-        let mut add_children = vec![];
-        if let Some(children) = lookup_new_child_cs.remove(&new_cg.res.id) {
-            for (_, child) in children {
-                add_children.push(child);
-            }
-        }
-        add.push(LocalCocg::ChannelGroup(LocalChannelGroup1 {
-            v: new_cg,
-            children: lunk::List::new(add_children),
-        }));
+    swap(&mut *state().top_lookup_channel.borrow_mut(), &mut lookup_cs);
+    swap(&mut *state().top_lookup_channelgroup.borrow_mut(), &mut lookup_cgs);
+
+    // Do tree additions
+    for (_, new_c) in lookup_received_top_cs {
+        top_add.push(LocalCocg::Channel(new_c));
     }
-    for (_, new_c) in lookup_new_top_cs {
-        add.push(LocalCocg::Channel(new_c));
-    }
-    state().top.splice(pc, 0, 0, add);
+    state().top.splice(pc, 0, 0, top_add);
 }
 
-pub async fn pull_top(eg: &EventGraph) {
+pub async fn pull_top_touch(
+    eg: &EventGraph,
+    touch_c: Option<&QualifiedChannelId>,
+    touch_cg: Option<&ChannelGroupId>,
+) {
     match async {
         ta_return!((), String);
-        let (cs, cgs) = join!(req_api_channels(None), req_api_channelgroups(None));
+        let (cs, cgs) = join!(req_api_channels(touch_c), req_api_channelgroups(touch_cg));
         let cs = cs?;
         let cgs = cgs?;
         eg.event(move |pc| {
             merge_top(pc, cs, cgs);
+            superif!({
+                for (top_i, cocg) in state().top.borrow_values().iter().enumerate() {
+                    match cocg {
+                        LocalCocg::Channel(tc) => {
+                            if let Some(touch_c) = touch_c {
+                                if tc.id == *touch_c {
+                                    break 'found_top top_i;
+                                }
+                            }
+                        },
+                        LocalCocg::ChannelGroup(tcg) => {
+                            if let Some(touch_cg) = touch_cg {
+                                if tcg.id == *touch_cg {
+                                    break 'found_top top_i;
+                                }
+                            }
+                            superif!({
+                                for (c_i, c) in tcg.children.borrow_values().iter().enumerate() {
+                                    if let Some(touch_c) = touch_c {
+                                        if c.id == *touch_c {
+                                            break 'found_child c_i;
+                                        }
+                                    }
+                                }
+                            } move_child = 'found_child {
+                                if move_child > 0 {
+                                    let removed = tcg.children.splice(pc, move_child, 1, vec![]);
+                                    tcg.children.splice(pc, 0, 0, removed);
+                                }
+                            });
+                        },
+                    }
+                }
+            } move_top = 'found_top {
+                if move_top > 0 {
+                    let removed = state().top.splice(pc, move_top, 1, vec![]);
+                    state().top.splice(pc, 0, 0, removed);
+                }
+            });
         }).unwrap();
         return Ok(());
     }.await {
         Ok(_) => { },
         Err(e) => {
             state().log.log(&format!("Error pulling new top data: {}", e));
+        },
+    }
+}
+
+pub async fn pull_top(eg: &EventGraph) {
+    pull_top_touch(eg, None, None).await;
+}
+
+pub fn get_or_req_channel(eg: &EventGraph, id: &QualifiedChannelId, touch: bool) -> NowOrLater<Rc<LocalChannel1>> {
+    match state().top_lookup_channel.borrow().get(id) {
+        Some(c) => return NowOrLater::Now(c.clone()),
+        None => {
+            let eg = eg.clone();
+            let id = id.clone();
+            return NowOrLater::Later(bg_val(async move {
+                pull_top_touch(&eg, if touch {
+                    Some(&id)
+                } else {
+                    None
+                }, None).await;
+                return Ok(state().top_lookup_channel.borrow().get(&id).cloned());
+            }));
+        },
+    }
+}
+
+pub fn get_or_req_channelgroup(
+    eg: &EventGraph,
+    id: &ChannelGroupId,
+    touch: bool,
+) -> NowOrLater<Rc<LocalChannelGroup1>> {
+    match state().top_lookup_channelgroup.borrow().get(id) {
+        Some(c) => return NowOrLater::Now(c.clone()),
+        None => {
+            let eg = eg.clone();
+            let id = id.clone();
+            return NowOrLater::Later(bg_val(async move {
+                pull_top_touch(&eg, None, if touch {
+                    Some(&id)
+                } else {
+                    None
+                }).await;
+                return Ok(state().top_lookup_channelgroup.borrow().get(&id).cloned());
+            }));
         },
     }
 }

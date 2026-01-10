@@ -3,48 +3,55 @@ use {
         js::style_export,
         localdata::greq_api_identityinvites,
         pageutil::{
-            build_nol_menu,
             LazyPage,
+            build_nol_menu,
         },
         state::{
-            ministate_octothorpe,
             Ministate,
             MinistateIdentityInvite,
+            ministate_octothorpe,
         },
     },
+    lunk::ProcessingContext,
     rooting::El,
     shared::interface::shared::IdentityInviteId,
     spaghettinuum::interface::identity::Identity,
 };
 
-pub fn build(identity: &Identity, id: &IdentityInviteId) -> El {
-    return build_nol_menu(&Ministate::IdentityInvites(identity.clone()), greq_api_identityinvites(id, true), {
-        let identity = identity.clone();
-        move |local| LazyPage {
-            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
-                text: local.res.memo_short.clone(),
-                link: None,
-            }).root,
-            body: vec![
-                //. .
-                style_export::leaf_menu_code(style_export::LeafMenuCodeArgs { text: local.res.token.token.0.clone() }).root,
-                style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                    text: format!("Edit"),
-                    link: ministate_octothorpe(&Ministate::IdentityInviteEdit(MinistateIdentityInvite {
-                        identity: identity.clone(),
-                        invite: local.res.id.clone(),
-                    })),
-                    image: None,
+pub fn build(pc: &mut ProcessingContext, identity: &Identity, id: &IdentityInviteId) -> El {
+    return build_nol_menu(
+        //. .
+        pc,
+        &Ministate::IdentityInvites(identity.clone()),
+        greq_api_identityinvites(id, true),
+        {
+            let identity = identity.clone();
+            move |local| LazyPage {
+                center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
+                    text: local.res.memo_short.clone(),
+                    link: None,
                 }).root,
-                style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                    text: format!("Delete"),
-                    link: ministate_octothorpe(&Ministate::IdentityInviteDelete(MinistateIdentityInvite {
-                        identity: identity.clone(),
-                        invite: local.res.id.clone(),
-                    })),
-                    image: None,
-                }).root,
-            ],
-        }
-    });
+                body: vec![
+                    //. .
+                    style_export::leaf_menu_code(style_export::LeafMenuCodeArgs { text: local.res.token.token.0.clone() }).root,
+                    style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                        text: format!("Edit"),
+                        link: ministate_octothorpe(&Ministate::IdentityInviteEdit(MinistateIdentityInvite {
+                            identity: identity.clone(),
+                            invite: local.res.id.clone(),
+                        })),
+                        image: None,
+                    }).root,
+                    style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                        text: format!("Delete"),
+                        link: ministate_octothorpe(&Ministate::IdentityInviteDelete(MinistateIdentityInvite {
+                            identity: identity.clone(),
+                            invite: local.res.id.clone(),
+                        })),
+                        image: None,
+                    }).root,
+                ],
+            }
+        },
+    );
 }

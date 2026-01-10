@@ -29,7 +29,10 @@ use {
 };
 
 pub fn build(pc: &mut ProcessingContext, identity: &Identity, id: &IdentityInviteId) -> El {
-    return build_nol_form(&Ministate::IdentityInvite(MinistateIdentityInvite {
+    return build_nol_form(
+        //. .
+        pc,
+        &Ministate::IdentityInvite(MinistateIdentityInvite {
         identity: identity.clone(),
         invite: id.clone(),
     }), "Delete invite", greq_api_identityinvites(id, false).map({

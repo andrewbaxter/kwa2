@@ -37,6 +37,8 @@ pub fn build(pc: &mut ProcessingContext) -> El {
     let (form_els, form_state) = Form_::new_form("", None);
     let form_state = Rc::new(form_state);
     return build_form(
+        //. .
+        pc,
         format!("New identity"),
         Ministate::Identities,
         form_els.error.unwrap(),

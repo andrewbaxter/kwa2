@@ -1,12 +1,16 @@
 use {
     crate::{
-        api::req_post_json, localdata::{
+        api::req_post_json,
+        localdata::{
             self,
-        }, pageutil::build_form, state::{
+        },
+        pageutil::build_form,
+        state::{
             goto_replace_ministate,
             state,
-            Ministate, MinistateIdentityInvite,
-        }
+            Ministate,
+            MinistateIdentityInvite,
+        },
     },
     jiff::Timestamp,
     lunk::ProcessingContext,
@@ -36,6 +40,8 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity) -> El {
     let (form_els, form_state) = Form_::new_form("", None);
     let form_state = Rc::new(form_state);
     return build_form(
+        //. .
+        pc,
         format!("New invite"),
         Ministate::Identity(identity.clone()),
         form_els.error.unwrap(),
@@ -56,10 +62,9 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity) -> El {
                 }).await?;
                 localdata::ensure_identityinvite(res.clone()).await;
                 eg.event(|pc| {
-                    goto_replace_ministate(pc, &state().log, &Ministate::IdentityInvite(MinistateIdentityInvite{
-
+                    goto_replace_ministate(pc, &state().log, &Ministate::IdentityInvite(MinistateIdentityInvite {
                         identity: identity.clone(),
-invite                       : res.id,
+                        invite: res.id,
                     }));
                 }).unwrap();
                 return Ok(());

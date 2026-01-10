@@ -43,7 +43,9 @@ struct Form_ {
 }
 
 pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
-    return build_nol_form(&Ministate::ChannelInvite(MinistateChannelInvite {
+    return build_nol_form(
+        //. .
+        pc,&Ministate::ChannelInvite(MinistateChannelInvite {
         channel: channel.clone(),
         invite: id.clone(),
     }), "Edit invite", get_or_req_api_channelinvite(id, true).map({

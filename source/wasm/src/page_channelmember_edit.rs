@@ -31,7 +31,10 @@ struct Form_ {
 }
 
 pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelMember) -> El {
-    return build_nol_form(&Ministate::ChannelMember(MinistateChannelMember {
+    return build_nol_form(
+        //. .
+        pc,
+        &Ministate::ChannelMember(MinistateChannelMember {
         channel: s.channel.clone(),
         identity: s.identity.clone(),
     }), "Edit member", get_or_req_api_contact(&s.identity, true).map({

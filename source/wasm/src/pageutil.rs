@@ -5,23 +5,28 @@ use {
             style_export,
         },
         localdata::{
+            NowOrLater,
             req_api_channelgroups,
             req_api_identities,
-            NowOrLater,
         },
         state::{
+            Ministate,
             ministate_octothorpe,
             spawn_rooted_log,
-            Ministate,
+            state,
         },
     },
     flowcontrol::ta_return,
     js_sys::Math::random,
+    lunk::{
+        ProcessingContext,
+        link,
+    },
     rooting::{
+        El,
         el,
         scope_any,
         spawn_rooted,
-        El,
     },
     rooting_forms::css::err_el,
     shared::interface::shared::ChannelGroupId,
@@ -223,21 +228,32 @@ pub fn build_form_inner(
 }
 
 pub fn build_form(
+    pc: &mut ProcessingContext,
     title: String,
     back_link: Ministate,
     form_err_el: El,
     form_els: Vec<El>,
     do_send: impl 'static + Clone + AsyncFn(f64) -> Result<(), String>,
 ) -> El {
-    let form = style_export::cont_page_form(style_export::ContPageFormArgs {
-        head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
-            back_link: ministate_octothorpe(&back_link),
-            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
-                text: title,
-                link: None,
-            }).root,
-            right: None,
+    let head_bar = style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
+        back_link: ministate_octothorpe(&back_link),
+        center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
+            text: title,
+            link: None,
         }).root,
+        right: None,
+    });
+    head_bar.back_unread.ref_own(|el_| link!((_pc = pc), (unread = state().unread.clone()), (), (el_ = el_.weak()), {
+        let el_ = el_.upgrade()?;
+        let unread = *unread.borrow();
+        if unread > 0 {
+            el_.ref_text(&unread.to_string());
+        } else {
+            el_.ref_text("");
+        }
+    }));
+    let form = style_export::cont_page_form(style_export::ContPageFormArgs {
+        head_bar: head_bar.root,
         children: vec![],
     });
     form.errors.ref_push(form_err_el);
@@ -247,16 +263,26 @@ pub fn build_form(
 
 pub fn build_nol_form<
     SEND: 'static + Clone + AsyncFn(f64) -> Result<(), String>,
->(back_link: &Ministate, title: &str, v: NowOrLater<(El, Vec<El>, SEND)>) -> El {
-    let form = style_export::cont_page_form(style_export::ContPageFormArgs {
-        head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
-            back_link: ministate_octothorpe(&back_link),
-            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
-                text: title.to_string(),
-                link: None,
-            }).root,
-            right: None,
+>(pc: &mut ProcessingContext, back_link: &Ministate, title: &str, v: NowOrLater<(El, Vec<El>, SEND)>) -> El {
+    let head_bar = style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
+        back_link: ministate_octothorpe(&back_link),
+        center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
+            text: title.to_string(),
+            link: None,
         }).root,
+        right: None,
+    });
+    head_bar.back_unread.ref_own(|el_| link!((_pc = pc), (unread = state().unread.clone()), (), (el_ = el_.weak()), {
+        let el_ = el_.upgrade()?;
+        let unread = *unread.borrow();
+        if unread > 0 {
+            el_.ref_text(&unread.to_string());
+        } else {
+            el_.ref_text("");
+        }
+    }));
+    let form = style_export::cont_page_form(style_export::ContPageFormArgs {
+        head_bar: head_bar.root,
         children: vec![],
     });
     let button_ok = form.submit;
@@ -271,7 +297,7 @@ pub fn build_nol_form<
             body = vec![el_async({
                 let button_ok = button_ok.clone();
                 async move {
-                    let Some((form_err_el, form_els, do_send)) = v.await.map_err(|e| e.to_string())?? else {
+                    let Some((form_err_el, form_els, do_send)) = v.get().await.map_err(|e| e.to_string())? else {
                         return Err(format!("Could not find object"));
                     };
                     errs.ref_push(form_err_el);
@@ -290,8 +316,13 @@ pub struct LazyPage {
 }
 
 pub fn build_nol_menu<
-    T: 'static,
->(back_link: &Ministate, v: NowOrLater<T>, build: impl 'static + FnOnce(T) -> LazyPage) -> El {
+    T: 'static + Clone,
+>(
+    pc: &mut ProcessingContext,
+    back_link: &Ministate,
+    v: NowOrLater<T>,
+    build: impl 'static + FnOnce(T) -> LazyPage,
+) -> El {
     let center;
     let body;
     match v {
@@ -305,7 +336,7 @@ pub fn build_nol_menu<
             body = vec![el_async({
                 let center = center.clone();
                 async move {
-                    let Some(local) = v.await.map_err(|e| e.to_string())?? else {
+                    let Some(local) = v.get().await.map_err(|e| e.to_string())? else {
                         return Err(format!("Could not find object"));
                     };
                     let r = build(local);
@@ -315,19 +346,35 @@ pub fn build_nol_menu<
             })];
         },
     }
+    let head_bar = style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
+        back_link: ministate_octothorpe(&back_link),
+        center: center,
+        right: None,
+    });
+    head_bar.back_unread.ref_own(|el_| link!((_pc = pc), (unread = state().unread.clone()), (), (el_ = el_.weak()), {
+        let el_ = el_.upgrade()?;
+        let unread = *unread.borrow();
+        if unread > 0 {
+            el_.ref_text(&unread.to_string());
+        } else {
+            el_.ref_text("");
+        }
+    }));
     return style_export::cont_page_menu(style_export::ContPageMenuArgs {
-        head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
-            back_link: ministate_octothorpe(&back_link),
-            center: center,
-            right: None,
-        }).root,
+        head_bar: head_bar.root,
         children: body,
     }).root;
 }
 
 pub fn build_nol_menu_title<
-    T: 'static,
->(back_link: &Ministate, title: &str, v: NowOrLater<T>, build: impl 'static + FnOnce(T) -> El) -> El {
+    T: 'static + Clone,
+>(
+    pc: &mut ProcessingContext,
+    back_link: &Ministate,
+    title: &str,
+    v: NowOrLater<T>,
+    build: impl 'static + FnOnce(T) -> El,
+) -> El {
     let body;
     match v {
         NowOrLater::Now(local) => {
@@ -336,7 +383,7 @@ pub fn build_nol_menu_title<
         NowOrLater::Later(v) => {
             body = el_async({
                 async move {
-                    let Some(local) = v.await.map_err(|e| e.to_string())?? else {
+                    let Some(local) = v.get().await.map_err(|e| e.to_string())? else {
                         return Err(format!("Could not find object"));
                     };
                     return Ok(vec![build(local)]);
@@ -344,22 +391,36 @@ pub fn build_nol_menu_title<
             });
         },
     }
-    return style_export::cont_page_menu(style_export::ContPageMenuArgs {
-        head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
-            back_link: ministate_octothorpe(&back_link),
-            center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
-                text: title.to_string(),
-                link: None,
-            }).root,
-            right: None,
+    let head_bar = style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
+        back_link: ministate_octothorpe(&back_link),
+        center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
+            text: title.to_string(),
+            link: None,
         }).root,
+        right: None,
+    });
+    head_bar.back_unread.ref_own(|el_| link!((_pc = pc), (unread = state().unread.clone()), (), (el_ = el_.weak()), {
+        let el_ = el_.upgrade()?;
+        let unread = *unread.borrow();
+        if unread > 0 {
+            el_.ref_text(&unread.to_string());
+        } else {
+            el_.ref_text("");
+        }
+    }));
+    return style_export::cont_page_menu(style_export::ContPageMenuArgs {
+        head_bar: head_bar.root,
         children: vec![body],
     }).root;
 }
 
 pub fn build_nol_chat_bar<
-    T: 'static,
->(back_link: &Ministate, v: NowOrLater<T>, build: impl 'static + FnOnce(T) -> El) -> El {
+    T: 'static + Clone,
+>(
+    back_link: &Ministate,
+    v: NowOrLater<T>,
+    build: impl 'static + FnOnce(T) -> El,
+) -> style_export::ContChatHeadBarRet {
     let mut own = vec![];
     let center;
     match v {
@@ -371,7 +432,7 @@ pub fn build_nol_chat_bar<
             own.push(spawn_rooted_log("Fetching channel info", {
                 let top_center = center.clone();
                 async move {
-                    let Some(local) = v.await.map_err(|e| e.to_string())?? else {
+                    let Some(local) = v.get().await.map_err(|e| e.to_string())? else {
                         top_center.ref_replace(
                             vec![style_export::leaf_chat_head_bar_center(style_export::LeafChatHeadBarCenterArgs {
                                 text: format!("Unknown"),
@@ -386,9 +447,11 @@ pub fn build_nol_chat_bar<
             }));
         },
     }
-    return style_export::cont_chat_head_bar(style_export::ContChatHeadBarArgs {
+    let out = style_export::cont_chat_head_bar(style_export::ContChatHeadBarArgs {
         back_link: ministate_octothorpe(&back_link),
         center: center,
         right: None,
-    }).root.own(move |_| own);
+    });
+    out.root.ref_own(move |_| own);
+    return out;
 }

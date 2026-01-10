@@ -44,6 +44,7 @@ pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId) -> El {
     let form_state = Rc::new(form_state);
     return build_form(
         //. .
+        pc,
         format!("New invite"),
         Ministate::ChannelMenu(MinistateChannelSub {
             id: channel.clone(),

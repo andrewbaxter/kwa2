@@ -1,13 +1,11 @@
 use {
     crate::{
         api::req_post_json,
-        localdata::{
-            get_or_req_api_channelgroup,
-        },
         pageutil::build_nol_form,
         state::{
             Ministate,
             MinistateChannelGroup,
+            get_or_req_channelgroup,
             goto_replace_ministate,
             pull_top,
             state,
@@ -34,15 +32,17 @@ struct Form_ {
 }
 
 pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
-    return build_nol_form(&Ministate::ChannelGroup(MinistateChannelGroup {
+    return build_nol_form(
+        //. .
+        pc,&Ministate::ChannelGroup(MinistateChannelGroup {
         id: id.clone(),
         reset_id: None,
-    }), "Edit group", get_or_req_api_channelgroup(id, false).map({
+    }), "Edit group", get_or_req_channelgroup(&pc.eg(), id, false).map({
         let eg = pc.eg();
         move |value| {
             let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
-                memo_short: value.res.memo_short.clone(),
-                memo_long: value.res.memo_long.clone(),
+                memo_short: value.memo_short.get(),
+                memo_long: value.memo_long.get(),
             }));
             let form_state = Rc::new(form_state);
             return (form_els.error.unwrap(), form_els.elements, async move |_idem| {
@@ -50,13 +50,13 @@ pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
                     return Ok(());
                 };
                 let res = req_post_json(&state().env.base_url, c2s::ChannelGroupModify {
-                    id: value.res.id.clone(),
-                    memo_short: if new_values.memo_short == value.res.memo_short {
+                    id: value.id.clone(),
+                    memo_short: if new_values.memo_short == *value.memo_short.borrow() {
                         None
                     } else {
                         Some(new_values.memo_short)
                     },
-                    memo_long: if new_values.memo_long == value.res.memo_long {
+                    memo_long: if new_values.memo_long == *value.memo_long.borrow() {
                         None
                     } else {
                         Some(new_values.memo_long)

@@ -31,7 +31,10 @@ struct Form_ {
 }
 
 pub fn build(pc: &mut ProcessingContext, id: &Identity) -> El {
-    return build_nol_form(&Ministate::Identity(id.clone()), "Edit identity", get_or_req_api_identity(id, true).map({
+    return build_nol_form(
+        //. .
+        pc,
+        &Ministate::Identity(id.clone()), "Edit identity", get_or_req_api_identity(id, true).map({
         let eg = pc.eg();
         move |local| {
             let (form_els, form_state) = Form_::new_form("", Some(&Form_ {

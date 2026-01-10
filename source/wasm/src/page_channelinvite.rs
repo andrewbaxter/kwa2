@@ -3,24 +3,21 @@ use {
         js::style_export,
         localdata::get_or_req_api_channelinvite,
         pageutil::{
-            build_nol_menu,
-            LazyPage,
+            LazyPage, build_nol_menu
         },
         state::{
-            ministate_octothorpe,
-            Ministate,
-            MinistateChannelInvite,
+            Ministate, MinistateChannelInvite, ministate_octothorpe
         },
-    },
-    rooting::El,
-    shared::interface::shared::{
+    }, lunk::ProcessingContext, rooting::El, shared::interface::shared::{
         ChannelInviteId,
         QualifiedChannelId,
-    },
+    }
 };
 
-pub fn build(channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
-    return build_nol_menu(&Ministate::ChannelInvites(channel.clone()), get_or_req_api_channelinvite(id, true), {
+pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
+    return build_nol_menu(
+        //. .
+        pc,&Ministate::ChannelInvites(channel.clone()), get_or_req_api_channelinvite(id, true), {
         let channel = channel.clone();
         move |local| LazyPage {
             center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {

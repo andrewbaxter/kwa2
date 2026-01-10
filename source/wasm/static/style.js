@@ -226,7 +226,8 @@
     "rgb(176, 180, 196)",
     "rgb(70, 73, 77)"
   );
-  const varCBackgroundGrad2 = vs("background-end", "#9ab0c4", "rgb(0,0,0)");
+  //const varCBackgroundGrad2 = vs("background-end", "#9ab0c4", "rgb(0,0,0)");
+  const varCBackgroundGrad2 = varCBackground;
   const varCBackgroundBubble = vs(
     "background-bubble",
     "whitesmoke",
@@ -1342,6 +1343,22 @@ svg.spinner4 path {
         styles_: [...buttonMutStylesText],
       }
     );
+    const body = e(
+      "div",
+      {},
+      {
+        styles_: [
+          contVboxStyle,
+          nonchatPageStyleInner,
+          s("cont_page_form_inner", {
+            "": (s) => {
+              s.position = "relative";
+            },
+          }),
+        ],
+        children_: [...args.children],
+      }
+    );
     return {
       root: e(
         "div",
@@ -1350,22 +1367,7 @@ svg.spinner4 path {
           styles_: [contVboxStyle, ...nonchatPageStylesOuter],
           children_: [
             args.headBar,
-            e(
-              "div",
-              {},
-              {
-                styles_: [
-                  contVboxStyle,
-                  nonchatPageStyleInner,
-                  s("cont_page_form_inner", {
-                    "": (s) => {
-                      s.position = "relative";
-                    },
-                  }),
-                ],
-                children_: [...args.children],
-              }
-            ),
+            body,
             spacer(),
             e(
               "div",
@@ -1394,6 +1396,7 @@ svg.spinner4 path {
       ),
       submit: submit,
       errors: errors,
+      body: body,
     };
   };
 

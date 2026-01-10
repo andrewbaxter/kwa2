@@ -13,7 +13,10 @@ use {
             window,
         },
     },
-    lunk::EventGraph,
+    lunk::{
+        EventGraph,
+        Prim,
+    },
     rooting::set_root,
     serde::Deserialize,
     shared::interface::{
@@ -56,10 +59,10 @@ use {
             STATE,
             State_,
             build_ministate,
+            merge_top,
             read_ministate,
             record_replace_ministate,
             state,
-            merge_top,
         },
         websocket::Ws,
     },
@@ -97,6 +100,9 @@ pub fn main() {
             current_chat: Default::default(),
             service_worker: service_worker,
             page_root: root.clone(),
+            top_lookup_channel: Default::default(),
+            top_lookup_channelgroup: Default::default(),
+            unread: Prim::new(0),
             top: lunk::List::new(vec![]),
             ministate: RefCell::new(shed!{
                 'found _;

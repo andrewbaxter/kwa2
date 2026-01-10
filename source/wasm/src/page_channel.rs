@@ -26,7 +26,6 @@ use {
             LogJsErr,
             style_export,
         },
-        localdata::get_or_req_api_channel,
         pageutil::build_nol_chat_bar,
         state::{
             CurrentChat,
@@ -35,6 +34,7 @@ use {
             MinistateChannel,
             SESSIONSTORAGE_CHAT_RESET,
             SessionStorageChatReset,
+            get_or_req_channel,
             ministate_octothorpe,
             record_replace_ministate,
             spawn_rooted_log,
@@ -283,22 +283,61 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
         ),
     );
 
+    // Head bar
+    let nol_channel = get_or_req_channel(&pc.eg(), &m.id, true);
+    let head_bar = build_nol_chat_bar(&Ministate::Top, nol_channel.clone(), {
+        let id = m.id.clone();
+        let sender = m.own_identity.clone();
+        move |local_channel| style_export::leaf_chat_head_bar_center(style_export::LeafChatHeadBarCenterArgs {
+            text: local_channel.memo_short.get(),
+            link: Some(ministate_octothorpe(&Ministate::Channel(MinistateChannel {
+                id: id.clone(),
+                own_identity: sender.clone(),
+                reset_id: None,
+            }))),
+        }).root
+    });
+    head_bar.back_unread.ref_own(|el_| nol_channel.then({
+        let el_ = el_.weak();
+        let eg = pc.eg();
+        move |channel| {
+            let channel = match channel {
+                Ok(Some(x)) => x,
+                Ok(None) => {
+                    return;
+                },
+                Err(e) => {
+                    state().log.log(&format!("Error looking up channel: {}", e));
+                    return;
+                },
+            };
+            let Some(el_) = el_.upgrade() else {
+                return;
+            };
+            el_.ref_own(
+                |el_| eg
+                    .event(
+                        |pc| link!(
+                            (_pc = pc),
+                            (unread_all = state().unread.clone(), unread_channel = channel.unread.clone()),
+                            (),
+                            (el_ = el_.weak()) {
+                                let el_ = el_.upgrade()?;
+                                let unread = *unread_all.borrow() - *unread_channel.borrow();
+                                if unread > 0 {
+                                    el_.ref_text(&unread.to_string());
+                                } else {
+                                    el_.ref_text("");
+                                }
+                            }
+                        ),
+                    )
+                    .unwrap(),
+            );
+        }
+    }));
+
     // Assembly
-    inf.padding_pre_el().ref_push(style_export::cont_chat_head_bar(style_export::ContChatHeadBarArgs {
-        back_link: ministate_octothorpe(&Ministate::Top),
-        center: build_nol_chat_bar(&Ministate::Top, get_or_req_api_channel(&m.id, true), {
-            let id = m.id.clone();
-            let sender = m.own_identity.clone();
-            move |local_channel| style_export::leaf_chat_head_bar_center(style_export::LeafChatHeadBarCenterArgs {
-                text: local_channel.res.memo_short.clone(),
-                link: Some(ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                    id: id.clone(),
-                    own_identity: sender.clone(),
-                    reset_id: None,
-                }))),
-            }).root
-        }),
-        right: None,
-    }).root);
+    inf.padding_pre_el().ref_push(head_bar.root);
     return inf.el().own(move |_| own);
 }

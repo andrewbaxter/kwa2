@@ -39,45 +39,86 @@ fn build_root_children(pc: &mut ProcessingContext) -> El {
             let mut add = vec![];
             for cocg in &change.add {
                 let el1 = match cocg {
-                    LocalCocg::Channel(c) => style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                        text: c.res.memo_short.clone(),
-                        link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                            id: c.res.id.clone(),
-                            own_identity: c.res.own_identity.clone(),
-                            reset_id: None,
-                        })),
-                        image: Some(portrait_url(&c.res.id.identity)),
-                    }).root,
+                    LocalCocg::Channel(c) => {
+                        let child = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                            text: c.memo_short.get(),
+                            link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
+                                id: c.id.clone(),
+                                own_identity: c.own_identity.clone(),
+                                reset_id: None,
+                            })),
+                            image: Some(portrait_url(&c.id.identity)),
+                        });
+                        child
+                            .unread
+                            .ref_own(|el_| link!((_pc = pc), (unread = c.unread.clone()), (), (el_ = el_.weak()) {
+                                let el_ = el_.upgrade()?;
+                                let unread = *unread.borrow();
+                                if unread > 0 {
+                                    el_.ref_text(&unread.to_string());
+                                } else {
+                                    el_.ref_text("");
+                                }
+                            }));
+                        child.root
+                    },
                     LocalCocg::ChannelGroup(cg) => {
                         let out = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
-                            text: cg.v.res.memo_short.clone(),
+                            text: cg.memo_short.get(),
                             link: ministate_octothorpe(&Ministate::ChannelGroup(MinistateChannelGroup {
-                                id: cg.v.res.id,
+                                id: cg.id.clone(),
                                 reset_id: None,
                             })),
                             children: vec![],
                         });
                         out
-                            .group_el
-                            .ref_own(|e| link!((_pc = pc), (children = cg.children.clone()), (), (e = e.weak()) {
-                                let e = e.upgrade()?;
-                                for change in &*children.borrow_changes() {
-                                    let mut add = vec![];
-                                    for c in &change.add {
-                                        let child_e = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                                            text: c.res.memo_short.clone(),
-                                            link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
-                                                id: c.res.id.clone(),
-                                                own_identity: c.res.own_identity.clone(),
-                                                reset_id: None,
-                                            })),
-                                            image: Some(portrait_url(&c.res.id.identity)),
-                                        }).root;
-                                        add.push(child_e);
-                                    }
-                                    e.ref_splice(change.offset, change.remove, add);
+                            .unread
+                            .ref_own(|el_| link!((_pc = pc), (unread = cg.unread.clone()), (), (el_ = el_.weak()) {
+                                let el_ = el_.upgrade()?;
+                                let unread = *unread.borrow();
+                                if unread > 0 {
+                                    el_.ref_text(&unread.to_string());
+                                } else {
+                                    el_.ref_text("");
                                 }
                             }));
+                        out.group_el.ref_own(|e| link!((pc = pc), (children = cg.children.clone()), (), (e = e.weak()) {
+                            let e = e.upgrade()?;
+                            for change in &*children.borrow_changes() {
+                                let mut add = vec![];
+                                for c in &change.add {
+                                    let child = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                                        text: c.memo_short.get(),
+                                        link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
+                                            id: c.id.clone(),
+                                            own_identity: c.own_identity.clone(),
+                                            reset_id: None,
+                                        })),
+                                        image: Some(portrait_url(&c.id.identity)),
+                                    });
+                                    child
+                                        .unread
+                                        .ref_own(
+                                            |el_| link!(
+                                                (_pc = pc),
+                                                (unread = c.unread.clone()),
+                                                (),
+                                                (el_ = el_.weak()) {
+                                                    let el_ = el_.upgrade()?;
+                                                    let unread = *unread.borrow();
+                                                    if unread > 0 {
+                                                        el_.ref_text(&unread.to_string());
+                                                    } else {
+                                                        el_.ref_text("");
+                                                    }
+                                                }
+                                            )
+                                        );
+                                    add.push(child.root);
+                                }
+                                e.ref_splice(change.offset, change.remove, add);
+                            }
+                        }));
                         out.root
                     },
                 };
