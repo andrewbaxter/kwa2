@@ -210,6 +210,7 @@
     "rgba(219, 222, 238, 1)",
     "rgb(70, 73, 77)",
   );
+  // TODO set BackgroundDark to match glass on bg (make glass slightly darker)
   const varCBackgroundGlass = vs(
     "background-dark",
     "rgba(219, 222, 238, 1)",
