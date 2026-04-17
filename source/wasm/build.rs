@@ -155,7 +155,7 @@ fn main() {
         Func {
             name: "leafMenuGroup",
             args: vec![("text", &string_), ("link", &string_), ("children", &arrel_)],
-            returns: vec![("root", &el_), ("groupEl", &el_), ("unread", &el_)],
+            returns: vec![("root", &el_), ("group", &el_), ("link", &el_), ("unread", &el_)],
         },
         Func {
             name: "leafMenuCode",

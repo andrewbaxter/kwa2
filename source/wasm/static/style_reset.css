@@ -74,6 +74,10 @@ Baseline un-styling.
   flex-grow: 1;
 }
 
+button {
+  cursor: pointer;
+}
+
 .stack {
   display: grid;
   grid-template-columns: 1fr;

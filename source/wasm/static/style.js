@@ -119,7 +119,7 @@
   const vs = /** @type {(id:String, light: string, dark: string) => string} */ (
     id,
     light,
-    dark
+    dark,
   ) => {
     const name = `--${id}`;
     globalStyleLight.setProperty(name, light);
@@ -181,14 +181,14 @@
             globalStyleMediaNarrow.insertRule(`.${id1}${suffix} {}`, 0);
             f1(
               /** @type { CSSStyleRule } */ (globalStyleMediaNarrow.cssRules[0])
-                .style
+                .style,
             );
             break;
           case "wide":
             globalStyleMediaWide.insertRule(`.${id1}${suffix} {}`, 0);
             f1(
               /** @type { CSSStyleRule } */ (globalStyleMediaWide.cssRules[0])
-                .style
+                .style,
             );
             break;
           default:
@@ -203,89 +203,67 @@
   ///////////////////////////////////////////////////////////////////////////////
   // xx Constants
 
-  const textIconDelete = "\ue15b";
-  const textIconAdd = "\ue145";
-  const textIconAddMessage = "\ue266";
-  const textIconSettings = "\ue8b8";
-  const textIconIdentities = "\ue7fd";
-  const textIconContacts = "\uf4ca";
-  const textIconBack = "\ue2ea";
-  const textIconLink = "\ue157";
-  const textIconCopy = "\ue14d";
-  const textIconLogin = "\uea77";
-  const textIconLogout = "\ue9ba";
-  const textIconFoldArrow = "\ue5e1";
-  const textIconClose = "\ue5cd";
-  const textIconSend = "\ue163";
-  const textIconEdit = "\ue3c9";
-
   // xx Variables
-  const varCBackground = vs(
-    "background",
-    //"rgb(98, 102, 119)",
-    "rgb(176, 180, 196)",
-    "rgb(70, 73, 77)"
+  const varCBackground = vs("background", "whitesmoke", "rgb(70, 73, 77)");
+  const varCBackgroundDark = vs(
+    "background-dark",
+    "rgba(219, 222, 238, 1)",
+    "rgb(70, 73, 77)",
   );
-  //const varCBackgroundGrad2 = vs("background-end", "#9ab0c4", "rgb(0,0,0)");
-  const varCBackgroundGrad2 = varCBackground;
-  const varCFullBackground = `linear-gradient(to bottom, ${varCBackground}, ${varCBackgroundGrad2})`;
-  const varCBackgroundBubble = vs(
-    "background-bubble",
-    "whitesmoke",
-    "rgb(70, 73, 77)"
-  );
-  const varCBackgroundBubble2 = vs(
-    "background-bubble2",
-    "rgba(224, 212, 200, 1)",
-    "rgb(70, 73, 77)"
+  const varCBackgroundGlass = vs(
+    "background-dark",
+    "rgba(219, 222, 238, 1)",
+    "rgb(70, 73, 77)",
   );
   const varCForeground = vs(
     "c-foreground",
     "rgb(30, 30, 30)",
-    "rgb(244, 255, 255)"
+    "rgb(244, 255, 255)",
+  );
+  const varCForegroundChatButton = vs(
+    "c-foreground-chat-button",
+    "rgba(86, 103, 220, 1)",
+    "rgb(244, 255, 255)",
   );
   const varCForegroundLight = `color-mix(in srgb, ${varCForeground} 80%, transparent)`;
   const varCForegroundVeryLight = `color-mix(in srgb, ${varCForeground} 50%, transparent)`;
   const varCForegroundUltraLight = `color-mix(in srgb, ${varCForeground} 20%, transparent)`;
   const varCForegroundHeadCenter = `color-mix(in srgb, ${varCForeground} 50%, ${varCBackground})`;
-  const varCMutateForeground = "white";
-  const varCMutateBackground = vs(
+  const varCMutateForeground = vs(
     "c-foreground-mutate",
-    //"rgb(164, 32, 73)",
-    //"rgb(137, 81, 219)",
-    //"rgba(76, 76, 146, 1)",
-    "rgba(120, 66, 87, 1)",
-    "rgb(0,0,0)"
+    "rgb(120, 79, 132)",
+    "rgb(0,0,0)",
   );
   const varCNotifyForeground = "white";
   const varCNotifyBackground = vs(
     "c-foreground-notify",
     //"rgb(164, 32, 73)",
     "rgba(68, 78, 111, 1)",
-    "rgb(0,0,0)"
+    "rgb(0,0,0)",
   );
   const varCNotifyBright = vs(
     "c-foreground-notify-bright",
     //"rgb(164, 32, 73)",
     "rgba(81, 101, 176, 1)",
-    "rgb(0,0,0)"
+    "rgb(0,0,0)",
   );
   const varCForegroundError = vs(
     "c-foreground-error",
     "rgb(154, 60, 74)",
-    "rgb(243, 69, 95)"
+    "rgb(243, 69, 95)",
   );
 
-  const varFMenu = "20pt";
+  const varOIcon = "0.75";
+
+  const varFMenu = "14pt";
   const varFHeadBar = "13pt";
 
-  const varSHeadButton = "0.8cm";
+  const varSHeadButton = "0.7cm";
   const varSPageNarrow = "min(100%, 20cm)";
   const varSChatEntry = "16cm";
   const varSPortrait = "1.5cm";
-  const varSChatControlsButton = "0.8cm";
+  const varSChatControlsButton = "0.6cm";
   const varSMenuIcon = "1cm";
-  const varSMenuIconShiftCalc = `(${varSMenuIcon} + 0.15cm)`;
 
   const varPPage = "0.3cm";
   const varPSmall = "0.2cm";
@@ -334,7 +312,7 @@
     root: e("div", {}, { styles_: [contGroupStyle], children_: args.children }),
   });
 
-  const menuItemLineHeight = "1cm";
+  const menuItemLineHeight = "0.8cm";
   const paperStyle = s("paper", {
     "": (s) => {
       s.maskSize = "3cm, 3cm";
@@ -440,11 +418,11 @@ svg.spinner4 path {
     ;
 }
       </style>
-    `)
+    `),
     );
   });
   const leafSpinner = /** @type { (extraStyles: string[])=>HTMLElement } */ (
-    extraStyles
+    extraStyles,
   ) => {
     const styles = [
       s("spinner", {
@@ -465,47 +443,47 @@ svg.spinner4 path {
       return et(
         `
       <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${styles.join(
-        " "
+        " ",
       )} spinner1">
         <path fill="none" stroke="currentColor" stroke-width="${varLAsyncSvg}" pathLength="1" d="m 0.04276819,0.30609795 c 0.02501087,-0.0621192 0.02587843,-0.26140339 0.07010972,-0.25775973 0.0442308,0.0036438 0.0392081,0.24571051 0.0949588,0.24268559 0.0557507,-0.003024 0.044678,-0.19950842 0.10249788,-0.1955405 0.0578198,0.0039683 0.0658219,0.15775144 0.13449927,0.15586294 0.0686774,-0.001889 0.10746733,-0.0981084 0.17282507,-0.095961 0.0653576,0.002148 0.11054793,0.0614271 0.1828686,0.0649971 0.0723208,0.00357 0.0987762,-0.0464728 0.16302072,-0.0447597" />
       </svg>
-    `
+    `,
       );
     } else if (sel < 0.5) {
       return et(
         `
       <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${styles.join(
-        " "
+        " ",
       )} spinner2">
         <path fill="none" stroke="currentColor" stroke-width="${varLAsyncSvg}" pathLength="1" d="M 0.14254063,0.2938125 C 0.10301621,0.2571751 0.0885351,0.17576883 0.12872349,0.11336434 c 0.0401883,-0.06240458 0.17293408,-0.08274137 0.25797572,-0.003932 0.0850417,0.0788098 0.0269571,0.13671136 -0.039893,0.13923062 -0.0668499,0.002519 -0.0812133,-0.0627161 -0.0300127,-0.0891682 0.0512009,-0.0264521 0.15399772,0.020863 0.23776893,0.0435695 0.0837712,0.0227066 0.19943644,0.028629 0.27049542,4.1993e-4 0.0710589,-0.0282097 0.0922414,-0.0677874 0.0456478,-0.0856104" />
       </svg>
-    `
+    `,
       );
     } else if (sel < 0.75) {
       return et(
         `
       <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${styles.join(
-        " "
+        " ",
       )} spinner3">
         <path fill="none" stroke="currentColor" stroke-width="${varLAsyncSvg}" pathLength="1" d="M 0.05805971,0.13660498 C 0.10797019,0.26193567 0.35525482,0.19161688 0.38586466,0.11202727 0.41647444,0.03243767 0.3367885,0.0220047 0.31256276,0.08803155 0.28833702,0.1540584 0.27688391,0.22803629 0.38859489,0.24382805 0.50030587,0.2596199 0.66125404,0.11789295 0.71967761,0.22511469 0.77810135,0.3323364 0.59090405,0.3361921 0.60743783,0.21194022 0.62397152,0.08768833 0.8381139,0.13047976 0.94682009,0.15652352" />
       </svg>
-    `
+    `,
       );
     } else {
       return et(
         `
       <svg viewBox="0 0 1 0.35" xmlns="http://www.w3.org/2000/svg" class="${styles.join(
-        " "
+        " ",
       )} spinner4">
         <path fill="none" stroke="currentColor" stroke-width="${varLAsyncSvg}" pathLength="1" d="m 0.06717016,0.19875525 c 0.04590072,0.0640954 0.09986502,0.0862412 0.14118426,0.0637398 0.0413194,-0.0225014 0.0786624,-0.0661734 0.0763519,-0.12579028 -0.002313,-0.05961708 -0.0802163,-0.07410729 -0.0724987,0.0114052 0.007718,0.0855125 0.0981388,0.10332275 0.14289414,0.10209764 0.0447553,-0.001225 0.14567377,-0.0514403 0.14452406,-0.11976192 -0.001152,-0.06832152 -0.0713155,-0.06170884 -0.077116,0.006882 -0.0058,0.0685904 0.079857,0.11707331 0.13892941,0.11242721 0.0590725,-0.004646 0.14949369,-0.0504459 0.14921933,-0.11892872 -2.7486e-4,-0.06848265 -0.0729905,-0.07196589 -0.0718564,0.006953 0.001134,0.0789188 0.0699061,0.11761026 0.12504166,0.11801568 0.0551356,4.0553e-4 0.1429375,-0.0578232 0.16859285,-0.10290166" />
       </svg>
-    `
+    `,
       );
     }
   };
 
   presentation.leafAsyncBlock = /** @type {Presentation["leafAsyncBlock"]} */ (
-    args
+    args,
   ) => {
     const inner = e(
       "div",
@@ -515,6 +493,7 @@ svg.spinner4 path {
           contStackStyle,
           s(["leaf_async_block"], {
             "": (s) => {
+              s.gridColumn = "1 / 3";
               s.justifyItems = "center";
               s.alignItems = "center";
             },
@@ -529,7 +508,7 @@ svg.spinner4 path {
             }),
           ]),
         ],
-      }
+      },
     );
     return {
       root: inner,
@@ -537,7 +516,7 @@ svg.spinner4 path {
   };
 
   presentation.leafErrBlock = /** @type {Presentation["leafErrBlock"]} */ (
-    args
+    args,
   ) => {
     const out = e(
       "div",
@@ -567,10 +546,10 @@ svg.spinner4 path {
                   },
                 }),
               ],
-            }
+            },
           ),
         ],
-      }
+      },
     );
     return {
       root: out,
@@ -590,7 +569,6 @@ svg.spinner4 path {
             "": {
               "": (s) => {
                 s.position = "relative";
-                s.background = varCFullBackground;
                 s.display = "flex";
                 s.flexDirection = "column";
                 s.justifyContent = "stretch";
@@ -607,7 +585,7 @@ svg.spinner4 path {
             },
           }),
         ],
-      }
+      },
     );
     return {
       page: page,
@@ -623,7 +601,7 @@ svg.spinner4 path {
                 },
                 wide: (s) => {
                   s.gridTemplateColumns = "8cm 0fr auto";
-                  s.columnGap = "0.5cm";
+                  //s.columnGap = "0.5cm";
                 },
                 narrow: (s) => {
                   s.gridTemplateColumns = "1fr";
@@ -643,7 +621,6 @@ svg.spinner4 path {
                       s.gridRow = "1";
 
                       s.position = "relative";
-                      s.background = varCFullBackground;
 
                       s.display = "flex";
                       s.flexDirection = "column";
@@ -654,8 +631,9 @@ svg.spinner4 path {
                   }),
                 ],
                 children_: [args.menu],
-              }
+              },
             ),
+            /*
             e(
               "div",
               {},
@@ -669,8 +647,9 @@ svg.spinner4 path {
                         s.justifySelf = "center";
                         s.alignSelf = "center";
                         s.height = "80%";
-                        s.width = varLVeryThin;
-                        s.backgroundColor = varCForegroundUltraLight;
+                        s.borderLeftWidth = "0.07cm";
+                        s.borderLeftStyle = "dotted";
+                        s.borderLeftColor = varCForegroundUltraLight;
                       },
                       narrow: (s) => {
                         s.display = "none";
@@ -678,16 +657,17 @@ svg.spinner4 path {
                     },
                   }),
                 ],
-              }
+              },
             ),
+            */
             page,
           ],
-        }
+        },
       ),
     };
   };
   presentation.contPageBlank = /** @type { Presentation["contPageBlank"] } */ (
-    args
+    args,
   ) => {
     return { root: e("div", {}, {}) };
   };
@@ -695,72 +675,28 @@ svg.spinner4 path {
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: menu, form, top
 
-  const buttonStyle = s("button", {
-    "": (s) => {},
-    ":hover": (s) => {
-      s.opacity = "0.5";
+  const menuItemStyle0 = s("leaf_menu_item0", {
+    "": (s) => {
+      s.height = varSMenuIcon;
     },
   });
-  const buttonMutStyles = [
-    buttonStyle,
-    s("button_mut", {
-      "": (s) => {
-        s.backgroundColor = varCMutateBackground;
-        s.color = "white";
-        s.borderRadius = "0.2cm";
-      },
-    }),
-  ];
-  const buttonMutStylesText = [
-    ...buttonMutStyles,
-    s("button_mut_text", {
-      "": (s) => {
-        s.fontFamily = "sans-serif";
-        s.fontSize = "14pt";
-        s.fontWeight = "500";
-        s.padding = "0.2cm 0.4cm";
-      },
-    }),
-  ];
-  const menuItemStyles = [
-    s("leaf_menu_item", {
-      "": (s) => {
-        s.fontSize = varFMenu;
-        s.display = "flex";
-        s.alignItems = "center";
-        s.height = menuItemLineHeight;
-        s.fontWeight = "600";
-        s.lineHeight = menuItemLineHeight;
-        s.flexGrow = "1";
-        s.justifyContent = "space-between";
-      },
-    }),
-    buttonStyle,
-  ];
-  const topSelectBgStyle = s("top_selectable_bg", {
+  const onwhiteSelectableStyle = s("top_selectable", {
     "": (s) => {
-      s.display = "none";
-      s.backgroundColor = varCBackgroundBubble;
-      s.position = "absolute";
-      s.inset = "-0.05cm";
       s.borderRadius = "0.1cm";
-      s.zIndex = "-1";
+      s.border = `${varLThin} solid transparent`;
+      s.pointerEvents = "initial";
+    },
+    [`:hover`]: (s) => {
+      s.backgroundColor = varCBackgroundDark;
+    },
+    [`.${classStateSelected}:hover`]: (s) => {
+      s.backgroundColor = `color-mix(in srgb, ${varCBackgroundDark} 50%, transparent)`;
+      s.borderColor = varCBackgroundDark;
+    },
+    [`.${classStateSelected}`]: (s) => {
+      s.backgroundColor = varCBackgroundDark;
     },
   });
-  const topSelectableStyle = s("top_selectable", {
-    "": (s) => {
-      s.position = "relative";
-    },
-    [`.${classStateSelected} > summary .${topSelectBgStyle}`]: (s) => {
-      s.display = "initial";
-    },
-    [`.${classStateSelected} > .${topSelectBgStyle}`]: (s) => {
-      s.display = "initial";
-    },
-  });
-  const createTopItemSelectBg = () => {
-    return e("div", {}, { styles_: [topSelectBgStyle] });
-  };
 
   const unreadStyle = s("unread", {
     "": (s) => {
@@ -789,71 +725,132 @@ svg.spinner4 path {
       },
     }),
   ];
+  const menuTextStyle = s("leaf_menu_text", {
+    "": (s) => {
+      s.flexBasis = "0";
+      s.flexGrow = "1";
+      s.textOverflow = "ellipsis";
+      s.overflowX = "hidden";
+      s.whiteSpace = "nowrap";
+      s.fontSize = varFMenu;
+      s.fontWeight = "600";
+      s.maxWidth = "100%";
+    },
+  });
+  const leafMenuTextUnread =
+    /** @type (args: {text: string})=> {all: HTMLElement[], unread: HTMLElement} */ (
+      args,
+    ) => {
+      const unread = e("div", {}, { styles_: [unreadStyle, classStateHidden] });
+      return {
+        all: [
+          e(
+            "span",
+            { textContent: args.text },
+            {
+              styles_: [menuTextStyle],
+            },
+          ),
+          unread,
+        ],
+        unread: unread,
+      };
+    };
+  const menuTextUnreadOuterStyles = [
+    contHboxStyle,
+    s("leaf_menu_text_unread_outer", {
+      "": (s) => {
+        s.gridColumn = "2";
+        s.justifyContent = "space-between";
+        s.alignItems = "center";
+        s.minWidth = "0";
+        s.paddingLeft = "0.1cm";
+      },
+    }),
+  ];
   presentation.leafMenuLink = /** @type { Presentation["leafMenuLink"] } */ (
-    args
+    args,
   ) => {
-    const unread = e("div", {}, { styles_: [unreadStyle, classStateHidden] });
     /** @type { HTMLElement[] } */
-    const children = [createTopItemSelectBg()];
+    const children = [];
     if (args.image != null) {
+      const outerPadding = "0.1cm";
       children.push(
         e(
-          "img",
-          { src: args.image },
+          "div",
+          {},
           {
             styles_: [
-              s("leaf_menu_link_icon", {
+              s("leaf_menu_link_icon_outer", {
                 "": (s) => {
-                  s.width = varSMenuIcon;
-                  s.height = varSMenuIcon;
-                  s.marginLeft = `calc(-1.0 * ${varSMenuIconShiftCalc})`;
-                  s.borderRadius = varRPortrait;
+                  s.gridColumn = "1";
+                  s.display = "grid";
+                  s.alignItems = "center";
+                  s.justifyItems = "center";
+                  s.padding = outerPadding;
                 },
               }),
             ],
-          }
-        )
+            children_: [
+              e(
+                "img",
+                { src: args.image },
+                {
+                  styles_: [
+                    s("leaf_menu_link_icon", {
+                      "": (s) => {
+                        s.borderRadius = varRPortrait;
+                        s.borderRadius = "0.2cm";
+                        s.minWidth = "0";
+                        s.minHeight = "0";
+                        s.maxWidth = "100%";
+                        s.maxHeight = "100%";
+                      },
+                    }),
+                  ],
+                },
+              ),
+            ],
+          },
+        ),
       );
     }
+    const textUnread = leafMenuTextUnread({ text: args.text });
     children.push(
       e(
-        "span",
-        { textContent: args.text },
+        "div",
+        {},
         {
           styles_: [
-            s("leaf_menu_link_text", {
-              "": (s) => {
-                s.flexBasis = "0";
-                s.flexGrow = "1";
-                s.textOverflow = "ellipsis";
-                s.overflowX = "hidden";
-                s.whiteSpace = "nowrap";
-              },
-            }),
+            ...menuTextUnreadOuterStyles,
+            menuItemStyle0,
+            onwhiteSelectableStyle,
           ],
-        }
-      )
+          children_: textUnread.all,
+        },
+      ),
     );
-    children.push(unread);
     return {
       root: e(
         "a",
         { href: args.link },
         {
           styles_: [
-            ...menuItemStyles,
-            topSelectableStyle,
+            menuItemStyle0,
             s("leaf_menu_link", {
               "": (s) => {
-                s.gap = "0.1cm";
+                s.display = "grid";
+                s.gridTemplateColumns = "subgrid";
+                s.gridColumn = "1 / 3";
+                s.alignItems = "center";
                 s.maxWidth = "100%";
               },
             }),
           ],
           children_: children,
-        }
+        },
       ),
-      unread: unread,
+      unread: textUnread.unread,
     };
   };
 
@@ -863,50 +860,67 @@ svg.spinner4 path {
         root: e(
           "button",
           { textContent: args.text },
-          { styles_: [...menuItemStyles] }
+          {
+            styles_: [
+              onwhiteSelectableStyle,
+              ...menuTextUnreadOuterStyles,
+              menuTextStyle,
+              menuItemStyle0,
+            ],
+          },
         ),
       };
     };
 
   presentation.leafMenuGroup = /** @type { Presentation["leafMenuGroup"] } */ (
-    args
+    args,
   ) => {
-    const link = presentation.leafMenuLink({
-      text: args.text,
-      link: args.link,
-    });
     const groupEl = e(
       "div",
       {},
       {
         styles_: [
-          contVboxStyle,
+          ...menuGridStyles,
           s("leaf_menu_group_group", {
             "": (s) => {
-              s.marginLeft = "0.5cm";
+              s.marginLeft = "0.7cm";
             },
           }),
         ],
         children_: args.children,
-      }
+      },
     );
     const toggleStyle = s("leaf_menu_group_toggle", {
       "": (s) => {
+        s.gridColumn = "1";
         s.pointerEvents = "initial";
         s.cursor = "pointer";
         s.userSelect = "none";
         s.fontFamily = "I";
         s.fontWeight = varWIconMenuDecor;
         s.flexGrow = "0";
-        s.display = "flex";
-        s.justifyContent = "center";
         s.alignItems = "center";
-        s.width = varSMenuIcon;
-        s.height = varSMenuIcon;
-        s.marginLeft = `calc(-1.0 * ${varSMenuIconShiftCalc})`;
-        s.fontSize = "0.7cm";
+        s.height = s.width = varSMenuIcon;
+        s.display = "grid";
+        s.gridTemplateColumns = "1fr";
+        s.justifyItems = "center";
+        s.alignItems = "center";
+        s.opacity = varOIcon;
       },
     });
+    const textUnread = leafMenuTextUnread({ text: args.text });
+    const link = e(
+      "a",
+      { href: args.link },
+      {
+        styles_: [
+          ...menuTextUnreadOuterStyles,
+          menuItemStyle0,
+          onwhiteSelectableStyle,
+        ],
+        children_: textUnread.all,
+      },
+    );
     return {
       root: e(
         "details",
@@ -914,7 +928,9 @@ svg.spinner4 path {
         {
           styles_: [
             s("leaf_menu_group_details", {
-              "": (s) => {},
+              "": (s) => {
+                s.gridColumn = "1 / 3";
+              },
               [`[open]>summary>.${toggleStyle}`]: (s) => {
                 s.rotate = "90deg";
               },
@@ -923,66 +939,118 @@ svg.spinner4 path {
                 s.content = '""';
               },
             }),
-            topSelectableStyle,
           ],
           children_: [
             e(
               "summary",
               {},
               {
-                styles_: [contHboxStyle],
+                styles_: [menuGridRowStyle],
                 children_: [
                   e(
                     "div",
-                    { textContent: textIconFoldArrow },
-                    { styles_: [toggleStyle, buttonStyle] }
+                    {},
+                    {
+                      styles_: [
+                        toggleStyle,
+                        menuItemStyle0,
+                        onwhiteSelectableStyle,
+                      ],
+                      children_: [
+                        leafSvg({
+                          width: "0.7cm",
+                          text: svgIconClosed,
+                        }),
+                      ],
+                    },
                   ),
-                  link.root,
+                  link,
                 ],
-              }
+              },
             ),
             groupEl,
           ],
-        }
+        },
       ),
-      groupEl: groupEl,
-      unread: link.unread,
+      group: groupEl,
+      link: link,
+      unread: textUnread.unread,
     };
   };
 
   presentation.leafMenuCode = /** @type { Presentation["leafMenuCode"] } */ (
-    args
+    args,
   ) => {
     return { root: e("code", { textContent: args.text }, {}) };
   };
 
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: menu, form
+  const onBlueButtonColors = s("onblue_button_colors", {
+    "": (s) => {
+      s.borderRadius = "9999cm";
+    },
+    [classStateSelected]: (s) => {
+      s.backgroundColor = varCBackground;
+    },
+    ":hover": (s) => {
+      s.backgroundColor = varCBackground;
+    },
+    [`${classStateSelected}:hover`]: (s) => {
+      s.backgroundColor = `color-mix(in srgb, ${varCBackground} 50%, transparent)`;
+    },
+  });
+  const onBlueButtonInverseColors = s("onblue_button_colors_inverse", {
+    "": (s) => {
+      s.borderRadius = "9999cm";
+    },
+    [classStateSelected]: (s) => {
+      s.backgroundColor = varCBackgroundDark;
+    },
+    ":hover": (s) => {
+      s.backgroundColor = varCBackgroundDark;
+    },
+    [`${classStateSelected}:hover`]: (s) => {
+      s.backgroundColor = `color-mix(in srgb, ${varCBackgroundDark} 50%, transparent)`;
+    },
+  });
+  const onBlueIconButtonStyle = s("onblue_icon_button", {
+    "": (s) => {
+      s.display = "grid";
+      s.gridTemplateColumns = "1fr";
+      s.justifyItems = "center";
+      s.alignItems = "center";
+      s.width = s.height = "0.8cm";
+    },
+  });
+  const onBlueIconButtonStyles = [onBlueButtonColors, onBlueIconButtonStyle];
+  const onBlueIconButtonInverseStyles = [
+    onBlueButtonInverseColors,
+    onBlueIconButtonStyle,
+  ];
   const headIconButton =
-    /** @type { (_:{link: string, icon: string, extraStyles?: string[]}) => HTMLElement } */ (
-      args
+    /** @type { (_:{link: string, svg: string, extraStyles?: string[]}) => HTMLElement } */ (
+      args,
     ) => {
       return e(
         "a",
         { href: args.link },
         {
-          styles_: [buttonStyle, ...(args.extraStyles || [])],
+          styles_: [...onBlueIconButtonStyles, ...(args.extraStyles || [])],
           children_: [
-            leafIcon({
-              text: args.icon,
-              weight: varWIconHead,
+            leafSvg({
+              text: args.svg,
+              width: varSHeadButton,
               extraStyles: [
                 s("head_icon_button", {
                   "": (s) => {
                     s.color = varCForegroundVeryLight;
-                    s.height = varSHeadButton;
-                    s.width = varSHeadButton;
                   },
                 }),
               ],
             }),
           ],
-        }
+        },
       );
     };
 
@@ -1009,13 +1077,13 @@ svg.spinner4 path {
             ],
             children_: [
               headIconButton({
-                icon: textIconBack,
+                svg: svgIconBack,
                 link: args.backLink,
               }),
               backUnread,
             ],
-          }
-        )
+          },
+        ),
       );
       children.push(
         e(
@@ -1035,8 +1103,8 @@ svg.spinner4 path {
               }),
             ],
             children_: [args.center],
-          }
-        )
+          },
+        ),
       );
       if (args.right != null) {
         children.push(
@@ -1057,28 +1125,24 @@ svg.spinner4 path {
                 }),
               ],
               children_: [args.right],
-            }
-          )
+            },
+          ),
         );
       }
       return {
-        root: e(
-          "div",
-          {},
-          {
-            styles_: [
-              s("cont_head_bar", {
-                "": (s) => {
-                  s.marginTop = "0.2cm";
-                  s.marginBottom = "0.3cm";
-                  s.display = "grid";
-                  s.gridTemplateColumns = "1fr auto 1fr";
-                },
-              }),
-            ],
-            children_: children,
-          }
-        ),
+        root: floatingBar({
+          extraStyles: [
+            s("cont_head_bar", {
+              "": (s) => {
+                s.marginTop = "0.2cm";
+                s.marginBottom = "0.3cm";
+                s.display = "grid";
+                s.gridTemplateColumns = "1fr auto 1fr";
+              },
+            }),
+          ],
+          children_: children,
+        }),
         backUnread: backUnread,
       };
     };
@@ -1087,39 +1151,49 @@ svg.spinner4 path {
   // xx Components, styles: top
 
   presentation.contPageTop = /** @type { Presentation["contPageTop"] } */ (
-    args
+    args,
   ) => {
-    const appiconSize = `min(20dvw, 1.1cm)`;
-    const topButton =
-      /** @type { (icon: string, link: string)=>HTMLElement} */ (
-        icon,
-        link
-      ) => {
-        return e(
-          "a",
-          { href: link },
-          {
-            styles_: [buttonStyle, topSelectableStyle],
-            children_: [
-              createTopItemSelectBg(),
-              leafIcon({
-                text: icon,
-                extraStyles: [
-                  s("cont_page_top_generic_button", {
-                    "": (s) => {
-                      s.height = "100%";
-                      s.opacity = "0.75";
-                    },
-                  }),
-                ],
-              }),
-            ],
-          }
-        );
-      };
-    const settingsLink = topButton(textIconSettings, args.settingsLink);
-    const identitiesLink = topButton(textIconIdentities, args.identitiesLink);
-    const addLink = topButton(textIconAdd, args.addLink);
+    const appiconSize = "1.1cm";
+    const topButton = /** @type { (svg: string, link: string)=>HTMLElement} */ (
+      svg,
+      link,
+    ) => {
+      return e(
+        "a",
+        { href: link },
+        {
+          styles_: [
+            onwhiteSelectableStyle,
+            s("cont_page_top_button", {
+              "": (s) => {
+                s.display = "grid";
+                s.gridTemplateColumns = "1fr";
+                s.justifyItems = "center";
+                s.alignItems = "center";
+                s.padding = "0.1cm";
+                s.margin = "0.1cm";
+              },
+            }),
+          ],
+          children_: [
+            leafSvg({
+              text: svg,
+              height: "0.7cm",
+              extraStyles: [
+                s("cont_page_top_generic_button", {
+                  "": (s) => {
+                    s.opacity = varOIcon;
+                  },
+                }),
+              ],
+            }),
+          ],
+        },
+      );
+    };
+    const settingsLink = topButton(svgIconSettings, args.settingsLink);
+    const identitiesLink = topButton(svgIconIdentity, args.identitiesLink);
+    const addLink = topButton(svgIconAdd, args.addLink);
     return {
       root: e(
         "div",
@@ -1135,10 +1209,10 @@ svg.spinner4 path {
                   contHboxStyle,
                   s("cont_page_top_hbox_outer", {
                     "": (s) => {
-                      s.padding = "0.2cm";
-                      s.gap = "0.2cm";
+                      s.padding = "1cm 1cm 0.7cm 1cm";
+                      s.gap = "0.13cm";
                       s.alignItems = "center";
-                      s.justifyContent = "space-between";
+                      s.justifyContent = "center";
                     },
                   }),
                 ],
@@ -1151,42 +1225,37 @@ svg.spinner4 path {
                         paperStyle,
                         s("cont_page_top_appicon", {
                           "": (s) => {
+                            s.marginRight = "0.15cm";
                             s.width = appiconSize;
                             s.height = appiconSize;
                           },
                         }),
                       ],
-                    }
+                    },
                   ),
-                  e(
-                    "div",
-                    {},
-                    {
-                      styles_: [
-                        contHboxStyle,
-                        s("page_top_menu_generic", {
-                          "": (s) => {
-                            s.height = "100%";
-                            s.gap = "0.13cm";
-                          },
-                        }),
-                      ],
-                      children_: [settingsLink, identitiesLink, addLink],
-                    }
-                  ),
+                  settingsLink,
+                  identitiesLink,
+                  addLink,
                 ],
-              }
+              },
             ),
             e(
               "div",
               {},
               {
-                styles_: [contVboxStyle, nonchatPageStyleInner],
+                styles_: [
+                  ...menuGridStyles,
+                  s("cont_page_top", {
+                    "": (s) => {
+                      s.margin = `0 0.6cm`;
+                    },
+                  }),
+                ],
                 children_: args.body,
-              }
+              },
             ),
           ],
-        }
+        },
       ),
       addLink: addLink,
       settingsLink: settingsLink,
@@ -1197,55 +1266,45 @@ svg.spinner4 path {
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: menu
 
-  const nonchatPageStyleInner = s("nonchat_cont_page", {
+  const menuGridRowStyle = s("menu_grid_row", {
     "": (s) => {
-      s.margin = varPPage;
-      s.marginLeft = `calc(${varPPage} + ${varSMenuIconShiftCalc})`;
-      s.position = "relative";
-    },
-    ":before": (s) => {
-      s.content = JSON.stringify("");
-      s.display = "block";
-      s.position = "absolute";
-      s.inset = "0";
-      s.backgroundColor = varCForegroundLight;
-      s.maskImage = `url("linedpaper.svg")`;
-      s.maskSize = `auto ${menuItemLineHeight}`;
+      s.display = "grid";
+      s.gridTemplateColumns = `${varSMenuIcon} auto`;
+      s.justifyItems = "stretch";
+      s.alignItems = "center";
+      s.columnGap = "0.1cm";
     },
   });
-  const bubbleStyle0 = s("bubble", {
-    "": (s) => {
-      s.borderRadius = varRBubble;
-      s.backgroundColor = varCBackgroundBubble;
-      //s.filter = "drop-shadow(0 0 0.08cm rgba(0,7,18, 0.35))";
-      s.padding = varPBubblePadding;
-    },
-  });
-  const bubbleStyle0Bg = s("bubble_bg", {
-    "": (s) => {
-      s.backgroundColor = varCBackgroundBubble;
-    },
-  });
-  const bubbleStyles = [bubbleStyle0, bubbleStyle0Bg];
-  const bubbleStylesDark = [
-    bubbleStyle0,
-    s("bubble_bg_dark", {
+  const menuGridStyles = [
+    menuGridRowStyle,
+    s("menu_grid", {
       "": (s) => {
-        s.backgroundColor = varCBackgroundBubble2;
+        s.rowGap = "0.1cm";
+        s.padding = "0.1cm 0";
       },
     }),
   ];
+  const nonchatPageStyleInner = s("nonchat_cont_page", {
+    "": (s) => {
+      s.margin = varPPage;
+      s.position = "relative";
+    },
+  });
+  const bubbleStyle = s("bubble", {
+    "": (s) => {
+      s.borderRadius = varRBubble;
+      s.padding = varPBubblePadding;
+    },
+  });
   const nonchatPageStylesOuter = [
-    ...bubbleStyles,
     s("cont_page_outer", {
       "": (s) => {
         s.flexGrow = "1";
-        s.margin = varPPage;
       },
     }),
   ];
   presentation.contPageMenu = /** @type { Presentation["contPageMenu"] } */ (
-    args
+    args,
   ) => {
     return {
       root: e(
@@ -1260,8 +1319,8 @@ svg.spinner4 path {
               {},
               {
                 styles_: [
-                  contVboxStyle,
                   nonchatPageStyleInner,
+                  ...menuGridStyles,
                   s("cont_page_menu_inner", {
                     "": (s) => {
                       s.width = varSPageNarrow;
@@ -1270,53 +1329,83 @@ svg.spinner4 path {
                   }),
                 ],
                 children_: args.children,
-              }
+              },
             ),
           ],
-        }
+        },
       ),
     };
   };
 
-  const leafIconStyle = s("icon", {
-    "": (s) => {
-      //s.display = "inline-grid";
-      s.display = "grid";
-      s.fontFamily = "I";
-      s.gridTemplateColumns = "1fr";
-      s.gridTemplateRows = "1fr";
-      s.justifyItems = "center";
-      s.alignItems = "center";
-    },
-    ">*": (s) => {
-      s.gridColumn = "1";
-      s.gridRow = "1";
-    },
-  });
-  const leafIcon =
-    /** @type {(args: {text: string, weight?: string, extraStyles?: string[]})=>HTMLElement} */ (
-      args
-    ) =>
-      et(
+  const removeSuffix = /** @type { (suff: string, all: string) => string } */ (
+    suff,
+    all,
+  ) => {
+    if (!all.endsWith(suff)) {
+      throw new Error();
+    }
+    return all.substring(0, all.length - suff.length);
+  };
+  const panic = /** @type { <T>() => T } */ () => {
+    throw new Error();
+  };
+  const leafSvg =
+    /** @type {(args: {width?: string, height?: string, text: string, extraStyles?: string[]})=>HTMLElement} */ (
+      args,
+    ) => {
+      const width =
+        args.width ?? args.height ?? /** @type { string } */ (panic());
+      const height =
+        args.height ?? args.width ?? /** @type { string } */ (panic());
+      const widthFloat = Number.parseFloat(removeSuffix("cm", width));
+      const heightFloat = Number.parseFloat(removeSuffix("cm", height));
+      var thicknessFloat = Number.parseFloat(removeSuffix("cm", varLVeryThin));
+      var relWidth;
+      var relHeight;
+      var relThickness;
+      if (args.width != null) {
+        relWidth = 1;
+        relHeight = heightFloat / widthFloat;
+        relThickness = thicknessFloat / widthFloat;
+      } else {
+        relHeight = 1;
+        relWidth = widthFloat / heightFloat;
+        relThickness = thicknessFloat / heightFloat;
+      }
+      relWidth *= 10;
+      relHeight *= 10;
+      relThickness *= 10;
+      return et(
         `
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-          <g transform="translate(50 50)"><text fill="currentColor" style="
-            text-anchor: middle;
-            dominant-baseline: central;
-            font-family: I;
-            font-size: 90px;
-            font-weight: ${args.weight || 400};
-          ">${args.text}</text></g>
+        <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${relWidth} ${relHeight}" fill="none" stroke="currentColor" stroke-width="${relThickness}">
+        ${args.text}
         </svg>
       `,
-        {
-          styles_: [leafIconStyle, ...(args.extraStyles || [])],
-        }
+        { styles_: args.extraStyles || [] },
       );
+    };
+  // All 10x10 to work with leafSvg
+  const svgIconSettings = `<path d="M 4.31771,0.90964 5.73455,0.91664 6.09313,2.18873 6.97669,2.80134 8.28887,2.48698 8.91655,3.55729 7.91238,4.48391 7.92458,5.63636 8.94791,6.50111 8.36387,7.59541 7.21054,7.33344 6.09733,7.92532 5.82051,9.1754 4.25358,9.1919 3.93448,7.89527 2.87611,7.33578 1.68562,7.65025 1.01037,6.59993 1.95733,5.59742 1.96433,4.4247 1.0661,3.48549 1.68666,2.46798 2.92087,2.80557 3.87497,2.22525 Z" />
+      <circle cx="5.0333862" cy="5.0034509" r="1.4575578" /> `;
+  const svgIconIdentity = `<ellipse cx="5.0000134" cy="2.7737503" rx="1.7285849" ry="1.7067041" />
+            <path d="m 1.70009,9.0854 c 0,0 -0.0757,-1.9327733 0.43401,-2.3333933 0.5097,-0.40061 1.85863,-0.71435 2.81093,-0.76661 0.95229,-0.0522 2.58176,0.41876 2.94221,0.73492 0.36044,0.31616 0.41667,2.3779933 0.41667,2.3779933" />
+`;
+  const svgIconAdd = `<path d="m 1.22036,4.91196 7.27082,0.0512" />
+      <path d="M 4.90698,1.22536 5.00934,8.77702" /> `;
+  const svgIconNope = `<path d="M 1.78044,1.95892 7.96763,7.90814" />
+      <path d="M 7.84864,1.95892 1.95892,8.08661" /> `;
+  const svgIconBack = `<path d="m 6.3569633,1.06654 -3.86699,3.98597 3.92649,3.98598" />`;
+  const svgIconSend = `<path d="M 1.94858,2.01502 8.95692,5.16878 2.00698,8.03051" />
+      <path d="M 0.78052,4.93516 8.7233,5.16878" /> `;
+  const svgIconBall = `<circle cx="5.0333862" cy="5.0154572" r="1.4575578" /> `;
+  const svgIconOpened = `<path d="M 2.38412,3.35249 4.97757,6.69406 7.52115,3.30262" /> `;
+  const svgIconClosed = `<path d="M 3.31381,2.55686 6.54797,4.97396 3.31381,7.42511" /> `;
+  const svgIconMessage = `<path        d="M 1.0451019,9.0882899 C 1.881773,6.8346388 0.9807132,6.4106016 1.0025419,4.7517916 1.0270541,2.8890523 2.5540914,1.2417577 5.1503393,1.2344073 7.7465873,1.2270557 9.178426,2.801595 9.1403442,4.7019845 9.1022618,6.6023739 7.7306769,8.016585 5.0856639,8.0388243 3.4647788,8.0524527 2.7929907,7.4356862 1.0451019,9.0882899 Z"
+/>`;
 
   presentation.leafNonchatHeadBarCenterPlaceholder =
     /** @type { Presentation["leafNonchatHeadBarCenterPlaceholder"] } */ (
-      args
+      args,
     ) => {
       return { root: e("span", { textContent: "..." }, {}) };
     };
@@ -1328,7 +1417,7 @@ svg.spinner4 path {
           root: e(
             "span",
             { textContent: args.text },
-            { styles_: [leafHeadCenterStyle] }
+            { styles_: [leafHeadCenterStyle] },
           ),
         };
       } else {
@@ -1338,7 +1427,7 @@ svg.spinner4 path {
             { textContent: args.text, href: args.link },
             {
               styles_: leafHeadCenterButtonStyles,
-            }
+            },
           ),
         };
       }
@@ -1346,7 +1435,7 @@ svg.spinner4 path {
 
   presentation.leafMenuHeadBarRightAdd =
     /** @type { Presentation["leafMenuHeadBarRightAdd"] } */ (args) => {
-      return { root: headIconButton({ link: args.link, icon: textIconAdd }) };
+      return { root: headIconButton({ link: args.link, svg: svgIconAdd }) };
     };
 
   // /////////////////////////////////////////////////////////////////////////////
@@ -1364,7 +1453,7 @@ svg.spinner4 path {
             },
           }),
         ],
-      }
+      },
     );
   };
   const errorStyle = s("error", {
@@ -1373,22 +1462,38 @@ svg.spinner4 path {
     },
   });
   presentation.contPageForm = /** @type { Presentation["contPageForm"] } */ (
-    args
+    args,
   ) => {
     const errors = e("div", {}, { styles_: [errorStyle] });
     const submit = e(
       "button",
       { textContent: "Ok" },
       {
-        styles_: [...buttonMutStylesText],
-      }
+        styles_: [
+          s("button_mut_text_outline", {
+            "": (s) => {
+              s.border = `${varLThin} solid transparent`;
+              s.fontFamily = "sans-serif";
+              s.fontSize = "14pt";
+              s.fontWeight = "500";
+              s.padding = "0.2cm 0.4cm";
+              s.fontFamily = "sans-serif";
+              s.color = varCMutateForeground;
+              s.borderRadius = "0.2cm";
+            },
+            ":hover": (s) => {
+              s.borderColor = varCMutateForeground;
+            },
+          }),
+        ],
+      },
     );
     const body = e(
       "div",
       {},
       {
         styles_: [
-          contVboxStyle,
+          ...menuGridStyles,
           nonchatPageStyleInner,
           s("cont_page_form_inner", {
             "": (s) => {
@@ -1397,7 +1502,7 @@ svg.spinner4 path {
           }),
         ],
         children_: [...args.children],
-      }
+      },
     );
     return {
       root: e(
@@ -1415,7 +1520,6 @@ svg.spinner4 path {
               {
                 styles_: [
                   contVboxStyle,
-                  ...floatingBarStyles(varCBackgroundBubble, "0.7"),
                   s("cont_page_form_edit_bar", {
                     "": (s) => {
                       s.paddingLeft = "0.3cm";
@@ -1429,10 +1533,10 @@ svg.spinner4 path {
                   }),
                 ],
                 children_: [errors, submit],
-              }
+              },
             ),
           ],
-        }
+        },
       ),
       submit: submit,
       errors: errors,
@@ -1441,7 +1545,7 @@ svg.spinner4 path {
   };
 
   presentation.leafFormText = /** @type { Presentation["leafFormText"] } */ (
-    args
+    args,
   ) => {
     return { root: e("div", { textContent: args.text }, {}) };
   };
@@ -1450,7 +1554,7 @@ svg.spinner4 path {
   // xx Components, styles: chat
 
   presentation.contPageChat = /** @type { Presentation["contPageChat"] } */ (
-    args
+    args,
   ) => {
     return {
       root: e(
@@ -1461,6 +1565,7 @@ svg.spinner4 path {
             contVboxStyle,
             s("cont_page_chat", {
               "": (s) => {
+                s.backgroundColor = varCBackground;
                 s.flexGrow = "1";
                 s.position = "relative";
                 s.pointerEvents = "initial";
@@ -1468,7 +1573,7 @@ svg.spinner4 path {
             }),
           ],
           children_: args.children,
-        }
+        },
       ),
     };
   };
@@ -1501,26 +1606,21 @@ svg.spinner4 path {
                     s.alignItems = "center";
                     s.padding = varPChatSpinner;
                   },
-                  // Increase specificity... thanks css again
-                  [`.${bubbleStyle0}`]: (s) => {
-                    s.borderRadius = "999cm";
-                  },
                 }),
-                bubbleStyle0,
               ],
               children_: [
                 leafSpinner([
                   s("chat_spinner", {
                     "": (s) => {
-                      s.height = "0.6cm";
+                      s.height = "0.8cm";
                     },
                   }),
                 ]),
               ],
-            }
+            },
           ),
         ],
-      }
+      },
     );
   };
   presentation.leafChatSpinnerCenter =
@@ -1544,35 +1644,69 @@ svg.spinner4 path {
       };
     };
 
-  const floatingBarStyles =
-    /** @type { (color: string, opacity: string) => string[] } */ (
-      color,
-      opacity
+  const floatingBar =
+    /** @type (args: {extraStyles?: string[], children_: HTMLElement[]}) => HTMLElement */ (
+      args,
     ) => {
-      return [
-        s("chat_fg_style", {
-          "": (s) => {
-            s.backdropFilter = `blur(0.2cm)`;
-            s.margin = `0.2cm 0`;
-            s.padding = `0.1cm`;
-          },
-          ":before": (s) => {
-            s.content = JSON.stringify("");
-            s.display = "block";
-            s.position = "absolute";
-            s.inset = "0";
-            s.zIndex = "-1";
-          },
-        }),
-        s(["chat_fg_style", color, opacity], {
-          "": (s) => {},
-          ":before": (s) => {
-            s.backgroundColor = color;
-            s.opacity = opacity;
-          },
-        }),
-      ];
+      return e(
+        "div",
+        {},
+        {
+          styles_: [
+            s("floating_bar", {
+              "": (s) => {
+                s.margin = `0.2cm`;
+                s.padding = `0.1cm`;
+                s.borderRadius = "0.4cm";
+                s.position = "relative";
+                s.overflow = "hidden";
+              },
+            }),
+            ...(args.extraStyles || []),
+          ],
+          children_: [
+            e(
+              "div",
+              {},
+              {
+                styles_: [
+                  s("floating_bar_blur", {
+                    "": (s) => {
+                      s.display = "block";
+                      s.position = "absolute";
+                      s.inset = "0";
+                      s.zIndex = "-2";
+                      s.backdropFilter = `blur(0.2cm)`;
+                    },
+                  }),
+                ],
+              },
+            ),
+            e(
+              "div",
+              {},
+              {
+                styles_: [
+                  s("floating_bar_darken", {
+                    "": (s) => {
+                      s.content = JSON.stringify("");
+                      s.display = "block";
+                      s.position = "absolute";
+                      s.inset = "0";
+                      s.zIndex = "-1";
+                      s.background = varCBackgroundGlass;
+                      s.opacity = "0.7";
+                    },
+                  }),
+                ],
+              },
+            ),
+            ...args.children_,
+          ],
+        },
+      );
     };
+
   presentation.contChatHeadBar =
     /** @type { Presentation["contChatHeadBar"] } */ (args) => {
       const children = [];
@@ -1597,13 +1731,12 @@ svg.spinner4 path {
             children_: [
               headIconButton({
                 link: args.backLink,
-                icon: textIconBack,
-                extraStyles: [],
+                svg: svgIconBack,
               }),
               backUnread,
             ],
-          }
-        )
+          },
+        ),
       );
       children.push(
         e(
@@ -1623,8 +1756,8 @@ svg.spinner4 path {
               }),
             ],
             children_: [args.center],
-          }
-        )
+          },
+        ),
       );
       if (args.right != null) {
         children.push(
@@ -1644,27 +1777,22 @@ svg.spinner4 path {
                   },
                 }),
               ],
-            }
-          )
+            },
+          ),
         );
       }
       return {
-        root: e(
-          "div",
-          {},
-          {
-            styles_: [
-              ...floatingBarStyles(varCBackground, "0.7"),
-              s("cont_chat_bar", {
-                "": (s) => {
-                  s.display = "grid";
-                  s.gridTemplateColumns = "1fr auto 1fr";
-                },
-              }),
-            ],
-            children_: children,
-          }
-        ),
+        root: floatingBar({
+          extraStyles: [
+            s("cont_chat_bar", {
+              "": (s) => {
+                s.display = "grid";
+                s.gridTemplateColumns = "1fr auto 1fr";
+              },
+            }),
+          ],
+          children_: children,
+        }),
         backUnread: backUnread,
       };
     };
@@ -1673,15 +1801,14 @@ svg.spinner4 path {
     "": (s) => {
       s.fontWeight = varWHead;
       s.fontSize = varFHeadBar;
+      s.color = varCForegroundLight;
     },
   });
   const leafHeadCenterButtonStyles = [
-    buttonStyle,
+    onBlueButtonColors,
     leafHeadCenterStyle,
     s("leaf_chat_center_button", {
       "": (s) => {
-        s.color = varCForegroundLight;
-        s.border = `${varLThin} solid ${varCForegroundVeryLight}`;
         s.borderRadius = "999cm";
         s.padding = `0 0.3cm`;
         s.display = "flex";
@@ -1702,13 +1829,13 @@ svg.spinner4 path {
   ];
   presentation.leafChatHeadBarCenterPlaceholder =
     /** @type { Presentation["leafChatHeadBarCenterPlaceholder"] } */ (
-      args
+      args,
     ) => {
       return {
         root: e(
           "span",
           { textContent: "..." },
-          { styles_: leafHeadCenterButtonStyles }
+          { styles_: leafHeadCenterButtonStyles },
         ),
       };
     };
@@ -1721,7 +1848,7 @@ svg.spinner4 path {
           { textContent: args.text, href: args.link },
           {
             styles_: leafHeadCenterButtonStyles,
-          }
+          },
         ),
       };
     };
@@ -1740,18 +1867,8 @@ svg.spinner4 path {
         "div",
         {},
         {
-          styles_: [
-            contVboxStyle,
-            chatEntrySelectSpecificStyle,
-            ...(() => {
-              if (args.left) {
-                return bubbleStyles;
-              } else {
-                return bubbleStylesDark;
-              }
-            })(),
-          ],
-        }
+          styles_: [contVboxStyle, chatEntrySelectSpecificStyle, bubbleStyle],
+        },
       );
 
       // The vertical content bit
@@ -1785,11 +1902,11 @@ svg.spinner4 path {
                     },
                   }),
                 ],
-              }
+              },
             ),
             body,
           ],
-        }
+        },
       );
       if (args.left) {
         outer3.style.alignItems = "start";
@@ -1826,11 +1943,11 @@ svg.spinner4 path {
                     },
                   }),
                 ],
-              }
+              },
             ),
             outer3,
           ],
-        }
+        },
       );
       if (args.left) {
         outer2.style.flexDirection = "row";
@@ -1852,7 +1969,7 @@ svg.spinner4 path {
             }),
           ],
           children_: [outer2],
-        }
+        },
       );
       if (args.left) {
         outer1.style.justifyContent = "start";
@@ -1877,14 +1994,14 @@ svg.spinner4 path {
               }),
             ],
             children_: [outer1],
-          }
+          },
         ),
         body: body,
       };
     };
   presentation.leafChatEntryModeMessageTextBlock =
     /** @type { Presentation["leafChatEntryModeMessageTextBlock"] } */ (
-      args
+      args,
     ) => {
       return {
         root: e(
@@ -1899,7 +2016,7 @@ svg.spinner4 path {
               }),
             ],
             children_: [e("p", { textContent: args.text }, {})],
-          }
+          },
         ),
       };
     };
@@ -1926,31 +2043,14 @@ svg.spinner4 path {
                 },
               }),
             ],
-          }
+          },
         ),
       };
     };
 
-  const leafChatEntryModeControlControlsButtonStyles = [
-    buttonStyle,
-    s("leaf_chat_entry_mode_controls_button", {
-      "": (s) => {
-        /*
-        s.borderColor = "currentColor";
-        s.borderWidth = "0.1cm";
-        s.borderStyle = "solid";
-        s.borderRadius = "0.1cm";
-        */
-        const size = "0.8cm";
-        s.width = size;
-        s.height = size;
-        s.filter = `drop-shadow(rgba(12, 26, 47, 0.43) 0px 0px 0.05cm)`;
-      },
-    }),
-  ];
   presentation.leafChatEntryModeControlsButtonNewMessage =
     /** @type { Presentation["leafChatEntryModeControlsButtonNewMessage"] } */ (
-      args
+      args,
     ) => {
       return {
         root: e(
@@ -1958,48 +2058,33 @@ svg.spinner4 path {
           {},
           {
             styles_: [
-              ...leafChatEntryModeControlControlsButtonStyles,
+              ...onBlueIconButtonInverseStyles,
               s("leaf_chat_entry_mode_controls_button_new_message", {
                 "": (s) => {
-                  s.color = "green";
+                  s.color = varCForegroundChatButton;
                 },
               }),
             ],
             children_: [
-              leafIcon({
-                text: textIconAddMessage,
-                weight: "600",
-              }),
+              leafSvg({ text: svgIconMessage, width: varSChatControlsButton }),
             ],
-          }
+          },
         ),
       };
     };
 
   // Controls
-  const chatControlsBox =
-    /** @type { (_:{children: Element[], extraStyles: string[]})=>HTMLElement } */ (
-      args
-    ) => {
-      return e(
-        "div",
-        {},
-        { styles_: [...args.extraStyles], children_: args.children }
-      );
-    };
-
   presentation.contChatControlsBarModeMenu =
     /** @type { Presentation["contChatControlsBarModeMenu"] } */ (args) => {
       return {
-        root: chatControlsBox({
-          children: [
+        root: floatingBar({
+          children_: [
             e(
               "div",
               {},
               {
                 styles_: [
                   contHboxStyle,
-                  ...bubbleStyles,
                   s("leaf_chat_controls_mode_menu_buttons", {
                     "": (s) => {
                       s.gap = "0.2cm";
@@ -2007,12 +2092,11 @@ svg.spinner4 path {
                   }),
                 ],
                 children_: args.children,
-              }
+              },
             ),
           ],
           extraStyles: [
             contHboxStyle,
-            ...floatingBarStyles(varCBackground, "0.0"),
             s("leaf_chat_controls_mode_menu", {
               "": (s) => {
                 s.justifyContent = "center";
@@ -2025,56 +2109,53 @@ svg.spinner4 path {
 
   presentation.leafChatControlsBarModeMenuButtonNewMessage =
     /** @type { Presentation["leafChatControlsBarModeMenuButtonNewMessage"] } */ (
-      args
+      args,
     ) => {
       return {
         root: e(
           "button",
           {},
           {
-            styles_: [buttonStyle],
+            styles_: [...onBlueIconButtonStyles],
             children_: [
-              leafIcon({
-                text: textIconAddMessage,
-                extraStyles: [
-                  s("leaf_chat_controls_bar_mode_menu_button", {
-                    "": (s) => {
-                      s.width = varSChatControlsButton;
-                      s.height = varSChatControlsButton;
-                    },
-                  }),
-                ],
-              }),
+              leafSvg({ text: svgIconMessage, width: varSChatControlsButton }),
             ],
-          }
+          },
         ),
       };
     };
 
   presentation.leafChatControlsBarModeMessage =
     /** @type { Presentation["leafChatControlsBarModeMessage"] } */ (args) => {
-      const messageButtonStyle = s("leaf_chat_controls_mode_message_button", {
-        "": (s) => {
-          s.width = varSChatControlsButton;
-          s.height = varSChatControlsButton;
-          s.filter = `drop-shadow(0 0 0.1cm ${varCBackgroundGrad2}) drop-shadow(0 0 0.1cm ${varCBackgroundGrad2})`;
-        },
-      });
       const close = e(
         "button",
         {},
         {
-          styles_: [buttonStyle, messageButtonStyle],
-          children_: [leafIcon({ text: textIconClose, weight: varWIconHead })],
-        }
+          styles_: [...onBlueIconButtonStyles],
+          children_: [
+            leafSvg({ text: svgIconNope, width: varSChatControlsButton }),
+          ],
+        },
       );
       const send = e(
         "button",
         {},
         {
-          styles_: [...buttonMutStyles, messageButtonStyle],
-          children_: [leafIcon({ text: textIconSend })],
-        }
+          styles_: [...onBlueIconButtonStyles],
+          children_: [
+            leafSvg({
+              text: svgIconSend,
+              width: varSChatControlsButton,
+              extraStyles: [
+                s("chat_controls_bar_message_send", {
+                  "": (s) => {
+                    s.color = varCMutateForeground;
+                  },
+                }),
+              ],
+            }),
+          ],
+        },
       );
       const text = e(
         "div",
@@ -2083,21 +2164,21 @@ svg.spinner4 path {
           styles_: [
             s("leaf_chat_controls_mode_message_text", {
               "": (s) => {
-                s.backgroundColor = "white";
+                s.backgroundColor = `color-mix(in srgb, ${varCBackground} 50%, transparent)`;
                 s.borderRadius = varRBubble;
                 s.padding = "0.1cm 0.2cm";
                 s.flexGrow = "1";
+                s.flexBasis = "0";
               },
             }),
           ],
-        }
+        },
       );
       return {
-        root: chatControlsBox({
-          children: [close, text, send],
+        root: floatingBar({
+          children_: [close, text, send],
           extraStyles: [
             contHboxStyle,
-            ...floatingBarStyles(varCBackground, "0.0"),
             s("leaf_chat_controls_mode_message", {
               "": (s) => {
                 s.gap = "0.1cm";
@@ -2120,7 +2201,7 @@ svg.spinner4 path {
     const resetStyle = e(
       "link",
       { rel: "stylesheet", href: "style_reset.css" },
-      {}
+      {},
     );
     document.head.appendChild(resetStyle);
     notnull(document.body).classList.add(
@@ -2128,10 +2209,10 @@ svg.spinner4 path {
         "": (s) => {
           s.fontFamily = "X";
           //s.backgroundColor = varCBackground;
-          s.background = varCFullBackground;
+          s.background = varCBackground;
           s.color = varCForeground;
         },
-      })
+      }),
     );
     document.body.classList.add(contStackStyle);
   });

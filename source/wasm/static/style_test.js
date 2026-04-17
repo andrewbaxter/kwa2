@@ -52,7 +52,7 @@
         ],
       });
       group2.unread.classList.remove(presentation.classStateHidden({}).value);
-      group2.root.classList.add(presentation.classStateSelected({}).value);
+      group2.link.classList.add(presentation.classStateSelected({}).value);
       const page = presentation.contPageTop({
         identitiesLink: "abcd",
         addLink: "abcd",
@@ -91,7 +91,7 @@
         ],
       });
       page.settingsLink.classList.add(
-        presentation.classStateSelected({}).value
+        presentation.classStateSelected({}).value,
       );
       return page.root;
     };
@@ -105,7 +105,7 @@
       document.body.appendChild(root.root);
     };
     const buildMenu = /** @type {(_:{link: Boolean}) => HTMLElement} */ (
-      args
+      args,
     ) => {
       /** @type { undefined|string } */
       let centerLink;
@@ -149,7 +149,7 @@
       return page.root;
     };
     const buildChat = /** @type {(_:{controls: boolean}) => HTMLElement} */ (
-      args
+      args,
     ) => {
       const topLayer = document.createElement("div");
       topLayer.style.display = "flex";
@@ -190,12 +190,12 @@
       messageLayer.appendChild(presentation.leafChatSpinnerEarly({}).root);
       messageLayer.appendChild(presentation.leafChatSpinnerCenter({}).root);
       messageLayer.appendChild(
-        presentation.contChatEntryModeDeleted({ left: true }).root
+        presentation.contChatEntryModeDeleted({ left: true }).root,
       );
       const textMessage =
         /** @type {(left: Boolean,text: string)=>HTMLElement} */ (
           left,
-          text
+          text,
         ) => {
           const entryMessage1 = presentation.contChatEntryModeMessage({
             left: left,
@@ -203,7 +203,7 @@
             image: "testportrait.jpg",
           });
           entryMessage1.body.appendChild(
-            presentation.leafChatEntryModeMessageTextBlock({ text: text }).root
+            presentation.leafChatEntryModeMessageTextBlock({ text: text }).root,
           );
           return entryMessage1.root;
         };
@@ -215,11 +215,11 @@
       messageLayer.appendChild(textMessage(true, "Spam"));
       messageLayer.appendChild(textMessage(true, "Spam"));
       messageLayer.appendChild(
-        textMessage(true, "This is a short chat message")
+        textMessage(true, "This is a short chat message"),
       );
       const selectedMessage = textMessage(
         true,
-        "This is a longer chat message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines."
+        "This is a longer chat message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines.",
       );
       selectedMessage.classList.add(presentation.classStateSelected({}).value);
       messageLayer.appendChild(selectedMessage);
@@ -227,13 +227,13 @@
       // Right
       messageLayer.appendChild(textMessage(false, "This is a reply 1"));
       messageLayer.appendChild(
-        presentation.contChatEntryModeDeleted({ left: false }).root
+        presentation.contChatEntryModeDeleted({ left: false }).root,
       );
       messageLayer.appendChild(
         textMessage(
           false,
-          "This is a longer reply 1 message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines."
-        )
+          "This is a longer reply 1 message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines.",
+        ),
       );
       messageLayer.appendChild(textMessage(false, "Spam"));
       messageLayer.appendChild(textMessage(false, "Spam"));
@@ -249,9 +249,13 @@
       // Controls
       const controlsAsEntry = presentation.contChatEntryModeControls({}).root;
       controlsAsEntry.appendChild(
-        presentation.leafChatEntryModeControlsButtonNewMessage({}).root
+        presentation.leafChatEntryModeControlsButtonNewMessage({}).root,
       );
       messageLayer.appendChild(controlsAsEntry);
+
+      const padding = document.createElement("div");
+      padding.style.height = "1cm";
+      messageLayer.appendChild(padding);
 
       const root = document.createElement("div");
       root.classList.add("stack");
