@@ -296,12 +296,10 @@ async fn handle_req(state: &Arc<State>, mut req: Request<Incoming>) -> Response<
                                     //.                                        resp = rr(());
                                     //.                                    },
                                     c2s::proto::ServerReq::ChannelOrChannelGroupTree(rr, channel_or_channel_group_tree) => {
-                                        let (channels, channelgroups) = tx(&state.db, |conn| {
+                                        let (channels, channelgroups) = tx(&state.db, |db_tx| {
                                             use good_ormning::sqlite::{
                                                 good_query_many,
                                             };
-
-                                            let mut db_tx = db::Db(conn);
                                             let channels = good_query_many!(
                                                 db,
                                                 //# genemichaels-external: sql-formatter-sqlite

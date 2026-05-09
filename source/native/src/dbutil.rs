@@ -6,19 +6,20 @@ use {
 
 pub async fn tx<
     O: 'static + Send + Sync,
-    F: 'static + Send + FnOnce(&mut Transaction) -> Result<O, loga::Error>,
+    F: 'static + Send + for<'b, 't> FnOnce(&'b mut crate::db::Db<Transaction<'t>>) -> Result<O, loga::Error>,
 >(pool: &Pool, cb: F) -> Result<O, loga::Error> {
     let conn = pool.get().await?;
     return Ok(conn.interact(|conn| {
         let mut tx = conn.transaction()?;
-        match cb(&mut tx) {
+        let mut db_tx = crate::db::Db(tx);
+        match cb(&mut db_tx) {
             Ok(res) => {
-                tx.commit().context("Failed to commit transaction")?;
+                db_tx.0.commit().context("Failed to commit transaction")?;
                 Ok(res)
             },
             Err(e) => {
                 let e = e.context("Error during transaction");
-                match tx.rollback().context("Error rolling back transaction due to error") {
+                match db_tx.0.rollback().context("Error rolling back transaction due to error") {
                     Err(re) => {
                         return Err(e.also(re));
                     },
@@ -38,18 +39,19 @@ pub enum Txr<T> {
 
 pub async fn abortable_tx<
     O: 'static + Send + Sync,
-    F: 'static + Send + FnOnce(&mut Transaction) -> Result<Txr<O>, loga::Error>,
+    F: 'static + Send + for<'b, 't> FnOnce(&'b mut crate::db::Db<Transaction<'t>>) -> Result<Txr<O>, loga::Error>,
 >(pool: &Pool, cb: F) -> Result<Option<O>, loga::Error> {
     let conn = pool.get().await?;
     return Ok(conn.interact(|conn| {
         let mut tx = conn.transaction()?;
-        match cb(&mut tx) {
+        let mut db_tx = crate::db::Db(tx);
+        match cb(&mut db_tx) {
             Ok(Txr::Ok(res)) => {
-                tx.commit().context("Failed to commit transaction")?;
+                db_tx.0.commit().context("Failed to commit transaction")?;
                 Ok(Some(res))
             },
             Ok(Txr::Abort) => {
-                match tx.rollback().context("Error rolling back transaction due to abort") {
+                match db_tx.0.rollback().context("Error rolling back transaction due to abort") {
                     Err(re) => {
                         return Err(re);
                     },
@@ -60,7 +62,7 @@ pub async fn abortable_tx<
             },
             Err(e) => {
                 let e = e.context("Error during transaction");
-                match tx.rollback().context("Error rolling back transaction due to error") {
+                match db_tx.0.rollback().context("Error rolling back transaction due to error") {
                     Err(re) => {
                         return Err(e.also(re));
                     },
