@@ -151,6 +151,8 @@ pub struct Config {
 #[derive(Aargvark)]
 struct Args {
     config: AargvarkJson<Config>,
+    #[vark(flag = "--validate")]
+    validate: Option<()>,
 }
 
 struct State {
@@ -434,6 +436,10 @@ fn main() {
             let tm = TaskManager::new();
             let args = vark::<Args>();
             let config = args.config.value;
+            if args.validate.is_some() {
+                eprintln!("Config OK");
+                return Ok(());
+            }
             create_dirs(&config.persistent_dir).await?;
             let db_path = config.persistent_dir.join("db.sqlite3");
 
