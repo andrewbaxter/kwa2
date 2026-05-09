@@ -26,29 +26,33 @@ use {
 pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
     return build_nol_form(
         //. .
-        pc,&Ministate::Channel(MinistateChannel {
-        id: s.id.clone(),
-        own_identity: s.own_identity.clone(),
-        reset_id: None,
-    }), "Delete channel", get_or_req_channel(&pc.eg(), &s.id, false).map({
-        let eg = pc.eg();
-        |local| (
-            el("div"),
-            vec![
-                style_export::leaf_form_text(
-                    style_export::LeafFormTextArgs {
-                        text: format!("Are you sure you want to delete channel [{}]", &*local.memo_short.borrow()),
-                    },
-                ).root
-            ],
-            async move |_idem| {
-                req_post_json(&state().env.base_url, c2s::ChannelDelete { id: local.id.clone() }).await?;
-                pull_top(&eg).await;
-                eg.event(|pc| {
-                    goto_replace_ministate(pc, &state().log, &Ministate::Top);
-                }).unwrap();
-                return Ok(());
-            },
-        )
-    }));
+        pc,
+        &Ministate::Channel(MinistateChannel {
+            id: s.id.clone(),
+            own_identity: s.own_identity.clone(),
+            reset_id: None,
+        }),
+        "Delete channel",
+        get_or_req_channel(&pc.eg(), &s.id, false).map({
+            let eg = pc.eg();
+            |local| (
+                el("div"),
+                vec![
+                    style_export::leaf_form_text(
+                        style_export::LeafFormTextArgs {
+                            text: format!("Are you sure you want to delete channel [{}]", &*local.memo_short.borrow()),
+                        },
+                    ).root
+                ],
+                async move |_idem| {
+                    req_post_json(&state().env.base_url, c2s::ChannelDelete { id: local.id.clone() }).await?;
+                    pull_top(&eg).await;
+                    eg.event(|pc| {
+                        goto_replace_ministate(pc, &state().log, &Ministate::Top);
+                    }).unwrap();
+                    return Ok(());
+                },
+            )
+        }),
+    );
 }

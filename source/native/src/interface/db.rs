@@ -1,11 +1,12 @@
 use {
-    good_ormning_runtime::sqlite::{
+    good_ormning::runtime::sqlite::{
         GoodOrmningCustomI64,
         GoodOrmningCustomString,
     },
     shared::interface::shared::{
         AccountId,
         ChannelGroupId,
+        ChannelId,
     },
     spaghettinuum::interface::identity::{
         Identity,
@@ -60,5 +61,17 @@ impl GoodOrmningCustomI64<DbChannelGroupId> for DbChannelGroupId {
 
     fn from_sql(value: i64) -> Result<DbChannelGroupId, String> {
         return Ok(DbChannelGroupId(ChannelGroupId(u64::from_ne_bytes(value.to_ne_bytes()))));
+    }
+}
+
+pub struct DbChannelId(pub ChannelId);
+
+impl GoodOrmningCustomString<DbChannelId> for DbChannelId {
+    fn to_sql<'a>(value: &'a DbChannelId) -> String {
+        return value.0.0.to_string();
+    }
+
+    fn from_sql(value: String) -> Result<DbChannelId, String> {
+        return value.parse::<u64>().map(|v| DbChannelId(ChannelId(v))).map_err(|e| e.to_string());
     }
 }

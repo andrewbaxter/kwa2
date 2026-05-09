@@ -1,9 +1,10 @@
 pub mod interface;
 pub mod dbutil;
 pub mod fsutil;
-pub mod db;
 pub mod subsystems;
 pub mod util;
+
+good_ormning::good_module!(pub db);
 
 use {
     crate::{
@@ -170,9 +171,7 @@ pub async fn identify_c2s(
             break;
         };
         let Some(user) = state.oidc_state.sessions.get(&session).await else {
-            state
-                .log
-                .log(loga::DEBUG, format!("Request has session id [{}] but no matching session found", session));
+            state.log.log(loga::DEBUG, format!("Request has session id [{}] but no matching session found", session));
             break;
         };
         return Ok(Some(user));
@@ -298,16 +297,48 @@ async fn handle_req(state: &Arc<State>, mut req: Request<Incoming>) -> Response<
                                     //.                                    },
                                     c2s::proto::ServerReq::ChannelOrChannelGroupTree(rr, channel_or_channel_group_tree) => {
                                         let (channels, channelgroups) = tx(&state.db, |conn| {
-                                            return Ok(
-                                                (
-                                                    db::channel_list(conn, account),
-                                                    db::channelgroup_list(conn, account),
-                                                ),
-                                            );
+                                            use good_ormning::sqlite::{
+                                                good_query_many,
+                                            };
+
+                                            let mut db_tx = db::Db(conn);
+                                            let channels = good_query_many!(
+                                                db,
+                                                //# genemichaels-external: sql-formatter-sqlite
+                                                r#"select
+                                                     identity,
+                                                     id,
+                                                     idem,
+                                                     channel_group,
+                                                     memo_short,
+                                                     memo_long
+                                                   from
+                                                     channel
+                                                   where
+                                                     account_id = ${account_id_t = account}
+                                                   "#;
+                                                &mut db_tx
+                                            ).map_err(|e| loga::err(e.0))?;
+                                            let channelgroups = good_query_many!(
+                                                db,
+                                                //# genemichaels-external: sql-formatter-sqlite
+                                                r#"select
+                                                     rowid,
+                                                     idem,
+                                                     memo_short,
+                                                     memo_long
+                                                   from
+                                                     channelgroup
+                                                   where
+                                                     account_id = ${account_id_t = account}
+                                                   "#;
+                                                &mut db_tx
+                                            ).map_err(|e| loga::err(e.0))?;
+                                            return Ok((channels, channelgroups));
                                         }).await.err_internal()?;
                                         let mut out = vec![];
                                         let mut channelgroup_children = HashMap::new();
-                                        for channel in channels.err_internal()? {
+                                        for channel in channels {
                                             let channel1 = ChannelRes {
                                                 identity: channel.identity,
                                                 id: channel.id,
@@ -325,7 +356,7 @@ async fn handle_req(state: &Arc<State>, mut req: Request<Incoming>) -> Response<
                                                 out.push(ChannelOrChannelGroup::Channel(channel1));
                                             }
                                         }
-                                        for cg in channelgroups.err_internal()? {
+                                        for cg in channelgroups {
                                             out.push(ChannelOrChannelGroup::ChannelGroup(ChannelOrChannelGroupGroup {
                                                 group: ChannelGroupRes {
                                                     id: cg.rowid,
@@ -474,7 +505,7 @@ fn main() {
                     .build()
                     .context("Error creating sqlite pool")?;
             db.get().await?.interact(move |conn| -> Result<_, loga::Error> {
-                db::migrate(conn)?;
+                db::migrate(&mut *conn, None).map_err(|e| loga::err(e.0))?;
                 return Ok(());
             }).await?.context_with("Migration failed", ea!(action = "db_init", path = db_path.to_string_lossy()))?;
 

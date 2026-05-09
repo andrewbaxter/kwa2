@@ -6,12 +6,12 @@ use {
 
 pub async fn tx<
     O: 'static + Send + Sync,
-    F: 'static + Send + FnOnce(&Transaction) -> Result<O, loga::Error>,
+    F: 'static + Send + FnOnce(&mut Transaction) -> Result<O, loga::Error>,
 >(pool: &Pool, cb: F) -> Result<O, loga::Error> {
     let conn = pool.get().await?;
     return Ok(conn.interact(|conn| {
-        let tx = conn.transaction()?;
-        match cb(&tx) {
+        let mut tx = conn.transaction()?;
+        match cb(&mut tx) {
             Ok(res) => {
                 tx.commit().context("Failed to commit transaction")?;
                 Ok(res)
@@ -38,12 +38,12 @@ pub enum Txr<T> {
 
 pub async fn abortable_tx<
     O: 'static + Send + Sync,
-    F: 'static + Send + FnOnce(&Transaction) -> Result<Txr<O>, loga::Error>,
+    F: 'static + Send + FnOnce(&mut Transaction) -> Result<Txr<O>, loga::Error>,
 >(pool: &Pool, cb: F) -> Result<Option<O>, loga::Error> {
     let conn = pool.get().await?;
     return Ok(conn.interact(|conn| {
-        let tx = conn.transaction()?;
-        match cb(&tx) {
+        let mut tx = conn.transaction()?;
+        match cb(&mut tx) {
             Ok(Txr::Ok(res)) => {
                 tx.commit().context("Failed to commit transaction")?;
                 Ok(Some(res))

@@ -34,43 +34,47 @@ struct Form_ {
 pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
     return build_nol_form(
         //. .
-        pc,&Ministate::ChannelGroup(MinistateChannelGroup {
-        id: id.clone(),
-        reset_id: None,
-    }), "Edit group", get_or_req_channelgroup(&pc.eg(), id, false).map({
-        let eg = pc.eg();
-        move |value| {
-            let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
-                memo_short: value.memo_short.get(),
-                memo_long: value.memo_long.get(),
-            }));
-            let form_state = Rc::new(form_state);
-            return (form_els.error.unwrap(), form_els.elements, async move |_idem| {
-                let Ok(new_values) = form_state.parse() else {
+        pc,
+        &Ministate::ChannelGroup(MinistateChannelGroup {
+            id: id.clone(),
+            reset_id: None,
+        }),
+        "Edit group",
+        get_or_req_channelgroup(&pc.eg(), id, false).map({
+            let eg = pc.eg();
+            move |value| {
+                let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
+                    memo_short: value.memo_short.get(),
+                    memo_long: value.memo_long.get(),
+                }));
+                let form_state = Rc::new(form_state);
+                return (form_els.error.unwrap(), form_els.elements, async move |_idem| {
+                    let Ok(new_values) = form_state.parse() else {
+                        return Ok(());
+                    };
+                    let res = req_post_json(&state().env.base_url, c2s::ChannelGroupModify {
+                        id: value.id.clone(),
+                        memo_short: if new_values.memo_short == *value.memo_short.borrow() {
+                            None
+                        } else {
+                            Some(new_values.memo_short)
+                        },
+                        memo_long: if new_values.memo_long == *value.memo_long.borrow() {
+                            None
+                        } else {
+                            Some(new_values.memo_long)
+                        },
+                    }).await?;
+                    pull_top(&eg).await;
+                    eg.event(|pc| {
+                        goto_replace_ministate(pc, &state().log, &Ministate::ChannelGroup(MinistateChannelGroup {
+                            id: res.id,
+                            reset_id: None,
+                        }));
+                    }).unwrap();
                     return Ok(());
-                };
-                let res = req_post_json(&state().env.base_url, c2s::ChannelGroupModify {
-                    id: value.id.clone(),
-                    memo_short: if new_values.memo_short == *value.memo_short.borrow() {
-                        None
-                    } else {
-                        Some(new_values.memo_short)
-                    },
-                    memo_long: if new_values.memo_long == *value.memo_long.borrow() {
-                        None
-                    } else {
-                        Some(new_values.memo_long)
-                    },
-                }).await?;
-                pull_top(&eg).await;
-                eg.event(|pc| {
-                    goto_replace_ministate(pc, &state().log, &Ministate::ChannelGroup(MinistateChannelGroup {
-                        id: res.id,
-                        reset_id: None,
-                    }));
-                }).unwrap();
-                return Ok(());
-            });
-        }
-    }));
+                });
+            }
+        }),
+    );
 }

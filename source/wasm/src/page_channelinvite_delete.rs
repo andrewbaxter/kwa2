@@ -33,32 +33,39 @@ use {
 pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
     return build_nol_form(
         //. .
-        pc,&Ministate::ChannelInvite(MinistateChannelInvite {
-        channel: channel.clone(),
-        invite: id.clone(),
-    }), "Delete invite", get_or_req_api_channelinvite(id, false).map({
-        let eg = pc.eg();
-        move |local| (
-            el("div"),
-            vec![
-                style_export::leaf_form_text(
-                    style_export::LeafFormTextArgs {
-                        text: format!("Are you sure you want to delete invite [{}]", local.res.memo_short),
-                    },
-                ).root
-            ],
-            async move |_idem| {
-                req_post_json(&state().env.base_url, c2s::ChannelInviteDelete { id: local.res.id.clone() }).await?;
-                localdata::delete_channelinvite(local.res.clone()).await;
-                eg.event(|pc| {
-                    goto_replace_ministate(
-                        pc,
-                        &state().log,
-                        &Ministate::ChannelInvites(local.res.token.channel.clone()),
-                    );
-                }).unwrap();
-                return Ok(());
-            },
-        )
-    }));
+        pc,
+        &Ministate::ChannelInvite(MinistateChannelInvite {
+            channel: channel.clone(),
+            invite: id.clone(),
+        }),
+        "Delete invite",
+        get_or_req_api_channelinvite(id, false).map({
+            let eg = pc.eg();
+            move |local| (
+                el("div"),
+                vec![
+                    style_export::leaf_form_text(
+                        style_export::LeafFormTextArgs {
+                            text: format!("Are you sure you want to delete invite [{}]", local.res.memo_short),
+                        },
+                    ).root
+                ],
+                async move |_idem| {
+                    req_post_json(
+                        &state().env.base_url,
+                        c2s::ChannelInviteDelete { id: local.res.id.clone() },
+                    ).await?;
+                    localdata::delete_channelinvite(local.res.clone()).await;
+                    eg.event(|pc| {
+                        goto_replace_ministate(
+                            pc,
+                            &state().log,
+                            &Ministate::ChannelInvites(local.res.token.channel.clone()),
+                        );
+                    }).unwrap();
+                    return Ok(());
+                },
+            )
+        }),
+    );
 }

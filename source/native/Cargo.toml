@@ -7,7 +7,7 @@ edition = "2024"
 aargvark = { version = "0.8", features = ["serde_json"] }
 flowcontrol = "0.2"
 glove = "0.5"
-good-ormning-runtime = { version = "0.4", features = ["jiff", "sqlite"] }
+good-ormning = { version = "0.5", features = ["jiff", "sqlite"] }
 http = "1"
 htwrap = "0.13"
 loga = "0.5"
@@ -42,7 +42,7 @@ hyper = "1"
 http-body-util = "0.1"
 
 [build-dependencies]
-good-ormning = { version = "0.4", features = ["jiff", "sqlite"] }
+good-ormning = { version = "0.5", features = ["jiff", "sqlite"] }
 
 [lints.clippy]
 all = "allow"

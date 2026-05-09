@@ -950,8 +950,7 @@ impl<E: 'static + Entry> Infinite<E> {
                     let Some((feed_id, _)) = use_feed else {
                         break 'realize_late;
                     };
-                    let entry =
-                        self.0.feeds.borrow_mut().get_mut(&feed_id).unwrap().late_reserve.pop_front().unwrap();
+                    let entry = self.0.feeds.borrow_mut().get_mut(&feed_id).unwrap().late_reserve.pop_front().unwrap();
                     let mut real = None;
                     if let Some(f) = &*self.0.reserve_sticky_entry.borrow() {
                         if f.entry.time() == entry.time() {

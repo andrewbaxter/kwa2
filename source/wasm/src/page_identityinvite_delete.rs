@@ -33,31 +33,37 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity, id: &IdentityInvit
         //. .
         pc,
         &Ministate::IdentityInvite(MinistateIdentityInvite {
-        identity: identity.clone(),
-        invite: id.clone(),
-    }), "Delete invite", greq_api_identityinvites(id, false).map({
-        let eg = pc.eg();
-        move |local| (
-            el("div"),
-            vec![
-                style_export::leaf_form_text(
-                    style_export::LeafFormTextArgs {
-                        text: format!("Are you sure you want to delete invite [{}]", local.res.memo_short),
-                    },
-                ).root
-            ],
-            async move |_idem| {
-                req_post_json(&state().env.base_url, c2s::IdentityInviteDelete { id: local.res.id.clone() }).await?;
-                localdata::delete_identityinvite(local.res.clone()).await;
-                eg.event(|pc| {
-                    goto_replace_ministate(
-                        pc,
-                        &state().log,
-                        &Ministate::IdentityInvites(local.res.token.identity.clone()),
-                    );
-                }).unwrap();
-                return Ok(());
-            },
-        )
-    }));
+            identity: identity.clone(),
+            invite: id.clone(),
+        }),
+        "Delete invite",
+        greq_api_identityinvites(id, false).map({
+            let eg = pc.eg();
+            move |local| (
+                el("div"),
+                vec![
+                    style_export::leaf_form_text(
+                        style_export::LeafFormTextArgs {
+                            text: format!("Are you sure you want to delete invite [{}]", local.res.memo_short),
+                        },
+                    ).root
+                ],
+                async move |_idem| {
+                    req_post_json(
+                        &state().env.base_url,
+                        c2s::IdentityInviteDelete { id: local.res.id.clone() },
+                    ).await?;
+                    localdata::delete_identityinvite(local.res.clone()).await;
+                    eg.event(|pc| {
+                        goto_replace_ministate(
+                            pc,
+                            &state().log,
+                            &Ministate::IdentityInvites(local.res.token.identity.clone()),
+                        );
+                    }).unwrap();
+                    return Ok(());
+                },
+            )
+        }),
+    );
 }
