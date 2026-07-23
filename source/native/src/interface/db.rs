@@ -10,7 +10,7 @@ use {
     },
     spaghettinuum::interface::identity::{
         Identity,
-        LocalIdentitySecret,
+        IdentitySecret,
     },
 };
 
@@ -26,7 +26,7 @@ impl GoodOrmningCustomI64<DbAccountId> for DbAccountId {
     }
 }
 
-pub struct DbIdentitySecret(pub LocalIdentitySecret);
+pub struct DbIdentitySecret(pub IdentitySecret);
 
 impl GoodOrmningCustomString<DbIdentitySecret> for DbIdentitySecret {
     fn to_sql<'a>(value: &'a DbIdentitySecret) -> String {
@@ -34,7 +34,7 @@ impl GoodOrmningCustomString<DbIdentitySecret> for DbIdentitySecret {
     }
 
     fn from_sql(value: String) -> Result<DbIdentitySecret, String> {
-        return serde_json::from_str::<LocalIdentitySecret>(&value)
+        return serde_json::from_str::<IdentitySecret>(&value)
             .map_err(|e| e.to_string())
             .map(|x| DbIdentitySecret(x));
     }

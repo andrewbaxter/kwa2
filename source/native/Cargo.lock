@@ -1787,25 +1787,6 @@ dependencies = [
 
 [[package]]
 name = "good-ormning"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8358a098efb06781742bebbc9ab387420042df26db53cf433aba706516fdfa1c"
-dependencies = [
- "enum_dispatch",
- "flowcontrol",
- "genemichaels-lib 0.5.11",
- "hex",
- "jiff",
- "proc-macro2",
- "quote",
- "rpds",
- "samevariant",
- "stable-hash",
- "syn 2.0.106",
-]
-
-[[package]]
-name = "good-ormning"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24910e1590b04cc16c3248cccab811f7905a668f7b53034cdcdad8ca7e5241dd"
@@ -1873,16 +1854,6 @@ dependencies = [
  "serde_json",
  "sqlparser 0.56.0",
  "syn 2.0.106",
-]
-
-[[package]]
-name = "good-ormning-runtime"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba1dffce551fe9cf85614bcf588727d0bfd5f1dd1b038f0a77e7bb11266129a3"
-dependencies = [
- "jiff",
- "rusqlite",
 ]
 
 [[package]]
@@ -2966,7 +2937,7 @@ dependencies = [
  "deadpool-sqlite",
  "flowcontrol",
  "glove",
- "good-ormning 0.5.9",
+ "good-ormning",
  "hex",
  "http 1.3.1",
  "http-body-util",
@@ -4708,6 +4679,7 @@ version = "0.4.1"
 dependencies = [
  "bincode",
  "ed25519-dalek",
+ "rand_core 0.6.4",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -4733,8 +4705,7 @@ dependencies = [
  "flowcontrol",
  "futures",
  "generic-array",
- "good-ormning 0.4.0",
- "good-ormning-runtime",
+ "good-ormning",
  "hickory-proto",
  "hickory-resolver",
  "hickory-server",

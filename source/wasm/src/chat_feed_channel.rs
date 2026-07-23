@@ -45,6 +45,7 @@ use {
     rooting::scope_any,
     shared::interface::{
         shared::{
+            MessageBody,
             MessageClientId,
             QualifiedChannelId,
             QualifiedMessageId,
@@ -134,7 +135,7 @@ impl ChannelFeed {
                         let mut server_time = None;
                         eg.event(|pc| {
                             for entry in resp.messages.into_iter() {
-                                let entry1 = match entry.message.0.get_no_verify() {
+                                let entry1 = match serde_json::from_str::<MessageBody>(&entry.message.0.message) {
                                     Ok(e) => e,
                                     Err(e) => {
                                         state()

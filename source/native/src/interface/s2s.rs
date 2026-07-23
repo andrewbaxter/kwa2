@@ -20,10 +20,11 @@ pub mod s2sv1t {
         },
         spaghettinuum::{
             byteszb32::BytesZb32,
-            interface::{
-                identity::Identity,
-                signature::Signature,
+            interface::identity::{
+                Identity,
+                IdentityPublicKey,
             },
+            jsonsig::JsonSignature,
         },
     };
 
@@ -40,7 +41,7 @@ pub mod s2sv1t {
     #[derive(Serialize, Deserialize, JsonSchema)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub struct Identify {
-        pub challenge: Signature<BytesZb32>,
+        pub challenge: JsonSignature<BytesZb32, IdentityPublicKey>,
     }
 
     #[derive(Serialize, Deserialize, JsonSchema)]

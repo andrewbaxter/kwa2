@@ -1,0 +1,3 @@
+[submodule "source/spaghettinuum"]
+	path = source/spaghettinuum
+	url = https://github.com/andrewbaxter/spaghettinuum.git

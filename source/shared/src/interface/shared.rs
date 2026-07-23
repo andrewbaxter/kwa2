@@ -5,9 +5,12 @@ use {
         Deserialize,
         Serialize,
     },
-    spaghettinuum::interface::{
-        identity::Identity,
-        signature::Signature,
+    spaghettinuum::{
+        interface::identity::{
+            Identity,
+            IdentityPublicKey,
+        },
+        jsonsig::JsonSignature,
     },
 };
 
@@ -109,4 +112,4 @@ pub struct MessageBody {
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct Message(pub Signature<MessageBody>);
+pub struct Message(pub JsonSignature<MessageBody, IdentityPublicKey>);
