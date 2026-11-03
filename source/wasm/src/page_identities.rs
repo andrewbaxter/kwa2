@@ -1,5 +1,9 @@
 use {
     crate::{
+        api::{
+            channel_image,
+            identity_image,
+        },
         js::{
             el_async,
             style_export,
@@ -59,13 +63,13 @@ fn combine_local_values(
     let mut out = vec![];
     for identity in local_identities {
         let mut children = lookup_children.remove(&identity.res.id).unwrap_or_default();
-        children.sort_by_cached_key(|x| (std::cmp::Reverse(x.last_used), x.res.memo_short.clone()));
+        children.sort_by_cached_key(|x| (std::cmp::Reverse(x.last_used), x.res.name.clone()));
         out.push(LocalIdentity1 {
             children: children,
             v: identity,
         });
     }
-    out.sort_by_cached_key(|x| (std::cmp::Reverse(x.v.last_used), x.v.res.memo_short.clone()));
+    out.sort_by_cached_key(|x| (std::cmp::Reverse(x.v.last_used), x.v.res.name.clone()));
     return out;
 }
 
@@ -80,25 +84,30 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
     for old_identity in old_identities.clone() {
         let mut children = vec![];
         for old_channel in old_identity.children {
+            let img = channel_image(&old_channel.res.id, &old_channel.res.portrait);
             let channel_el = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                text: old_channel.res.memo_short,
+                image: img.image,
+                generated_image: img.generated_image,
+                text: old_channel.res.name,
                 link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
                     id: old_channel.res.id.clone(),
                     own_identity: old_identity.v.res.id.clone(),
                     reset_id: None,
                 })),
-                image: None,
             }).root;
             lookup_el_channels.borrow_mut().insert(old_channel.res.id, channel_el.clone());
             children.push(channel_el);
         }
+        let img = identity_image(&old_identity.v.res.id, &old_identity.v.res.portrait);
         let out = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
-            text: old_identity.v.res.memo_short.clone(),
-            link: ministate_octothorpe(&Ministate::Identity(old_identity.v.res.id)),
+            text: old_identity.v.res.name.clone(),
+            link: ministate_octothorpe(&Ministate::Identity(old_identity.v.res.id.clone())),
+            image: img.image,
+            generated_image: img.generated_image,
             children: vec![],
         });
-        out.group_el.ref_splice(0, 0, children);
-        lookup_el_identity_children.borrow_mut().insert(old_identity.v.res.id.clone(), out.group_el);
+        out.group.ref_splice(0, 0, children);
+        lookup_el_identity_children.borrow_mut().insert(old_identity.v.res.id.clone(), out.group);
         lookup_el_identities.borrow_mut().insert(old_identity.v.res.id, out.root.clone());
         identity_elements.ref_push(out.root);
     }
@@ -136,13 +145,16 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                                 .clone();
                         old_channels1 = old_cg.children;
                     } else {
+                        let img = identity_image(&new_identity.v.res.id, &new_identity.v.res.portrait);
                         let next_el1 = style_export::leaf_menu_group(style_export::LeafMenuGroupArgs {
-                            text: new_identity.v.res.memo_short,
-                            link: ministate_octothorpe(&Ministate::Identity(new_identity.v.res.id)),
+                            image: img.image,
+                            generated_image: img.generated_image,
+                            text: new_identity.v.res.name,
+                            link: ministate_octothorpe(&Ministate::Identity(new_identity.v.res.id.clone())),
                             children: vec![],
                         });
                         new_els1.push(next_el1.root);
-                        new_children_el = next_el1.group_el;
+                        new_children_el = next_el1.group;
                         old_channels1 = vec![];
                     }
 
@@ -157,14 +169,16 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                             if old_channels.remove(&new_channel.res.id) {
                                 // nop
                             } else {
+                                let img = channel_image(&new_channel.res.id, &new_channel.res.portrait);
                                 new_out_els2.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                                    text: new_channel.res.memo_short,
+                                    image: img.image,
+                                    generated_image: img.generated_image,
+                                    text: new_channel.res.name,
                                     link: ministate_octothorpe(&Ministate::Channel(MinistateChannel {
                                         id: new_channel.res.id,
                                         own_identity: new_identity.v.res.id.clone(),
                                         reset_id: None,
                                     })),
-                                    image: None,
                                 }).root);
                             }
                         }

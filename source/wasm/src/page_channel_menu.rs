@@ -38,12 +38,20 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                         own_identity: sender.clone(),
                     })),
                     image: None,
+                    generated_image: None,
                 }).root);
                 if local.id.identity == sender {
                     children.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                         text: format!("Members"),
                         link: ministate_octothorpe(&Ministate::ChannelMembers(local.id.clone())),
                         image: None,
+                        generated_image: None,
+                    }).root);
+                    children.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                        text: format!("Invites"),
+                        link: ministate_octothorpe(&Ministate::ChannelInvites(local.id.clone())),
+                        image: None,
+                        generated_image: None,
                     }).root);
                 }
                 children.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
@@ -53,10 +61,11 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                         own_identity: sender.clone(),
                     })),
                     image: None,
+                    generated_image: None,
                 }).root);
                 return LazyPage {
                     center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
-                        text: local.memo_short.get(),
+                        text: local.name.get(),
                         link: None,
                     }).root,
                     body: children,

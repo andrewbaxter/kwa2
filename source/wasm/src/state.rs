@@ -19,6 +19,8 @@ use {
             LocalChannel,
             LocalChannelGroup,
             NowOrLater,
+            get_stored_api_contacts,
+            get_stored_api_identities,
             req_api_channelgroups,
             req_api_channels,
         },
@@ -26,6 +28,7 @@ use {
         page_channel_delete,
         page_channel_edit,
         page_channel_join_url,
+        page_channel_join_url_confirm,
         page_channel_menu,
         page_channel_new,
         page_channelgroup,
@@ -75,6 +78,7 @@ use {
         HistPrim,
         Prim,
         ProcessingContext,
+        prim::WeakHistPrim,
     },
     rooting::{
         El,
@@ -88,11 +92,15 @@ use {
         shared::{
             ChannelGroupId,
             ChannelInviteId,
+            FileRef,
             IdentityInviteId,
             QualifiedChannelId,
             QualifiedMessageId,
         },
-        wire::c2s::ActivityOffset,
+        wire::{
+            c2s::ActivityOffset,
+            kwaurl::KwaUrl,
+        },
     },
     spaghettinuum::interface::identity::Identity,
     std::{
@@ -122,6 +130,20 @@ pub const SESSIONSTORAGE_POST_REDIRECT_MINISTATE: &str = "post_redirect";
 pub struct MinistateChannelInvite {
     pub channel: QualifiedChannelId,
     pub invite: ChannelInviteId,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum MinistateChannelInviteNewFrom {
+    Invites,
+    Members,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateChannelInviteNew {
+    pub channel: QualifiedChannelId,
+    pub from: MinistateChannelInviteNewFrom,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -174,6 +196,7 @@ pub enum Ministate {
     Settings,
     TopAdd,
     ChannelJoinUrl,
+    ChannelJoinUrlConfirm(KwaUrl),
     ChannelNew,
     ChannelGroupNew,
     Identities,
@@ -195,7 +218,7 @@ pub enum Ministate {
     ChannelEdit(MinistateChannelSub),
     ChannelDelete(MinistateChannelSub),
     ChannelInvites(QualifiedChannelId),
-    ChannelInviteNew(QualifiedChannelId),
+    ChannelInviteNew(MinistateChannelInviteNew),
     ChannelInvite(MinistateChannelInvite),
     ChannelInviteEdit(MinistateChannelInvite),
     ChannelInviteDelete(MinistateChannelInvite),
@@ -239,7 +262,14 @@ pub fn read_ministate(log: &Rc<dyn Log>) -> Ministate {
             log.log(&format!("Unable to parse url anchor state (1/2, no urldecode) [{}]: {}", s, e));
         },
     };
-    match serde_json::from_str::<Ministate>(&decode_uri(s.as_str()).unwrap().as_string().unwrap()) {
+    let decoded = match decode_uri(s.as_str()) {
+        Ok(d) => String::from(d),
+        Err(e) => {
+            log.log_js(&format!("Unable to urldecode url anchor state [{}]", s), &e);
+            return Ministate::Top;
+        },
+    };
+    match serde_json::from_str::<Ministate>(&decoded) {
         Ok(s) => return s,
         Err(e) => {
             log.log(&format!("Unable to parse url anchor state (2/2, urldecode) [{}]: {}", s, e));
@@ -266,9 +296,15 @@ pub struct LocalChannel1 {
     pub id: QualifiedChannelId,
     pub last_offset: Cell<Option<ActivityOffset>>,
     pub unread: Prim<bool>,
-    pub memo_short: HistPrim<String>,
-    pub memo_long: HistPrim<String>,
+    pub name: HistPrim<String>,
+    pub description: HistPrim<String>,
+    pub shown_name: HistPrim<Option<String>>,
+    pub shown_description: HistPrim<Option<String>>,
+    pub portrait: HistPrim<Option<FileRef>>,
     pub group: HistPrim<Option<ChannelGroupId>>,
+    pub retention_days: HistPrim<Option<u64>>,
+    pub public_read: HistPrim<bool>,
+    pub public_post: HistPrim<bool>,
     pub own_identity: Identity,
 }
 
@@ -276,8 +312,8 @@ pub struct LocalChannel1 {
 pub struct LocalChannelGroup1 {
     pub id: ChannelGroupId,
     pub unread: Prim<bool>,
-    pub memo_short: HistPrim<String>,
-    pub memo_long: HistPrim<String>,
+    pub name: HistPrim<String>,
+    pub description: HistPrim<String>,
     pub children: lunk::List<Rc<LocalChannel1>>,
 }
 
@@ -290,17 +326,21 @@ pub enum LocalCocg {
 pub struct State_ {
     pub eg: EventGraph,
     pub service_worker: BgVal<Result<ServiceWorkerRegistration, String>>,
-    pub page_root: El,
-    pub ministate: RefCell<Ministate>,
+    /// Set once during init, after the rest of the state is available.
+    pub page_root: std::cell::OnceCell<El>,
+    pub ministate: Prim<Ministate>,
     pub env: Env,
     pub log: Rc<dyn Log>,
     pub log1: Rc<VecLog>,
     pub unread_any: Prim<bool>,
     pub lookup_channel: RefCell<HashMap<QualifiedChannelId, Rc<LocalChannel1>>>,
     pub lookup_channelgroup: RefCell<HashMap<ChannelGroupId, Rc<LocalChannelGroup1>>>,
+    pub stored_identity_portraits: RefCell<HashMap<Identity, Option<FileRef>>>,
+    pub identity_portraits: RefCell<HashMap<Identity, WeakHistPrim<Option<FileRef>>>>,
     pub top: lunk::List<LocalCocg>,
     pub current_chat: RefCell<Option<CurrentChat>>,
     pub bg_pushing: RefCell<Option<oneshot::Receiver<()>>>,
+    pub bg_pushing_dirty: Cell<bool>,
     pub bg_pulling_interval: RefCell<Option<Interval>>,
     pub bg_pulling: RefCell<Option<oneshot::Receiver<()>>>,
 }
@@ -314,12 +354,14 @@ pub fn state() -> Rc<State_> {
 }
 
 pub fn set_page(body: El) {
-    let r = &state().page_root;
+    let state = state();
+    let r = state.page_root.get().unwrap();
     r.ref_clear();
     r.ref_push(body);
 }
 
 pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
+    state().ministate.set(pc, s.clone());
     let body;
     match s {
         Ministate::Top => {
@@ -366,6 +408,9 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
         },
         Ministate::ChannelJoinUrl => {
             body = page_channel_join_url::build(pc);
+        },
+        Ministate::ChannelJoinUrlConfirm(s) => {
+            body = page_channel_join_url_confirm::build(pc, s);
         },
         Ministate::Channel(s) => {
             body = page_channel::build(pc, s);
@@ -444,6 +489,36 @@ pub fn spawn_log(message: &'static str, f: impl Future<Output = Result<(), Strin
     });
 }
 
+pub fn identity_portrait(pc: &mut ProcessingContext, id: &Identity) -> HistPrim<Option<FileRef>> {
+    let state = state();
+    let mut portraits = state.identity_portraits.borrow_mut();
+    if let Some(prim) = portraits.get(id).and_then(|p| p.upgrade()) {
+        return prim;
+    }
+    portraits.retain(|_, p| p.upgrade().is_some());
+    let prim = HistPrim::new(pc, state.stored_identity_portraits.borrow().get(id).cloned().flatten());
+    portraits.insert(id.clone(), prim.weak());
+    return prim;
+}
+
+pub fn sync_identity_portraits(pc: &mut ProcessingContext) {
+    let mut stored = HashMap::new();
+    for c in get_stored_api_contacts(None) {
+        stored.insert(c.res.id, c.res.portrait);
+    }
+    for i in get_stored_api_identities(None) {
+        stored.insert(i.res.id, i.res.portrait);
+    }
+    state().identity_portraits.borrow_mut().retain(|id, p| {
+        let Some(prim) = p.upgrade() else {
+            return false;
+        };
+        prim.set(pc, stored.get(id).cloned().flatten());
+        return true;
+    });
+    *state().stored_identity_portraits.borrow_mut() = stored;
+}
+
 pub const SESSIONSTORAGE_CHAT_RESET: &str = "chat_reset";
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -499,16 +574,16 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
     for received_cg in cgs {
         let cg1 = match state().lookup_channelgroup.borrow_mut().remove(&received_cg.res.id) {
             Some(existing) => {
-                existing.memo_long.set(pc, received_cg.res.memo_long.clone());
-                existing.memo_short.set(pc, received_cg.res.memo_short.clone());
+                existing.description.set(pc, received_cg.res.description.clone());
+                existing.name.set(pc, received_cg.res.name.clone());
                 existing
             },
             None => {
                 let new_cg = Rc::new(LocalChannelGroup1 {
                     id: received_cg.res.id.clone(),
                     unread: Prim::new(false),
-                    memo_long: HistPrim::new(pc, received_cg.res.memo_long.clone()),
-                    memo_short: HistPrim::new(pc, received_cg.res.memo_short.clone()),
+                    description: HistPrim::new(pc, received_cg.res.description.clone()),
+                    name: HistPrim::new(pc, received_cg.res.name.clone()),
                     children: lunk::List::new(vec![]),
                 });
                 top_add.push(LocalCocg::ChannelGroup(new_cg.clone()));
@@ -523,9 +598,15 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
         let c1 = match state().lookup_channel.borrow_mut().remove(&received_c.res.id) {
             Some(existing_c) => {
                 // TODO make `set_if_not` for prim, don't use histprim here
-                existing_c.memo_long.set(pc, received_c.res.memo_long.clone());
-                existing_c.memo_short.set(pc, received_c.res.memo_short.clone());
+                existing_c.description.set(pc, received_c.res.description.clone());
+                existing_c.name.set(pc, received_c.res.name.clone());
+                existing_c.shown_name.set(pc, received_c.res.shown_name.clone());
+                existing_c.shown_description.set(pc, received_c.res.shown_description.clone());
+                existing_c.portrait.set(pc, received_c.res.portrait.clone());
                 existing_c.group.set(pc, received_c.res.group);
+                existing_c.retention_days.set(pc, received_c.res.retention_days);
+                existing_c.public_read.set(pc, received_c.res.public_read);
+                existing_c.public_post.set(pc, received_c.res.public_post);
                 existing_c
             },
             None => {
@@ -535,9 +616,15 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
                     own_identity: received_c.res.own_identity.clone(),
                     last_offset: Cell::new(c_unread.as_ref().and_then(|x| x.offset)),
                     unread: Prim::new(c_unread.map(|x| x.unread).unwrap_or(false)),
-                    memo_long: HistPrim::new(pc, received_c.res.memo_long.clone()),
-                    memo_short: HistPrim::new(pc, received_c.res.memo_short.clone()),
+                    description: HistPrim::new(pc, received_c.res.description.clone()),
+                    name: HistPrim::new(pc, received_c.res.name.clone()),
+                    shown_name: HistPrim::new(pc, received_c.res.shown_name.clone()),
+                    shown_description: HistPrim::new(pc, received_c.res.shown_description.clone()),
+                    portrait: HistPrim::new(pc, received_c.res.portrait.clone()),
                     group: HistPrim::new(pc, received_c.res.group.clone()),
+                    retention_days: HistPrim::new(pc, received_c.res.retention_days),
+                    public_read: HistPrim::new(pc, received_c.res.public_read),
+                    public_post: HistPrim::new(pc, received_c.res.public_post),
                 })
             },
         };

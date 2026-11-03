@@ -6,13 +6,60 @@ use {
         Serialize,
     },
     spaghettinuum::{
+        byteszb32::BytesZb32,
         interface::identity::{
             Identity,
             IdentityPublicKey,
         },
         jsonsig::JsonSignature,
+        sigdomain::{
+            SigDomain,
+            SigDomained,
+        },
     },
 };
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct Portrait {
+    pub mime_type: String,
+    pub data: BytesZb32,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct FileHash(pub String);
+
+impl std::fmt::Display for FileHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        return self.0.fmt(f);
+    }
+}
+
+impl std::str::FromStr for FileHash {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 64 || !s.bytes().all(|b| matches!(b, b'0' ..= b'9' | b'a' ..= b'f')) {
+            return Err(format!("File hash must be 64 lowercase hex characters"));
+        }
+        return Ok(FileHash(s.to_string()));
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct FileRef {
+    pub hash: FileHash,
+    pub mime_type: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum JoinPortrait {
+    FromInvitation,
+    Upload(Portrait),
+}
 
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -103,11 +150,16 @@ pub enum MessageRel {
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageBody {
+    pub channel: QualifiedChannelId,
     pub client_id: Option<MessageClientId>,
     pub id: MessageId,
     pub rel: MessageRel,
     //. pub blocks: Vec<MessageBlock>,
     pub body: String,
+}
+
+impl SigDomained for MessageBody {
+    const DOMAIN: SigDomain = SigDomain::App("kwa/message_body");
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]

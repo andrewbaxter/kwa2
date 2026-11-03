@@ -1,6 +1,11 @@
 use {
     crate::{
+        api::{
+            file_url,
+            req_file_blob,
+        },
         js::{
+            copy_text,
             el_async,
             style_export,
         },
@@ -28,16 +33,84 @@ use {
         scope_any,
         spawn_rooted,
     },
-    rooting_forms::css::err_el,
-    shared::interface::shared::ChannelGroupId,
+    rooting_forms::{
+        css::err_el,
+        impl_file::{
+            initial_blob,
+            FileFormState,
+            FileValue,
+        },
+    },
+    shared::interface::{
+        shared::{
+            ChannelGroupId,
+            FileRef,
+            Portrait,
+        },
+        wire::{
+            c2s::ModifyOption,
+            kwaurl::KwaUrl,
+        },
+    },
+    spaghettinuum::byteszb32::BytesZb32,
     spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
         rc::Rc,
     },
+    qrcode::{
+        QrCode,
+        render::svg,
+    },
     wasm_bindgen::JsCast,
     web_sys::HtmlSelectElement,
 };
+
+#[derive(Clone)]
+pub struct FormPortrait(pub FileValue);
+
+impl From<FileValue> for FormPortrait {
+    fn from(value: FileValue) -> Self {
+        return FormPortrait(value);
+    }
+}
+
+pub async fn req_form_portrait(file: &Option<FileRef>) -> Result<FormPortrait, String> {
+    match file {
+        Some(f) => return Ok(FormPortrait(FileValue::Keep(Some(req_file_blob(&file_url(f), &f.mime_type).await?)))),
+        None => return Ok(FormPortrait(FileValue::Keep(None))),
+    }
+}
+
+pub async fn read_portrait(file: web_sys::File) -> Result<Portrait, String> {
+    let mime_type = file.type_();
+    let data = gloo::file::futures::read_as_bytes(&gloo::file::File::from(file)).await.map_err(|e| e.to_string())?;
+    return Ok(Portrait {
+        mime_type: mime_type,
+        data: BytesZb32(data),
+    });
+}
+
+impl FormPortrait {
+    pub async fn into_modify(self) -> Result<Option<ModifyOption<Portrait>>, String> {
+        match self.0 {
+            FileValue::Keep(_) => return Ok(None),
+            FileValue::Clear => return Ok(Some(ModifyOption { value: None })),
+            FileValue::Set(f) => return Ok(Some(ModifyOption { value: Some(read_portrait(f).await?) })),
+        }
+    }
+}
+
+impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormPortrait {
+    fn new_form_with_(
+        _context: &C,
+        field: &str,
+        from: Option<&Self>,
+        _depth: usize,
+    ) -> (rooting_forms::FormElements, Box<dyn rooting_forms::FormState<Self>>) {
+        return FileFormState::new(field, Some("image/*"), initial_blob(from.map(|x| &x.0)));
+    }
+}
 
 pub struct FormIdentity(pub Identity);
 
@@ -87,7 +160,7 @@ impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormIdentity {
                     identities.sort_by_cached_key(|x| (x.last_used, x.res.id.clone()));
                     for i in identities {
                         let value = serde_json::to_string(&i.res.id).unwrap();
-                        out.ref_push(el("option").attr("value", &value).text(&i.res.memo_short));
+                        out.ref_push(el("option").attr("value", &value).text(&i.res.name));
                         if let Some(s) = &from {
                             if *s == i.res.id {
                                 out.ref_attr("value", &value);
@@ -158,7 +231,7 @@ impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormOptChannelGroup {
                     cgs.sort_by_cached_key(|x| (x.last_used, x.res.id.clone()));
                     for i in cgs {
                         let value = serde_json::to_string(&i.res.id).unwrap();
-                        out.ref_push(el("option").attr("value", &value).text(&i.res.memo_short));
+                        out.ref_push(el("option").attr("value", &value).text(&i.res.name));
                         if let Some(s) = &from {
                             if *s == Some(i.res.id) {
                                 out.ref_attr("value", &value);
@@ -231,7 +304,7 @@ pub fn build_form(
     pc: &mut ProcessingContext,
     title: String,
     back_link: Ministate,
-    form_err_el: El,
+    form_err_el: Option<El>,
     form_els: Vec<El>,
     do_send: impl 'static + Clone + AsyncFn(f64) -> Result<(), String>,
 ) -> El {
@@ -253,14 +326,14 @@ pub fn build_form(
         head_bar: head_bar.root,
         children: vec![],
     });
-    form.errors.ref_push(form_err_el);
+    form.errors.ref_extend(form_err_el.into_iter().collect());
     form.body.ref_push(build_form_inner(&form.submit, form.errors, form_els, do_send));
     return form.root;
 }
 
 pub fn build_nol_form<
     SEND: 'static + Clone + AsyncFn(f64) -> Result<(), String>,
->(pc: &mut ProcessingContext, back_link: &Ministate, title: &str, v: NowOrLater<(El, Vec<El>, SEND)>) -> El {
+>(pc: &mut ProcessingContext, back_link: &Ministate, title: &str, v: NowOrLater<(Option<El>, Vec<El>, SEND)>) -> El {
     let head_bar = style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
         back_link: ministate_octothorpe(&back_link),
         center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
@@ -284,7 +357,7 @@ pub fn build_nol_form<
     let body;
     match v {
         NowOrLater::Now((form_err_el, form_els, do_send)) => {
-            errs.ref_push(form_err_el);
+            errs.ref_extend(form_err_el.into_iter().collect());
             body = vec![build_form_inner(&button_ok, errs, form_els, do_send)];
         },
         NowOrLater::Later(v) => {
@@ -294,7 +367,7 @@ pub fn build_nol_form<
                     let Some((form_err_el, form_els, do_send)) = v.get().await.map_err(|e| e.to_string())? else {
                         return Err(format!("Could not find object"));
                     };
-                    errs.ref_push(form_err_el);
+                    errs.ref_extend(form_err_el.into_iter().collect());
                     return Ok(vec![build_form_inner(&button_ok, errs, form_els, do_send)]);
                 }
             })];
@@ -405,20 +478,22 @@ pub fn build_nol_menu_title<
 pub fn build_nol_chat_bar<
     T: 'static + Clone,
 >(
+    pc: &mut ProcessingContext,
     back_link: &Ministate,
     v: NowOrLater<T>,
-    build: impl 'static + FnOnce(T) -> El,
+    build: impl 'static + FnOnce(&mut ProcessingContext, T) -> El,
 ) -> style_export::ContChatHeadBarRet {
     let mut own = vec![];
     let center;
     match v {
         NowOrLater::Now(local) => {
-            center = build(local);
+            center = build(pc, local);
         },
         NowOrLater::Later(v) => {
             center = style_export::leaf_chat_head_bar_center_placeholder().root;
             own.push(spawn_rooted_log("Fetching channel info", {
                 let top_center = center.clone();
+                let eg = pc.eg();
                 async move {
                     let Some(local) = v.get().await.map_err(|e| e.to_string())? else {
                         top_center.ref_replace(
@@ -429,7 +504,8 @@ pub fn build_nol_chat_bar<
                         );
                         return Ok(());
                     };
-                    top_center.ref_replace(vec![build(local)]);
+                    let built = eg.event(|pc| build(pc, local)).unwrap();
+                    top_center.ref_replace(vec![built]);
                     return Ok(());
                 }
             }));
@@ -442,4 +518,26 @@ pub fn build_nol_chat_bar<
     });
     out.root.ref_own(move |_| own);
     return out;
+}
+
+pub fn build_url_menu_items(url: &KwaUrl) -> Vec<El> {
+    let url = url.to_string();
+    let code = style_export::leaf_menu_code(style_export::LeafMenuCodeArgs { text: url.clone() });
+    code.copy.ref_on("click", {
+        let url = url.clone();
+        move |_| copy_text(&state().log, &url)
+    });
+    return vec![
+        //. .
+        style_export::leaf_menu_qr(
+            style_export::LeafMenuQrArgs {
+                svg: QrCode::new(url.as_bytes())
+                    .unwrap()
+                    .render::<svg::Color>()
+                    .light_color(svg::Color("transparent"))
+                    .build(),
+            },
+        ).root,
+        code.root
+    ];
 }

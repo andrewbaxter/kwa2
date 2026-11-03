@@ -3,11 +3,13 @@ use {
         chat::{
             ChatMode,
             ChatState,
+            ClientIdKey,
         },
         chat_controls::build_chat_entry_controls,
         chat_message::build_chat_entry_message,
         infinite,
     },
+    flowcontrol::exenum,
     jiff::{
         Timestamp,
     },
@@ -27,6 +29,7 @@ use {
         shared::{
             MessageClientId,
             QualifiedChannelId,
+            QualifiedMessageId,
         },
         wire::c2s::SnapPageOffsetPos,
     },
@@ -42,6 +45,7 @@ use {
 pub enum ChatFeedId {
     Channel(QualifiedChannelId),
     Outbox((Identity, QualifiedChannelId)),
+    ServerOutbox((Identity, QualifiedChannelId)),
     Controls,
 }
 
@@ -49,6 +53,7 @@ pub enum ChatFeedId {
 pub enum ChatTimeId {
     None,
     Outbox(MessageClientId),
+    ServerOutbox(u64),
     Channel(SnapPageOffsetPos),
 }
 
@@ -75,15 +80,17 @@ pub struct ChatEntryInternalMessage {
 
 #[derive(Clone)]
 pub enum ChatEntryMessageInternal {
-    // Outbox messages that have since appeared in channel proper
-    Obviated,
     Deleted,
     Message(ChatEntryInternalMessage),
 }
 
 pub struct ChatEntryMessage {
     pub on_drop: ScopeValue,
+    pub chat_state: Rc<ChatState>,
     pub sender: Identity,
+    pub message_id: Option<QualifiedMessageId>,
+    pub client_key: Option<ClientIdKey>,
+    pub hidden: Prim<bool>,
     pub internal: Prim<ChatEntryMessageInternal>,
 }
 
@@ -104,20 +111,36 @@ pub struct ChatEntry {
 }
 
 impl ChatEntry {
-    pub fn new_message(sender: Identity, time: ChatTime, text: String, cleanup: ScopeValue) -> Rc<ChatEntry> {
-        let out = Rc::new(ChatEntry {
+    pub fn new_message(
+        chat_state: Rc<ChatState>,
+        sender: Identity,
+        message_id: Option<QualifiedMessageId>,
+        time: ChatTime,
+        body: Prim<String>,
+        hidden: bool,
+        client_key: Option<ClientIdKey>,
+        cleanup: ScopeValue,
+    ) -> Rc<ChatEntry> {
+        return Rc::new(ChatEntry {
             time: time.clone(),
             int: ChatEntryInternal::Message(ChatEntryMessage {
                 on_drop: cleanup,
+                chat_state: chat_state,
                 sender: sender,
+                message_id: message_id,
+                client_key: client_key,
+                hidden: Prim::new(hidden),
                 internal: Prim::new(ChatEntryMessageInternal::Message(ChatEntryInternalMessage {
                     time: time.stamp,
-                    body: Prim::new(text),
+                    body: body,
                 })),
             }),
             el: Default::default(),
         });
-        return out;
+    }
+
+    pub fn message(&self) -> &ChatEntryMessage {
+        return exenum!(&self.int, ChatEntryInternal:: Message(e) => e).unwrap();
     }
 }
 

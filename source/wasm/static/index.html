@@ -9,23 +9,30 @@
     <title>Kwa</title>
     <script>
       if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./serviceworker.js").catch((e) => {
+        navigator.serviceWorker.addEventListener("message", (ev) => {
+          const reload = ev.data?.reload;
+          if (reload != null) {
+            console.log(`Reloading at service worker request: ${reload.reason}`);
+            location.reload();
+          }
+        });
+        navigator.serviceWorker.register("./serviceworker_entry.js").catch((e) => {
           console.log(`Error registering service worker`, e);
         });
       }
     </script>
-    <script src="style.js"></script>
+    <script src="v/KWA_VERSION/style.js"></script>
     <link
       rel="preload"
-      href="main_bg.wasm"
+      href="v/KWA_VERSION/main_bg.wasm"
       as="fetch"
       type="application/wasm"
       crossorigin=""
     />
-    <link rel="modulepreload" href="main.js" />
+    <link rel="modulepreload" href="v/KWA_VERSION/main.js" />
     <script type="module">
-      import init from "./main.js";
-      init("./main_bg.wasm");
+      import init from "./v/KWA_VERSION/main.js";
+      init("./v/KWA_VERSION/main_bg.wasm");
       // Console errors due to https://github.com/rustwasm/wasm-bindgen/issues/2470
     </script>
   </head>

@@ -26,6 +26,7 @@ Baseline un-styling.
   }
 
   html {
+    overflow-wrap: anywhere;
     min-height: 100dvh;
     width: 100dvw;
     max-width: 100dvw;
@@ -85,24 +86,4 @@ button {
     grid-column: 1;
     grid-row: 1;
   }
-}
-
-/** Basic stuff */
-@font-face {
-  font-family: "I";
-  src: url("MaterialSymbolsRounded.woff2");
-}
-
-@font-face {
-  font-family: "X";
-  src: url("KleeOne-Regular.ttf");
-  font-weight: 400;
-  font-style: normal;
-}
-
-@font-face {
-  font-family: "X";
-  src: url("KleeOne-SemiBold.ttf");
-  font-weight: 600;
-  font-style: normal;
 }

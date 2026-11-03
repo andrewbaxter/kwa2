@@ -6,12 +6,13 @@ edition = "2021"
 [dependencies]
 console_error_panic_hook = "0.1"
 ezing = "0.2"
-gloo = { version = "0.9", features = ["futures"] }
+gloo = { version = "0.12", features = ["futures"] }
+gloo-events = "0.1"
 js-sys = "0.3"
 reqwasm = { version = "0.5", features = ["json"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-wasm-bindgen = "=0.2.105"
+wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = { version = "0.4", features = [
     "futures-core-03-stream",
 ] }
@@ -19,6 +20,7 @@ web-sys = { version = "0.3", features = [
     "Cache",
     "CacheStorage",
     "WindowClient",
+    "Client",
     "Clients",
     "ClientQueryOptions",
     "Clipboard",
@@ -37,6 +39,8 @@ web-sys = { version = "0.3", features = [
     "HtmlIFrameElement",
     "HtmlImageElement",
     "HtmlInputElement",
+    "File",
+    "FileList",
     "HtmlMediaElement",
     "HtmlSelectElement",
     "HtmlVideoElement",
@@ -47,6 +51,8 @@ web-sys = { version = "0.3", features = [
     "FileSystemFileHandle",
     "FileSystemWritableFileStream",
     "FileSystemGetDirectoryOptions",
+    "FileSystemGetFileOptions",
+    "FileSystemRemoveOptions",
     "KeyboardEvent",
     "Location",
     "MediaMetadata",
@@ -76,19 +82,21 @@ web-sys = { version = "0.3", features = [
     "VisibilityState",
     "WheelEvent",
     "WorkerLocation",
+    "WritableStream",
 ] }
 futures = "0.3"
 tokio = { version = "1", features = ["macros", "sync"] }
 hex = "0.4"
-defer = "0.1"
+defer = "0.2"
 shared = { path = "../shared" }
-sha2 = "0.10"
+sha2 = "0.11"
 lunk = { version = "0.3" }
 rooting = { version = "0.2", features = ["futures"] }
-rooting-forms = { version = "0.3", features = ["jiff"] }
+rooting-forms = { path = "../rooting-forms", features = ["jiff"] }
 urlencoding = "2"
-qrcode = { version = "0.13", default-features = false, features = ["svg"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 uuid = { version = "1", features = ["v4", "js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 serde_urlencoded = "0.7"
 async-trait = "0.1"
 flowcontrol = "0.2"
@@ -97,11 +105,11 @@ by_address = "1"
 tokio-stream = { version = "0.1", features = ["sync"] }
 mime2ext = "0.1"
 spaghettinuum = { path = "../spaghettinuum/source/shared" }
-jiff = { version = "0.2", features = ["serde"] }
+jiff = { version = "0.2", features = ["serde", "js"] }
 
 [build-dependencies]
-convert_case = "0.8"
-genemichaels-lib = "0.7"
+convert_case = "0.12"
+genemichaels-lib = "0.12"
 proc-macro2 = "1"
 quote = "1"
 

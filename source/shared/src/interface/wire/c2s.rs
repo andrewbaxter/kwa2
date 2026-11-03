@@ -24,13 +24,12 @@ use {
     spaghettinuum::interface::identity::Identity,
     std::{
         borrow::Cow,
-        collections::HashMap,
         str::FromStr,
     },
 };
 
 // POST/JSON data
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ModifyOption<T> {
     pub value: Option<T>,
@@ -51,8 +50,12 @@ pub struct NotificationRegister {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct IdentityCreate {
     pub idem: Option<String>,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub shown_name: Option<String>,
+    #[serde(default)]
+    pub shown_description: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
@@ -60,8 +63,11 @@ pub struct IdentityCreate {
 pub struct IdentityRes {
     pub id: Identity,
     pub idem: Option<String>,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
+    pub shown_name: Option<String>,
+    pub shown_description: Option<String>,
+    pub portrait: Option<crate::interface::shared::FileRef>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -69,9 +75,15 @@ pub struct IdentityRes {
 pub struct IdentityModify {
     pub id: Identity,
     #[serde(default)]
-    pub memo_short: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    pub memo_long: Option<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub shown_name: Option<ModifyOption<String>>,
+    #[serde(default)]
+    pub shown_description: Option<ModifyOption<String>>,
+    #[serde(default)]
+    pub portrait: Option<ModifyOption<crate::interface::shared::Portrait>>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -89,8 +101,12 @@ pub struct IdentityList;
 pub struct IdentityInviteCreate {
     #[serde(default)]
     pub idem: Option<String>,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub shown_name: Option<String>,
+    #[serde(default)]
+    pub shown_description: Option<String>,
     pub identity: Identity,
     #[serde(default)]
     pub single_use: bool,
@@ -103,8 +119,10 @@ pub struct IdentityInviteCreate {
 pub struct IdentityInviteRes {
     pub id: IdentityInviteId,
     pub token: QualifiedIdentityInviteToken,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
+    pub shown_name: Option<String>,
+    pub shown_description: Option<String>,
     pub single_use: bool,
     pub expiry: Option<Timestamp>,
 }
@@ -114,9 +132,13 @@ pub struct IdentityInviteRes {
 pub struct IdentityInviteModify {
     pub id: IdentityInviteId,
     #[serde(default)]
-    pub memo_short: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    pub memo_long: Option<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub shown_name: Option<ModifyOption<String>>,
+    #[serde(default)]
+    pub shown_description: Option<ModifyOption<String>>,
     #[serde(default)]
     pub single_use: Option<bool>,
     #[serde(default)]
@@ -137,8 +159,8 @@ pub struct IdentityInviteList;
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelGroupCreate {
     pub idem: Option<String>,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
@@ -146,8 +168,8 @@ pub struct ChannelGroupCreate {
 pub struct ChannelGroupRes {
     pub id: ChannelGroupId,
     pub idem: Option<String>,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
 }
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -158,9 +180,9 @@ pub struct ChannelGroupList;
 pub struct ChannelGroupModify {
     pub id: ChannelGroupId,
     #[serde(default)]
-    pub memo_short: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    pub memo_long: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -176,8 +198,12 @@ pub struct ChannelCreate {
     pub identity: Identity,
     pub idem: Option<String>,
     pub group: Option<ChannelGroupId>,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub shown_name: Option<String>,
+    #[serde(default)]
+    pub shown_description: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
@@ -187,8 +213,14 @@ pub struct ChannelRes {
     pub id: QualifiedChannelId,
     pub idem: Option<String>,
     pub group: Option<ChannelGroupId>,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
+    pub shown_name: Option<String>,
+    pub shown_description: Option<String>,
+    pub portrait: Option<crate::interface::shared::FileRef>,
+    pub retention_days: Option<u64>,
+    pub public_read: bool,
+    pub public_post: bool,
 }
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -202,9 +234,21 @@ pub struct ChannelModify {
     #[serde(default)]
     pub group: Option<ModifyOption<ChannelGroupId>>,
     #[serde(default)]
-    pub memo_short: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    pub memo_long: Option<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub shown_name: Option<ModifyOption<String>>,
+    #[serde(default)]
+    pub shown_description: Option<ModifyOption<String>>,
+    #[serde(default)]
+    pub retention_days: Option<ModifyOption<u64>>,
+    #[serde(default)]
+    pub public_read: Option<bool>,
+    #[serde(default)]
+    pub public_post: Option<bool>,
+    #[serde(default)]
+    pub portrait: Option<ModifyOption<crate::interface::shared::Portrait>>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -219,6 +263,10 @@ pub struct ChannelJoinChannel {
     pub channel: QualifiedChannelId,
     pub sender: Identity,
     pub code: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub portrait: Option<crate::interface::shared::JoinPortrait>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -227,20 +275,58 @@ pub struct ChannelJoinIdentity {
     pub identity: Identity,
     pub sender: Identity,
     pub code: String,
-}
-
-// # Channel member
-#[derive(Serialize, Deserialize, JsonSchema, Clone)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum ForeignMemoShort {
-    Confirmed(String),
-    Unconfirmed(String),
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub portrait: Option<crate::interface::shared::JoinPortrait>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelJoinPreview {
+    pub url: crate::interface::wire::kwaurl::KwaUrl,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelJoinPreviewRes {
+    pub name: String,
+    pub description: String,
+    pub portrait: Option<crate::interface::shared::FileRef>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelAdd {
+    pub channel: QualifiedChannelId,
+    pub identity: Identity,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub portrait: Option<crate::interface::shared::JoinPortrait>,
+}
+
+// # Channel member
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelMemberList {
     pub channel: QualifiedChannelId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelMemberRes {
+    pub identity: Identity,
+    pub can_post: bool,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelMemberModify {
+    pub channel: QualifiedChannelId,
+    pub member: Identity,
+    #[serde(default)]
+    pub can_post: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -257,12 +343,22 @@ pub struct ChannelInviteCreate {
     pub channel: QualifiedChannelId,
     #[serde(default)]
     pub idem: Option<String>,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub shown_name: Option<String>,
+    #[serde(default)]
+    pub shown_description: Option<String>,
     #[serde(default)]
     pub single_use: bool,
     #[serde(default)]
     pub expiry: Option<Timestamp>,
+    #[serde(default = "default_true")]
+    pub can_post: bool,
+}
+
+fn default_true() -> bool {
+    return true;
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
@@ -270,10 +366,13 @@ pub struct ChannelInviteCreate {
 pub struct ChannelInviteRes {
     pub id: ChannelInviteId,
     pub token: QualifiedChannelInviteToken,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
+    pub shown_name: Option<String>,
+    pub shown_description: Option<String>,
     pub single_use: bool,
     pub expiry: Option<Timestamp>,
+    pub can_post: bool,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -281,13 +380,19 @@ pub struct ChannelInviteRes {
 pub struct ChannelInviteModify {
     pub id: ChannelInviteId,
     #[serde(default)]
-    pub memo_short: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    pub memo_long: Option<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub shown_name: Option<ModifyOption<String>>,
+    #[serde(default)]
+    pub shown_description: Option<ModifyOption<String>>,
     #[serde(default)]
     pub single_use: Option<bool>,
     #[serde(default)]
     pub expiry: Option<ModifyOption<Timestamp>>,
+    #[serde(default)]
+    pub can_post: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -304,8 +409,9 @@ pub struct ChannelInviteList;
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ContactRes {
     pub id: Identity,
-    pub memo_short: String,
-    pub memo_long: String,
+    pub name: String,
+    pub description: String,
+    pub portrait: Option<crate::interface::shared::FileRef>,
 }
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -316,9 +422,11 @@ pub struct ContactList;
 pub struct ContactModify {
     pub id: Identity,
     #[serde(default)]
-    pub memo_short: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    pub memo_long: Option<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub portrait: Option<ModifyOption<crate::interface::shared::Portrait>>,
 }
 
 // Message
@@ -328,7 +436,13 @@ pub struct MessagePush {
     pub client_id: MessageClientId,
     pub channel: QualifiedChannelId,
     pub identity: Identity,
+    #[serde(default = "message_rel_default")]
+    pub rel: crate::interface::shared::MessageRel,
     pub body: String,
+}
+
+fn message_rel_default() -> crate::interface::shared::MessageRel {
+    return crate::interface::shared::MessageRel::None;
 }
 
 reqresp!(pub proto {
@@ -349,10 +463,13 @@ reqresp!(pub proto {
     ChannelCreate(ChannelCreate) => ChannelRes,
     ChannelJoinChannel(ChannelJoinChannel) => ChannelRes,
     ChannelJoinIdentity(ChannelJoinIdentity) => ChannelRes,
+    ChannelAdd(ChannelAdd) => ChannelRes,
+    ChannelJoinPreview(ChannelJoinPreview) => ChannelJoinPreviewRes,
     ChannelModify(ChannelModify) => ChannelRes,
     ChannelDelete(ChannelDelete) =>(),
     ChannelList(ChannelList) => Vec < ChannelRes >,
-    ChannelMemberList(ChannelMemberList) => Vec < Identity >,
+    ChannelMemberList(ChannelMemberList) => Vec < ChannelMemberRes >,
+    ChannelMemberModify(ChannelMemberModify) =>(),
     ChannelMemberDelete(ChannelMemberDelete) =>(),
     ChannelInviteCreate(ChannelInviteCreate) => ChannelInviteRes,
     ChannelInviteModify(ChannelInviteModify) => ChannelInviteRes,
@@ -428,13 +545,20 @@ pub struct SnapMessage {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct SnapPageRes {
-    pub latest_activity: ActivityPageOffsetPos,
+    pub latest_activity: Option<ActivityPageOffsetPos>,
     pub messages: Vec<SnapMessage>,
 }
 
 // # GET/Path data
 //
 // ---
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum GetResp<T> {
+    Ok(T),
+    OwnerUnreachable,
+}
+
 pub trait PathReqTrait: Sized {
     type Resp: DeserializeOwned;
 
@@ -442,15 +566,15 @@ pub trait PathReqTrait: Sized {
     fn serialize_path(&self) -> String;
 }
 
-fn serialize_path(x: impl IntoIterator<Item = String>) -> String {
-    return x.into_iter().map(|x| format!("/{}", urlencoding::encode(&x))).collect::<Vec<_>>().join("");
+pub fn serialize_path(x: impl IntoIterator<Item = String>) -> String {
+    return x.into_iter().map(|x| urlencoding::encode(&x).into_owned()).collect::<Vec<_>>().join("/");
 }
 
-fn deserialize_path<'a>(x: &'a str) -> impl Iterator<Item = Cow<'a, str>> {
+pub fn deserialize_path<'a>(x: &'a str) -> impl Iterator<Item = Cow<'a, str>> {
     return x.split("/").map(|x| urlencoding::decode(x).unwrap_or(std::borrow::Cow::Borrowed(x)));
 }
 
-fn confirm_path_const<'a>(segs: &mut dyn Iterator<Item = Cow<'a, str>>, want: &str) -> Result<(), String> {
+pub fn confirm_path_const<'a>(segs: &mut dyn Iterator<Item = Cow<'a, str>>, want: &str) -> Result<(), String> {
     let next = segs.next();
     let Some(x) = next.as_ref().map(|x| x.as_ref()) else {
         return Err(format!("Path missing segment [{}]", want));
@@ -461,14 +585,14 @@ fn confirm_path_const<'a>(segs: &mut dyn Iterator<Item = Cow<'a, str>>, want: &s
     return Ok(());
 }
 
-fn confirm_path_empty<'a>(segs: &mut dyn Iterator<Item = Cow<'a, str>>) -> Result<(), String> {
+pub fn confirm_path_empty<'a>(segs: &mut dyn Iterator<Item = Cow<'a, str>>) -> Result<(), String> {
     if segs.next().is_some() {
         return Err(format!("Unrecognized extra path segments"));
     }
     return Ok(());
 }
 
-fn confirm_path_element<
+pub fn confirm_path_element<
     'a,
     E: std::fmt::Display,
     T: FromStr<Err = E>,
@@ -585,6 +709,82 @@ impl PathReqTrait for SnapByClientId {
     }
 }
 
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct OutboxEntry {
+    pub sender: Identity,
+    pub client_id: MessageClientId,
+    pub created: Timestamp,
+    pub id: MessageId,
+    pub rel: crate::interface::shared::MessageRel,
+    pub body: String,
+}
+
+pub struct OutboxList {
+    pub channel: QualifiedChannelId,
+}
+
+const PATH_PREFIX_OUTBOX: &str = "outbox";
+
+impl PathReqTrait for OutboxList {
+    type Resp = Vec<OutboxEntry>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_OUTBOX)?;
+        let out = OutboxList { channel: QualifiedChannelId {
+            identity: confirm_path_element(&mut parts, "channel identity")?,
+            channel: ChannelId(confirm_path_element(&mut parts, "channel")?),
+        } };
+        confirm_path_empty(&mut parts)?;
+        return Ok(out);
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path(
+            [PATH_PREFIX_OUTBOX.to_string(), self.channel.identity.to_string(), self.channel.channel.0.to_string()],
+        );
+    }
+}
+
+pub struct MessageIdByClientId {
+    pub channel: QualifiedChannelId,
+    pub client_id: MessageClientId,
+}
+
+const PATH_PREFIX_MESSAGE_ID_BY_CLIENT_ID: &str = "message_id_by_client_id";
+
+impl PathReqTrait for MessageIdByClientId {
+    type Resp = Option<MessageId>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_MESSAGE_ID_BY_CLIENT_ID)?;
+        let out = MessageIdByClientId {
+            channel: QualifiedChannelId {
+                identity: confirm_path_element(&mut parts, "channel identity")?,
+                channel: ChannelId(confirm_path_element(&mut parts, "channel")?),
+            },
+            client_id: MessageClientId(confirm_path_element(&mut parts, "message client id")?),
+        };
+        confirm_path_empty(&mut parts)?;
+        return Ok(out);
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path(
+            [
+                PATH_PREFIX_MESSAGE_ID_BY_CLIENT_ID.to_string(),
+                self.channel.identity.to_string(),
+                self.channel.channel.0.to_string(),
+                self.client_id.0.to_string(),
+            ],
+        );
+    }
+}
+
 pub struct SnapPageContainingTime {
     pub channel: QualifiedChannelId,
     pub time: Timestamp,
@@ -665,7 +865,7 @@ pub struct ActivityLatestAll;
 const PATH_PREFIX_ACTIVITY_LATEST_ALL: &str = "activity_latest_all";
 
 impl PathReqTrait for ActivityLatestAll {
-    type Resp = HashMap<QualifiedChannelId, ActivityOffset>;
+    type Resp = Vec<(QualifiedChannelId, ActivityOffset)>;
 
     fn deserialize_path(path: &str) -> Result<Self, String> {
         let mut parts = deserialize_path(path);
@@ -730,25 +930,55 @@ impl PathReqTrait for GetActivityPage {
     }
 }
 
-pub struct GetPortrait {
-    pub identity: Identity,
+pub struct GetFile {
+    pub hash: crate::interface::shared::FileHash,
 }
 
-const PATH_PREFIX_PORTRAIT: &str = "portrait";
+const PATH_PREFIX_FILE: &str = "file";
 
-impl PathReqTrait for GetPortrait {
+impl PathReqTrait for GetFile {
     type Resp = Vec<u8>;
 
     fn deserialize_path(path: &str) -> Result<Self, String> {
         let mut parts = deserialize_path(path);
         confirm_path_const(&mut parts, "")?;
-        confirm_path_const(&mut parts, PATH_PREFIX_PORTRAIT)?;
-        let out = GetPortrait { identity: confirm_path_element(&mut parts, "identity")? };
+        confirm_path_const(&mut parts, PATH_PREFIX_FILE)?;
+        let out = GetFile { hash: confirm_path_element(&mut parts, "hash")? };
         confirm_path_empty(&mut parts)?;
         return Ok(out);
     }
 
     fn serialize_path(&self) -> String {
-        return serialize_path([PATH_PREFIX_PORTRAIT.to_string(), self.identity.to_string()]);
+        return serialize_path([PATH_PREFIX_FILE.to_string(), self.hash.to_string()]);
+    }
+}
+
+pub struct GetJoinPreviewFile {
+    pub url: crate::interface::wire::kwaurl::KwaUrl,
+    pub hash: crate::interface::shared::FileHash,
+}
+
+const PATH_PREFIX_JOIN_PREVIEW_FILE: &str = "join_preview_file";
+
+impl PathReqTrait for GetJoinPreviewFile {
+    type Resp = Vec<u8>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_JOIN_PREVIEW_FILE)?;
+        let url: String = confirm_path_element(&mut parts, "url")?;
+        let out = GetJoinPreviewFile {
+            url: crate::interface::wire::kwaurl::KwaUrl::from_string(&url)?,
+            hash: confirm_path_element(&mut parts, "hash")?,
+        };
+        confirm_path_empty(&mut parts)?;
+        return Ok(out);
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path(
+            [PATH_PREFIX_JOIN_PREVIEW_FILE.to_string(), self.url.to_string(), self.hash.to_string()],
+        );
     }
 }

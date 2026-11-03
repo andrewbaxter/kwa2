@@ -36,6 +36,7 @@ pub struct Ws_<S: Serialize + DeserializeOwned, R: Serialize + DeserializeOwned>
     ws: WaitVal<WebSocket>,
     ws_state: Cell<ScopeValue>,
     handler: Box<dyn Fn(&Ws<S, R>, R) -> ()>,
+    open_handler: Box<dyn Fn(&Ws<S, R>) -> ()>,
     log: Rc<dyn Log>,
 }
 
@@ -57,18 +58,18 @@ impl<S: 'static + Serialize + DeserializeOwned, R: 'static + Serialize + Deseria
         base_url: &str,
         path: impl ToString,
         notify_handler: impl 'static + Fn(&Ws<S, R>, R) -> (),
-    ) -> Self {
+        open_handler: impl 'static + Fn(&Ws<S, R>) -> (),
+    ) -> Result<Self, String> {
         let path = path.to_string();
-        let noschema_base_url = shed!{
+        let url = shed!{
             if let Some(u) = base_url.strip_prefix("http://") {
-                break u;
+                break format!("ws://{}{}", u, path);
             };
             if let Some(u) = base_url.strip_prefix("https://") {
-                break u;
+                break format!("wss://{}{}", u, path);
             };
-            panic!();
+            return Err(format!("Unsupported base url scheme for websocket: [{}]", base_url));
         };
-        let url = format!("wss://{}{}", noschema_base_url, path);
 
         fn connect<
             S: 'static + Serialize + DeserializeOwned,
@@ -94,6 +95,7 @@ impl<S: 'static + Serialize + DeserializeOwned, R: 'static + Serialize + Deseria
                         state.log.log_js("DEBUG Got websocket open event", ev);
                         let state = Ws(state);
                         state.0.ws.set(Some(ws));
+                        (state.0.open_handler)(&state);
                     }
                 }),
                 EventListener::new(&ws, "message", {
@@ -168,10 +170,11 @@ impl<S: 'static + Serialize + DeserializeOwned, R: 'static + Serialize + Deseria
             ws: WaitVal::new(),
             ws_state: Cell::new(scope_any(())),
             handler: Box::new(notify_handler),
+            open_handler: Box::new(open_handler),
             log: log.clone(),
         }));
         connect(out.clone());
-        return out;
+        return Ok(out);
     }
 
     pub async fn send(&self, data: S) {

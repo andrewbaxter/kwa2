@@ -1,6 +1,10 @@
 use {
     crate::{
-        chat::ChatState,
+        chat::{
+            ChatState,
+            CopyStage,
+            new_message_copy,
+        },
         chat_entry::{
             ChatEntry,
             ChatFeedId,
@@ -23,19 +27,22 @@ use {
             state,
         },
     },
-    defer::defer,
-    flowcontrol::ta_return,
     futures::channel::oneshot,
     jiff::Timestamp,
     lunk::EventGraph,
-    rooting::scope_any,
-    shared::interface::shared::QualifiedChannelId,
+    shared::interface::shared::{
+        MessageClientId,
+        QualifiedChannelId,
+    },
     spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
+        collections::BTreeMap,
         ops::Bound,
         rc::Rc,
+        str::FromStr,
     },
+    web_sys::FileSystemDirectoryHandle,
 };
 
 struct OutboxFeed_ {
@@ -64,58 +71,55 @@ impl OutboxFeed {
         }));
     }
 
-    pub fn notify(&self, eg: EventGraph) {
-        let pivot;
-        {
-            let Some(parent) = self.0.parent.borrow().as_ref().unwrap().upgrade() else {
-                return;
-            };
-            let Some(pivot1) =
-                parent.want_after(ChatFeedId::Outbox((self.0.sender.clone(), self.0.id.clone()))) else {
-                    return;
-                };
-            pivot = pivot1;
+    fn feed_id(&self) -> ChatFeedId {
+        return ChatFeedId::Outbox((self.0.sender.clone(), self.0.id.clone()));
+    }
+
+    pub fn add_sent(&self, client_id: MessageClientId, body: String) {
+        let parent = self.0.parent.borrow().as_ref().unwrap().upgrade().unwrap();
+        let Some(pivot) = parent.want_after(self.feed_id()) else {
+            return;
+        };
+        let stamp = Timestamp::from_str(&client_id.0).unwrap();
+        parent.respond_entries_after(&self.feed_id(), &pivot, vec![self.create_entry(&stamp, client_id, body)], true);
+    }
+
+    fn create_entry(&self, k: &Timestamp, client_id: MessageClientId, body: String) -> Rc<ChatEntry> {
+        return new_message_copy(
+            &self.0.chat_state,
+            CopyStage::Device,
+            (self.0.id.clone(), self.0.sender.clone(), client_id.clone()),
+            None,
+            ChatTime {
+                stamp: *k,
+                id: ChatTimeId::Outbox(client_id),
+            },
+            body,
+        );
+    }
+
+    async fn load_sources(&self) -> BTreeMap<Timestamp, FileSystemDirectoryHandle> {
+        return opfs_channel_dir_entries(&opfs_outbox_channel_dir(&self.0.sender, &self.0.id).await).await;
+    }
+
+    async fn create_entries<'a>(
+        &self,
+        sources: impl Iterator<Item = (&'a Timestamp, &'a FileSystemDirectoryHandle)>,
+    ) -> Vec<Rc<ChatEntry>> {
+        let mut out = vec![];
+        for (k, v) in sources {
+            match opfs_read_json::<OutboxMessage>(v, OPFS_FILENAME_MAIN).await {
+                Ok(main) => out.push(self.create_entry(k, main.client_id, main.body)),
+                Err(e) => {
+                    state().log.log(&format!("Error processing outbox entry, skipping: {}", e));
+                },
+            }
         }
-        self.request_after(eg, pivot);
+        return out;
     }
 }
 
 const WANT_COUNT: usize = 10;
-
-fn create_entry(
-    chat_state: &Rc<ChatState>,
-    channel: &QualifiedChannelId,
-    sender: &Identity,
-    k: &Timestamp,
-    main: OutboxMessage,
-) -> Rc<ChatEntry> {
-    let entry = ChatEntry::new_message(
-        //. .
-        sender.clone(),
-        ChatTime {
-            stamp: *k,
-            id: ChatTimeId::Outbox(main.client_id.clone()),
-        },
-        main.body,
-        scope_any(defer({
-            let channel = channel.clone();
-            let idem = main.client_id.clone();
-            let sender = sender.clone();
-            let chat_state = Rc::downgrade(chat_state);
-            move || {
-                let Some(chat_state) = chat_state.upgrade() else {
-                    return;
-                };
-                chat_state.entry_outbox_lookup.borrow_mut().remove(&(channel.clone(), sender.clone(), idem.clone()));
-            }
-        })),
-    );
-    chat_state
-        .entry_outbox_lookup
-        .borrow_mut()
-        .insert((channel.clone(), sender.clone(), main.client_id.clone()), entry.clone());
-    return entry;
-}
 
 impl Feed<ChatEntry> for OutboxFeed {
     fn set_parent(&self, parent: WeakInfinite<ChatEntry>) {
@@ -128,44 +132,19 @@ impl Feed<ChatEntry> for OutboxFeed {
         *self.0.pulling_around.borrow_mut() = Some(spawn_rooted_log("Outbox feed, request around", {
             let self1 = self.clone();
             async move {
-                let opfs_root = opfs_outbox_channel_dir(&self1.0.sender, &self1.0.id).await;
-                let opfs_entries = opfs_channel_dir_entries(&opfs_root).await;
-                let mut early_entries = vec![];
-                for (
-                    k,
-                    v,
-                ) in opfs_entries.range((Bound::Unbounded, Bound::Included(time.stamp))).rev().take(WANT_COUNT) {
-                    match async {
-                        ta_return!((), String);
-                        let main = opfs_read_json::<OutboxMessage>(v, OPFS_FILENAME_MAIN).await?;
-                        early_entries.push(create_entry(&self1.0.chat_state, &self1.0.id, &self1.0.sender, k, main));
-                        return Ok(());
-                    }.await {
-                        Ok(()) => { },
-                        Err(e) => {
-                            state().log.log(&format!("Error processing outbox entry, skipping: {}", e));
-                            continue;
-                        },
-                    };
-                }
-                let mut late_entries = vec![];
-                for (
-                    k,
-                    v,
-                ) in opfs_entries.range((Bound::Excluded(time.stamp), Bound::Unbounded)).take(WANT_COUNT) {
-                    match async {
-                        ta_return!((), String);
-                        let main = opfs_read_json::<OutboxMessage>(v, OPFS_FILENAME_MAIN).await?;
-                        late_entries.push(create_entry(&self1.0.chat_state, &self1.0.id, &self1.0.sender, k, main));
-                        return Ok(());
-                    }.await {
-                        Ok(()) => { },
-                        Err(e) => {
-                            state().log.log(&format!("Error processing outbox entry, skipping: {}", e));
-                            continue;
-                        },
-                    };
-                }
+                let sources = self1.load_sources().await;
+                let mut early_entries =
+                    self1
+                        .create_entries(
+                            sources.range((Bound::Unbounded, Bound::Included(time.stamp))).rev().take(WANT_COUNT),
+                        )
+                        .await;
+                let late_entries =
+                    self1
+                        .create_entries(
+                            sources.range((Bound::Excluded(time.stamp), Bound::Unbounded)).take(WANT_COUNT),
+                        )
+                        .await;
                 let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                     return Ok(());
                 };
@@ -173,13 +152,7 @@ impl Feed<ChatEntry> for OutboxFeed {
                 let late_stop = late_entries.len() < WANT_COUNT;
                 early_entries.reverse();
                 early_entries.extend(late_entries);
-                parent.respond_entries_around(
-                    &ChatFeedId::Outbox((self1.0.sender.clone(), self1.0.id.clone())),
-                    &time,
-                    early_entries,
-                    early_stop,
-                    late_stop,
-                );
+                parent.respond_entries_around(&self1.feed_id(), &time, early_entries, early_stop, late_stop);
                 return Ok(());
             }
         }));
@@ -189,33 +162,18 @@ impl Feed<ChatEntry> for OutboxFeed {
         *self.0.pulling_before.borrow_mut() = Some(spawn_rooted_log("Outbox feed, request before", {
             let self1 = self.clone();
             async move {
-                let opfs_channel_dir = opfs_outbox_channel_dir(&self1.0.sender, &self1.0.id).await;
-                let opfs_entries = opfs_channel_dir_entries(&opfs_channel_dir).await;
-                let mut entries = vec![];
-                for (k, v) in opfs_entries.range((Bound::Unbounded, Bound::Excluded(time.stamp))).rev().take(10) {
-                    match async {
-                        ta_return!((), String);
-                        let main = opfs_read_json::<OutboxMessage>(v, OPFS_FILENAME_MAIN).await?;
-                        entries.push(create_entry(&self1.0.chat_state, &self1.0.id, &self1.0.sender, k, main));
-                        return Ok(());
-                    }.await {
-                        Ok(()) => { },
-                        Err(e) => {
-                            state().log.log(&format!("Error processing outbox entry, skipping: {}", e));
-                            continue;
-                        },
-                    };
-                }
+                let sources = self1.load_sources().await;
+                let entries =
+                    self1
+                        .create_entries(
+                            sources.range((Bound::Unbounded, Bound::Excluded(time.stamp))).rev().take(WANT_COUNT),
+                        )
+                        .await;
                 let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                     return Ok(());
                 };
                 let stop = entries.len() < WANT_COUNT;
-                parent.respond_entries_before(
-                    &ChatFeedId::Outbox((self1.0.sender.clone(), self1.0.id.clone())),
-                    &time,
-                    entries,
-                    stop,
-                );
+                parent.respond_entries_before(&self1.feed_id(), &time, entries, stop);
                 return Ok(());
             }
         }));
@@ -225,34 +183,18 @@ impl Feed<ChatEntry> for OutboxFeed {
         *self.0.pulling_after.borrow_mut() = Some(spawn_rooted_log("Outbox feed, request after", {
             let self1 = self.clone();
             async move {
-                let opfs_channel_dir = opfs_outbox_channel_dir(&self1.0.sender, &self1.0.id).await;
-                let opfs_entries = opfs_channel_dir_entries(&opfs_channel_dir).await;
-                const WANT_COUNT: usize = 10;
-                let mut entries = vec![];
-                for (k, v) in opfs_entries.range((Bound::Unbounded, Bound::Excluded(time.stamp))).take(10) {
-                    match async {
-                        ta_return!((), String);
-                        let main = opfs_read_json::<OutboxMessage>(v, OPFS_FILENAME_MAIN).await?;
-                        entries.push(create_entry(&self1.0.chat_state, &self1.0.id, &self1.0.sender, k, main));
-                        return Ok(());
-                    }.await {
-                        Ok(()) => { },
-                        Err(e) => {
-                            state().log.log(&format!("Error processing outbox entry, skipping: {}", e));
-                            continue;
-                        },
-                    };
-                }
+                let sources = self1.load_sources().await;
+                let entries =
+                    self1
+                        .create_entries(
+                            sources.range((Bound::Excluded(time.stamp), Bound::Unbounded)).take(WANT_COUNT),
+                        )
+                        .await;
                 let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                     return Ok(());
                 };
                 let stop = entries.len() < WANT_COUNT;
-                parent.respond_entries_after(
-                    &ChatFeedId::Outbox((self1.0.sender.clone(), self1.0.id.clone())),
-                    &time,
-                    entries,
-                    stop,
-                );
+                parent.respond_entries_after(&self1.feed_id(), &time, entries, stop);
                 return Ok(());
             }
         }));

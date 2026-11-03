@@ -2,6 +2,8 @@
 /// <reference path="style_export2.d.ts" />
 {
   const presentation = {};
+  const scriptUrl = /** @type {HTMLScriptElement} */ (document.currentScript)
+    .src;
 
   ///////////////////////////////////////////////////////////////////////////////
   // xx Utility, globals
@@ -76,6 +78,13 @@
   const globalStyleRoot = /** @type { CSSStyleRule } */ (
     globalStyle.cssRules[globalStyle.cssRules.length - 1]
   ).style;
+  for (const rule of [
+    `@font-face { font-family: "I"; src: url("MaterialSymbolsRounded.woff2"); }`,
+    `@font-face { font-family: "X"; src: url("KleeOne-Regular.ttf"); font-weight: 400; font-style: normal; }`,
+    `@font-face { font-family: "X"; src: url("KleeOne-SemiBold.ttf"); font-weight: 600; font-style: normal; }`,
+  ]) {
+    globalStyle.insertRule(rule, globalStyle.cssRules.length);
+  }
   const lightClause = "(prefers-color-scheme: light)";
   const globalStyleMediaLight =
     /** @type { CSSMediaRule } */
@@ -221,6 +230,7 @@
     "rgb(30, 30, 30)",
     "rgb(244, 255, 255)",
   );
+  const varCQr = vs("c-qr", "black", "white");
   const varCForegroundChatButton = vs(
     "c-foreground-chat-button",
     "rgba(86, 103, 220, 1)",
@@ -257,6 +267,7 @@
   const varOIcon = "0.75";
 
   const varFMenu = "14pt";
+  const varFCodeScale = "1.15em";
   const varFHeadBar = "13pt";
 
   const varSHeadButton = "0.7cm";
@@ -265,9 +276,12 @@
   const varSPortrait = "1.5cm";
   const varSChatControlsButton = "0.6cm";
   const varSMenuIcon = "1cm";
+  const varSTopButtonIcon = "0.7cm";
+  const varSFormButtonIcon = "0.47cm";
 
   const varPPage = "0.3cm";
   const varPSmall = "0.2cm";
+  const varPIconButton = "0.07cm";
   const varPChatEntry = "0.2cm";
   const varPChatSpinner = "0.15cm";
   const varPBubblePadding = "0.18cm";
@@ -282,6 +296,8 @@
 
   const varRPortrait = "0.2cm";
   const varRBubble = "0.3cm";
+  const varRInput = "0.2cm";
+  const varRSelectable = "0.1cm";
 
   // xx State classes
 
@@ -300,6 +316,19 @@
     /** @type { Presentation["classStateHidden"]} */ () => ({
       value: classStateHidden,
     });
+
+  // xx Text classes
+
+  const classCode = s("code", {
+    "": (s) => {
+      s.fontFamily = "monospace, monospace";
+      s.fontSize = varFCodeScale;
+      s.pointerEvents = "initial";
+    },
+  });
+  presentation.classCode = /** @type { Presentation["classCode"]} */ () => ({
+    value: classCode,
+  });
 
   ///////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: all
@@ -575,6 +604,7 @@ svg.spinner4 path {
                 s.justifyContent = "stretch";
                 s.height = "100dvh";
                 s.overflowY = "scroll";
+                s.pointerEvents = "initial";
                 s.gridRow = "1";
               },
               wide: (s) => {
@@ -628,6 +658,7 @@ svg.spinner4 path {
                       s.justifyContent = "stretch";
                       s.height = "100dvh";
                       s.overflowY = "scroll";
+                      s.pointerEvents = "initial";
                     },
                   }),
                 ],
@@ -681,23 +712,25 @@ svg.spinner4 path {
       s.height = varSMenuIcon;
     },
   });
-  const onwhiteSelectableStyle = s("top_selectable", {
-    "": (s) => {
-      s.borderRadius = "0.1cm";
-      s.border = `${varLThin} solid transparent`;
-      s.pointerEvents = "initial";
-    },
-    [`:hover`]: (s) => {
-      s.backgroundColor = varCBackgroundDark;
-    },
-    [`.${classStateSelected}:hover`]: (s) => {
-      s.backgroundColor = `color-mix(in srgb, ${varCBackgroundDark} 50%, transparent)`;
-      s.borderColor = varCBackgroundDark;
-    },
-    [`.${classStateSelected}`]: (s) => {
-      s.backgroundColor = varCBackgroundDark;
-    },
-  });
+  const onwhiteSelectableRules =
+    /** @type { { [s: string]: (r: CSSStyleDeclaration) => void } } */ ({
+      "": (s) => {
+        s.borderRadius = varRSelectable;
+        s.border = `${varLThin} solid transparent`;
+        s.pointerEvents = "initial";
+      },
+      [`:hover`]: (s) => {
+        s.backgroundColor = varCBackgroundDark;
+      },
+      [`.${classStateSelected}:hover`]: (s) => {
+        s.backgroundColor = `color-mix(in srgb, ${varCBackgroundDark} 50%, transparent)`;
+        s.borderColor = varCBackgroundDark;
+      },
+      [`.${classStateSelected}`]: (s) => {
+        s.backgroundColor = varCBackgroundDark;
+      },
+    });
+  const onwhiteSelectableStyle = s("top_selectable", onwhiteSelectableRules);
 
   const unreadStyle = s("unread", {
     "": (s) => {
@@ -739,23 +772,39 @@ svg.spinner4 path {
     },
   });
   const leafMenuTextUnread =
-    /** @type (args: {text: string})=> {all: HTMLElement[], unread: HTMLElement} */ (
+    /** @type (args: {text: string})=> {all: HTMLElement[], text: HTMLElement, unread: HTMLElement} */ (
       args,
     ) => {
+      const text = e(
+        "span",
+        { textContent: args.text },
+        {
+          styles_: [menuTextStyle],
+        },
+      );
       const unread = e("div", {}, { styles_: [unreadStyle, classStateHidden] });
       return {
-        all: [
-          e(
-            "span",
-            { textContent: args.text },
-            {
-              styles_: [menuTextStyle],
-            },
-          ),
-          unread,
-        ],
+        all: [text, unread],
+        text: text,
         unread: unread,
       };
+    };
+  const portraitClipStyle = s("portrait_clip", {
+    "": (s) => {
+      s.borderRadius = varRPortrait;
+    },
+  });
+  const menuImage =
+    /** @type {(args: {image?: string, generatedImage?: string}) => {src: string, styles: string[]} | null} */ (
+      args,
+    ) => {
+      if (args.image != null) {
+        return { src: args.image, styles: [portraitClipStyle] };
+      }
+      if (args.generatedImage != null) {
+        return { src: args.generatedImage, styles: [] };
+      }
+      return null;
     };
   const menuTextUnreadOuterStyles = [
     contHboxStyle,
@@ -769,52 +818,60 @@ svg.spinner4 path {
       },
     }),
   ];
+  presentation.leafMenuLinkImage =
+    /** @type { Presentation["leafMenuLinkImage"] } */ (args) => {
+      const image = menuImage(args);
+      if (image == null) {
+        throw new Error("leafMenuLinkImage requires image or generatedImage");
+      }
+      return {
+        root: e(
+          "img",
+          { src: image.src },
+          {
+            styles_: [
+              ...image.styles,
+              s("leaf_menu_link_icon", {
+                "": (s) => {
+                  s.minWidth = "0";
+                  s.minHeight = "0";
+                  s.maxWidth = "100%";
+                  s.maxHeight = "100%";
+                },
+              }),
+            ],
+          },
+        ),
+      };
+    };
   presentation.leafMenuLink = /** @type { Presentation["leafMenuLink"] } */ (
     args,
   ) => {
     /** @type { HTMLElement[] } */
     const children = [];
-    if (args.image != null) {
+    /** @type { HTMLElement | undefined } */
+    let imageOuter = undefined;
+    if (menuImage(args) != null) {
       const outerPadding = "0.1cm";
-      children.push(
-        e(
-          "div",
-          {},
-          {
-            styles_: [
-              s("leaf_menu_link_icon_outer", {
-                "": (s) => {
-                  s.gridColumn = "1";
-                  s.display = "grid";
-                  s.alignItems = "center";
-                  s.justifyItems = "center";
-                  s.padding = outerPadding;
-                },
-              }),
-            ],
-            children_: [
-              e(
-                "img",
-                { src: args.image },
-                {
-                  styles_: [
-                    s("leaf_menu_link_icon", {
-                      "": (s) => {
-                        s.borderRadius = varRPortrait;
-                        s.borderRadius = "0.2cm";
-                        s.minWidth = "0";
-                        s.minHeight = "0";
-                        s.maxWidth = "100%";
-                        s.maxHeight = "100%";
-                      },
-                    }),
-                  ],
-                },
-              ),
-            ],
-          },
-        ),
+      imageOuter = e(
+        "div",
+        {},
+        {
+          styles_: [
+            s("leaf_menu_link_icon_outer", {
+              "": (s) => {
+                s.gridColumn = "1";
+                s.display = "grid";
+                s.alignItems = "center";
+                s.justifyItems = "center";
+                s.padding = outerPadding;
+              },
+            }),
+          ],
+          children_: [presentation.leafMenuLinkImage(args).root],
+        },
       );
+      children.push(imageOuter);
     }
     const textUnread = leafMenuTextUnread({ text: args.text });
     children.push(
@@ -846,11 +903,20 @@ svg.spinner4 path {
                 s.alignItems = "center";
                 s.maxWidth = "100%";
               },
+              [`.${classStateSelected}>.${onwhiteSelectableStyle}`]: (s) => {
+                s.backgroundColor = varCBackgroundDark;
+              },
+              [`.${classStateSelected}>.${onwhiteSelectableStyle}:hover`]: (s) => {
+                s.backgroundColor = `color-mix(in srgb, ${varCBackgroundDark} 50%, transparent)`;
+                s.borderColor = varCBackgroundDark;
+              },
             }),
           ],
           children_: children,
         },
       ),
+      image: imageOuter,
+      text: textUnread.text,
       unread: textUnread.unread,
     };
   };
@@ -910,6 +976,30 @@ svg.spinner4 path {
       },
     });
     const textUnread = leafMenuTextUnread({ text: args.text });
+    /** @type { HTMLElement[] } */
+    const linkChildren = [];
+    const image = menuImage(args);
+    if (image != null) {
+      linkChildren.push(
+        e(
+          "img",
+          { src: image.src },
+          {
+            styles_: [
+              ...image.styles,
+              s("leaf_menu_group_icon", {
+                "": (s) => {
+                  s.width = s.height = `calc(${varSMenuIcon} - 0.2cm)`;
+                  s.marginRight = "0.2cm";
+                  s.flexShrink = "0";
+                },
+              }),
+            ],
+          },
+        ),
+      );
+    }
+    linkChildren.push(...textUnread.all);
     const link = e(
       "a",
       { href: args.link },
@@ -919,7 +1009,7 @@ svg.spinner4 path {
           menuItemStyle0,
           onwhiteSelectableStyle,
         ],
-        children_: textUnread.all,
+        children_: linkChildren,
       },
     );
     return {
@@ -975,6 +1065,7 @@ svg.spinner4 path {
       ),
       group: groupEl,
       link: link,
+      text: textUnread.text,
       unread: textUnread.unread,
     };
   };
@@ -982,7 +1073,123 @@ svg.spinner4 path {
   presentation.leafMenuCode = /** @type { Presentation["leafMenuCode"] } */ (
     args,
   ) => {
-    return { root: e("code", { textContent: args.text }, {}) };
+    const copy = e(
+      "button",
+      { title: "Copy" },
+      {
+        styles_: [
+          onwhiteSelectableStyle,
+          s("leaf_menu_code_copy", {
+            "": (s) => {
+              s.display = "grid";
+              s.justifyItems = "center";
+              s.alignItems = "center";
+              s.padding = varPIconButton;
+            },
+          }),
+        ],
+        children_: [
+          leafSvg({
+            text: svgIconCopy,
+            height: varSFormButtonIcon,
+            extraStyles: [
+              s("leaf_menu_code_copy_icon", {
+                "": (s) => {
+                  s.opacity = varOIcon;
+                },
+              }),
+            ],
+          }),
+        ],
+      },
+    );
+    return {
+      root: e(
+        "div",
+        {},
+        {
+          styles_: [
+            contHboxStyle,
+            s("leaf_menu_code", {
+              "": (s) => {
+                s.gridColumn = "1 / 3";
+                s.alignItems = "center";
+                s.gap = varPSmall;
+                s.minWidth = "0";
+              },
+            }),
+          ],
+          children_: [
+            e(
+              "code",
+              { textContent: args.text },
+              {
+                styles_: [
+                  classCode,
+                  s("leaf_menu_code_text", {
+                    "": (s) => {
+                      s.flexGrow = "1";
+                      s.flexShrink = "1";
+                      s.minWidth = "0";
+                      s.overflow = "hidden";
+                      s.textOverflow = "ellipsis";
+                      s.whiteSpace = "nowrap";
+                      s.backgroundColor = varCBackgroundDark;
+                      s.borderRadius = varRSelectable;
+                      s.padding = "0.1cm 0.2cm";
+                      s.userSelect = "all";
+                    },
+                  }),
+                ],
+              },
+            ),
+            copy,
+          ],
+        },
+      ),
+      copy: copy,
+    };
+  };
+
+  presentation.leafMenuQr = /** @type { Presentation["leafMenuQr"] } */ (
+    args,
+  ) => {
+    const image = e(
+      "div",
+      {},
+      {
+        styles_: [
+          s("leaf_menu_qr_image", {
+            "": (s) => {
+              s.width = "min(10cm, 100%)";
+              s.aspectRatio = "1";
+              s.backgroundColor = varCQr;
+              s.maskSize = "100% 100%";
+            },
+          }),
+        ],
+      },
+    );
+    image.style.maskImage = `url(${JSON.stringify(`data:image/svg+xml,${encodeURIComponent(args.svg)}`)})`;
+    return {
+      root: e(
+        "div",
+        {},
+        {
+          styles_: [
+            s("leaf_menu_qr", {
+              "": (s) => {
+                s.gridColumn = "1 / 3";
+                s.display = "grid";
+                s.justifyItems = "center";
+                s.padding = "0.1cm 0";
+              },
+            }),
+          ],
+          children_: [image],
+        },
+      ),
+    };
   };
 
   // /////////////////////////////////////////////////////////////////////////////
@@ -1179,7 +1386,7 @@ svg.spinner4 path {
           children_: [
             leafSvg({
               text: svg,
-              height: "0.7cm",
+              height: varSTopButtonIcon,
               extraStyles: [
                 s("cont_page_top_generic_button", {
                   "": (s) => {
@@ -1400,9 +1607,22 @@ svg.spinner4 path {
       <path d="M 0.78052,4.93516 8.7233,5.16878" /> `;
   const svgIconBall = `<circle cx="5.0333862" cy="5.0154572" r="1.4575578" /> `;
   const svgIconOpened = `<path d="M 2.38412,3.35249 4.97757,6.69406 7.52115,3.30262" /> `;
+  const svgIconUp = `<path d="M 2.38412,6.64751 4.97757,3.30594 7.52115,6.69738" /> `;
+  const svgIconCopy = `<rect x="3.5" y="1.5" width="5" height="5.5" rx="0.8" />
+      <path d="M 3.5,3 H 2.3 Q 1.5,3 1.5,3.8 V 7.7 Q 1.5,8.5 2.3,8.5 H 5.7 Q 6.5,8.5 6.5,7.7 V 7" /> `;
   const svgIconClosed = `<path d="M 3.31381,2.55686 6.54797,4.97396 3.31381,7.42511" /> `;
   const svgIconMessage = `<path        d="M 1.0451019,9.0882899 C 1.881773,6.8346388 0.9807132,6.4106016 1.0025419,4.7517916 1.0270541,2.8890523 2.5540914,1.2417577 5.1503393,1.2344073 7.7465873,1.2270557 9.178426,2.801595 9.1403442,4.7019845 9.1022618,6.6023739 7.7306769,8.016585 5.0856639,8.0388243 3.4647788,8.0524527 2.7929907,7.4356862 1.0451019,9.0882899 Z"
 />`;
+
+  const svgMaskImage = /** @type {(text: string, size: string) => string} */ (
+    text,
+    size,
+  ) => {
+    const sizeFloat = Number.parseFloat(removeSuffix("cm", size));
+    const thicknessFloat = Number.parseFloat(removeSuffix("cm", varLVeryThin));
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" fill="none" stroke="black" stroke-width="${(thicknessFloat / sizeFloat) * 10}">${text}</svg>`;
+    return `url(${JSON.stringify(`data:image/svg+xml,${encodeURIComponent(svg)}`)})`;
+  };
 
   presentation.leafNonchatHeadBarCenterPlaceholder =
     /** @type { Presentation["leafNonchatHeadBarCenterPlaceholder"] } */ (
@@ -1462,6 +1682,15 @@ svg.spinner4 path {
       s.color = varCForegroundError;
     },
   });
+  const formGridStyle = /** @type { (s: CSSStyleDeclaration) => void } */ (
+    s,
+  ) => {
+    s.display = "grid";
+    s.gridTemplateColumns = "minmax(0, max-content) minmax(60%, 1fr)";
+    s.columnGap = varPSmall;
+    s.rowGap = varPSmall;
+    s.alignItems = "center";
+  };
   presentation.contPageForm = /** @type { Presentation["contPageForm"] } */ (
     args,
   ) => {
@@ -1499,6 +1728,103 @@ svg.spinner4 path {
           s("cont_page_form_inner", {
             "": (s) => {
               s.position = "relative";
+              s.width = varSPageNarrow;
+              s.alignSelf = "center";
+            },
+            ...Object.fromEntries(
+              Object.entries(onwhiteSelectableRules).map(([suffix, f]) => [
+                ` .rf_button_icon${suffix}`,
+                f,
+              ]),
+            ),
+            ">*": (s) => {
+              s.gridColumn = "2";
+            },
+            ">form": formGridStyle,
+            " :where(form, .rf_subform, .group) > *": (s) => {
+              s.gridColumn = "2";
+            },
+            " .rf_label": (s) => {
+              s.gridColumn = "1";
+            },
+            " .rf_vec_item_header": (s) => {
+              s.gridColumn = "1 / -1";
+            },
+            " .rf_vec": (s) => {
+              s.gridColumn = "1 / -1";
+            },
+            " .rf_file": (s) => {
+              s.display = "flex";
+              s.flexWrap = "wrap";
+              s.alignItems = "center";
+              s.gap = varPSmall;
+            },
+            " .rf_file>input": (s) => {
+              s.flexGrow = "1";
+            },
+            " .rf_file_preview": (s) => {
+              s.flexBasis = "100%";
+              s.display = "grid";
+              s.justifyItems = "center";
+            },
+            " .rf_file_preview:empty": (s) => {
+              s.display = "none";
+            },
+            " .rf_file_preview>*": (s) => {
+              s.width = "min(10cm, 100%)";
+            },
+            " .rf_button_icon::before": (s) => {
+              s.content = JSON.stringify("");
+              s.display = "block";
+              s.width = varSFormButtonIcon;
+              s.height = varSFormButtonIcon;
+              s.margin = varPIconButton;
+              s.backgroundColor = "currentColor";
+              s.maskSize = "100% 100%";
+              s.opacity = varOIcon;
+            },
+            " .rf_button_add::before": (s) => {
+              s.maskImage = svgMaskImage(svgIconAdd, varSFormButtonIcon);
+            },
+            " .rf_button_delete::before": (s) => {
+              s.maskImage = svgMaskImage(svgIconNope, varSFormButtonIcon);
+            },
+            " .rf_button_move_up::before": (s) => {
+              s.maskImage = svgMaskImage(svgIconUp, varSFormButtonIcon);
+            },
+            " .rf_button_move_down::before": (s) => {
+              s.maskImage = svgMaskImage(svgIconOpened, varSFormButtonIcon);
+            },
+            " .rf_subform": (s) => {
+              formGridStyle(s);
+              s.gridColumn = "1 / -1";
+              s.borderLeft = `${varLThin} solid ${varCBackgroundGlass}`;
+              s.paddingLeft = varPSmall;
+            },
+            " .rf_input_big": (s) => {
+              s.gridColumn = "1 / -1";
+            },
+            " :is(input, select, [contenteditable])": (s) => {
+              s.border = `${varLThin} solid ${varCBackgroundGlass}`;
+              s.borderRadius = varRInput;
+              s.padding = varPSmall;
+            },
+            " .rf_error": (s) => {
+              s.display = "block";
+              s.gridColumn = "1 / -1";
+              s.color = varCForegroundError;
+            },
+            " .rf_error:empty": (s) => {
+              s.display = "none";
+            },
+            " .disable_hide": (s) => {
+              s.display = "none";
+            },
+            " .rf_subform.disable_hide": (s) => {
+              s.display = "none";
+            },
+            " .rf_error.disable_hide": (s) => {
+              s.display = "none";
             },
           }),
         ],
@@ -1660,6 +1986,7 @@ svg.spinner4 path {
                 s.padding = `0.1cm`;
                 s.borderRadius = "0.4cm";
                 s.position = "relative";
+                s.isolation = "isolate";
                 s.overflow = "hidden";
               },
             }),
@@ -1857,9 +2184,15 @@ svg.spinner4 path {
   // Entry
   const chatEntrySelectSpecificStyle = "chat_entry_selectable_specific";
   const chatEntrySelectableStyle = s("chat_entry_selectable", {
-    "": (s) => {},
+    "": (s) => {
+      s.pointerEvents = "initial";
+      s.cursor = "pointer";
+    },
+    [` .${chatEntrySelectSpecificStyle}`]: (s) => {
+      s.border = `${varLThin} solid transparent`;
+    },
     [`.${classStateSelected} .${chatEntrySelectSpecificStyle}`]: (s) => {
-      s.border = `${varLThin} solid ${varCNotifyBright}`;
+      s.borderColor = varCNotifyBright;
     },
   });
   presentation.contChatEntryModeMessage =
@@ -1915,6 +2248,23 @@ svg.spinner4 path {
         outer3.style.alignItems = "end";
       }
 
+      const portrait = e(
+        "div",
+        {},
+        {
+          styles_: [
+            s("chat_portrait", {
+              "": (s) => {
+                s.display = "grid";
+                s.flexShrink = "0";
+                s.width = varSPortrait;
+                s.height = varSPortrait;
+              },
+            }),
+          ],
+        },
+      );
+
       // The smallest box containing the actual content
       const outer2 = e(
         "div",
@@ -1931,21 +2281,7 @@ svg.spinner4 path {
             }),
           ],
           children_: [
-            e(
-              "img",
-              { src: args.image },
-              {
-                styles_: [
-                  s("chat_portrait", {
-                    "": (s) => {
-                      s.borderRadius = varRPortrait;
-                      s.width = varSPortrait;
-                      s.height = varSPortrait;
-                    },
-                  }),
-                ],
-              },
-            ),
+            portrait,
             outer3,
           ],
         },
@@ -1997,7 +2333,32 @@ svg.spinner4 path {
             children_: [outer1],
           },
         ),
+        portrait: portrait,
         body: body,
+      };
+    };
+  presentation.leafChatEntryPortrait =
+    /** @type { Presentation["leafChatEntryPortrait"] } */ (args) => {
+      const image = menuImage(args);
+      if (image == null) {
+        throw new Error("leafChatEntryPortrait requires image or generatedImage");
+      }
+      return {
+        root: e(
+          "img",
+          { src: image.src },
+          {
+            styles_: [
+              ...image.styles,
+              s("chat_portrait_image", {
+                "": (s) => {
+                  s.width = "100%";
+                  s.height = "100%";
+                },
+              }),
+            ],
+          },
+        ),
       };
     };
   presentation.leafChatEntryModeMessageTextBlock =
@@ -2201,7 +2562,7 @@ svg.spinner4 path {
   addEventListener("DOMContentLoaded", (_) => {
     const resetStyle = e(
       "link",
-      { rel: "stylesheet", href: "style_reset.css" },
+      { rel: "stylesheet", href: new URL("style_reset.css", scriptUrl).href },
       {},
     );
     document.head.appendChild(resetStyle);

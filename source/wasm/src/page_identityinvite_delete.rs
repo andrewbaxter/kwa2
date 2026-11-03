@@ -16,7 +16,6 @@ use {
     },
     lunk::ProcessingContext,
     rooting::{
-        el,
         El,
     },
     shared::interface::{
@@ -40,11 +39,11 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity, id: &IdentityInvit
         greq_api_identityinvites(id, false).map({
             let eg = pc.eg();
             move |local| (
-                el("div"),
+                None,
                 vec![
                     style_export::leaf_form_text(
                         style_export::LeafFormTextArgs {
-                            text: format!("Are you sure you want to delete invite [{}]", local.res.memo_short),
+                            text: format!("Are you sure you want to delete invite [{}]", local.res.name),
                         },
                     ).root
                 ],

@@ -41,12 +41,13 @@ pub fn build(_pc: &mut ProcessingContext, identity: &Identity) -> El {
     // Build the immediately available options
     for old_invite in old_invites.clone() {
         let out = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-            text: old_invite.res.memo_short.clone(),
+            text: old_invite.res.name.clone(),
             link: ministate_octothorpe(&Ministate::IdentityInvite(MinistateIdentityInvite {
                 identity: identity.clone(),
                 invite: old_invite.res.id,
             })),
             image: None,
+            generated_image: None,
         });
         lookup_el_invites.borrow_mut().insert(old_invite.res.id, out.root.clone());
         inv_elements.ref_push(out.root);
@@ -79,12 +80,13 @@ pub fn build(_pc: &mut ProcessingContext, identity: &Identity) -> El {
                         // nop
                     } else {
                         let next_el1 = style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                            text: new_invite.res.memo_short,
+                            text: new_invite.res.name,
                             link: ministate_octothorpe(&Ministate::IdentityInvite(MinistateIdentityInvite {
                                 identity: identity.clone(),
                                 invite: new_invite.res.id,
                             })),
                             image: None,
+                            generated_image: None,
                         });
                         new_els1.push(next_el1.root);
                     }
@@ -112,7 +114,7 @@ pub fn build(_pc: &mut ProcessingContext, identity: &Identity) -> El {
     // Other widgets, assemble and return
     let out = style_export::cont_page_menu(style_export::ContPageMenuArgs {
         head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
-            back_link: ministate_octothorpe(&Ministate::Top),
+            back_link: ministate_octothorpe(&Ministate::Identity(identity.clone())),
             center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
                 text: format!("Invites"),
                 link: None,

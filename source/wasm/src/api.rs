@@ -1,5 +1,9 @@
 use {
     crate::{
+        icon_gen::{
+            channel_icon,
+            identity_icon,
+        },
         js::LogJsErr,
         state::{
             Ministate,
@@ -9,38 +13,34 @@ use {
     },
     gloo::{
         storage::{
-            LocalStorage,
             SessionStorage,
             Storage,
         },
+        timers::future::TimeoutFuture,
         utils::window,
     },
     reqwasm::http::{
         Request,
         Response,
     },
-    shared::interface::wire::c2s::{
-        self,
-        PathReqTrait,
+    shared::interface::{
+        shared::{
+            FileRef,
+            QualifiedChannelId,
+        },
+        wire::{
+            c2s::{
+                self,
+                GetResp,
+                PathReqTrait,
+            },
+            kwaurl::KwaUrl,
+        },
     },
     spaghettinuum::interface::identity::Identity,
     wasm_bindgen::UnwrapThrowExt,
     web_sys::Url,
 };
-
-pub const LOCALSTORAGE_LOGGED_IN: &str = "want_logged_in";
-
-pub fn want_logged_in() -> bool {
-    return LocalStorage::get::<bool>(LOCALSTORAGE_LOGGED_IN).is_ok();
-}
-
-pub fn set_want_logged_in() {
-    LocalStorage::set(LOCALSTORAGE_LOGGED_IN, true).log(&state().log, &"Error remembering logged in pref");
-}
-
-pub fn unset_want_logged_in() {
-    LocalStorage::delete(LOCALSTORAGE_LOGGED_IN);
-}
 
 pub fn redirect_login() -> ! {
     if !SessionStorage::get::<Ministate>(SESSIONSTORAGE_POST_REDIRECT_MINISTATE).is_ok() {
@@ -53,7 +53,7 @@ pub fn redirect_login() -> ! {
     window()
         .location()
         .set_href(
-            &Url::new_with_base(&format!("oidc?url={}", urlencoding::encode(&base_url)), base_url).unwrap().href(),
+            &Url::new_with_base("oidc", base_url).unwrap().href(),
         )
         .unwrap();
     unreachable!();
@@ -70,7 +70,7 @@ pub fn redirect_logout() -> ! {
     window()
         .location()
         .set_href(
-            &Url::new_with_base(&format!("logout?url={}", urlencoding::encode(&base_url)), base_url).unwrap().href(),
+            &Url::new_with_base("logout", base_url).unwrap().href(),
         )
         .unwrap();
     unreachable!();
@@ -78,7 +78,7 @@ pub fn redirect_logout() -> ! {
 
 async fn read_resp(resp: Response) -> Result<Vec<u8>, String> {
     let status = resp.status();
-    if status == 401 && want_logged_in() {
+    if status == 401 {
         redirect_login();
     }
     let body = match resp.binary().await {
@@ -128,28 +128,112 @@ pub async fn req_file(url: &str) -> Result<Vec<u8>, String> {
     return read_resp(resp).await;
 }
 
-pub async fn req_get<T: c2s::PathReqTrait>(req: T) -> Result<T::Resp, String> {
-    let req = Request::get(&format!("{}{}", state().env.base_url, req.serialize_path()));
-    let body = match req.send().await {
+pub async fn req_file_blob(url: &str, mime_type: &str) -> Result<web_sys::Blob, String> {
+    let body = req_file(url).await?;
+    return Ok(gloo::file::Blob::new_with_options(body.as_slice(), Some(mime_type)).into());
+}
+
+pub enum GetFailure {
+    Transient(String),
+    Permanent(String),
+}
+
+async fn get_once<T: c2s::PathReqTrait>(req: &T) -> Result<T::Resp, GetFailure> {
+    let resp = match Request::get(&format!("{}{}", state().env.base_url, req.serialize_path())).send().await {
         Ok(r) => r,
         Err(e) => {
-            return Err(format!("Failed to send request: {}", e));
+            return Err(GetFailure::Transient(format!("Failed to send request: {}", e)));
         },
     };
-    let body = read_resp(body).await?;
-    return Ok(
-        serde_json::from_slice::<T::Resp>(
-            &body,
-        ).map_err(
-            |e| format!(
+    let status = resp.status();
+    let body = match read_resp(resp).await {
+        Ok(b) => b,
+        Err(e) => {
+            if status >= 500 {
+                return Err(GetFailure::Transient(e));
+            } else {
+                return Err(GetFailure::Permanent(e));
+            }
+        },
+    };
+    match serde_json::from_slice::<GetResp<T::Resp>>(
+        &body,
+    ).map_err(
+        |e| GetFailure::Permanent(
+            format!(
                 "Error parsing JSON response from server response: {}\nBody: {}",
                 e,
                 String::from_utf8_lossy(&body)
             ),
-        )?,
-    );
+        ),
+    )? {
+        GetResp::Ok(v) => return Ok(v),
+        GetResp::OwnerUnreachable => return Err(GetFailure::Transient(format!("Channel owner unreachable"))),
+    }
 }
 
-pub fn portrait_url(identity: &Identity) -> String {
-    return format!("{}{}", state().env.base_url, c2s::GetPortrait { identity: identity.clone() }.serialize_path());
+pub async fn req_get<T: c2s::PathReqTrait>(req: T) -> Result<T::Resp, String> {
+    match get_once(&req).await {
+        Ok(v) => return Ok(v),
+        Err(GetFailure::Transient(e)) | Err(GetFailure::Permanent(e)) => return Err(e),
+    }
+}
+
+const GET_RETRY_INITIAL_MS: u32 = 1000;
+const GET_RETRY_MAX_MS: u32 = 60 * 1000;
+
+pub async fn req_get_retry<T: c2s::PathReqTrait>(req: T) -> Result<T::Resp, String> {
+    let mut backoff = GET_RETRY_INITIAL_MS;
+    loop {
+        match get_once(&req).await {
+            Ok(v) => return Ok(v),
+            Err(GetFailure::Permanent(e)) => return Err(e),
+            Err(GetFailure::Transient(_)) => {
+                TimeoutFuture::new(backoff).await;
+                backoff = (backoff * 2).min(GET_RETRY_MAX_MS);
+            },
+        }
+    }
+}
+
+pub fn file_url(file: &FileRef) -> String {
+    return format!("{}{}", state().env.base_url, c2s::GetFile { hash: file.hash.clone() }.serialize_path());
+}
+
+pub struct MenuImage {
+    pub image: Option<String>,
+    pub generated_image: Option<String>,
+}
+
+pub fn channel_image(id: &QualifiedChannelId, portrait: &Option<FileRef>) -> MenuImage {
+    match portrait {
+        Some(p) => return MenuImage {
+            image: Some(file_url(p)),
+            generated_image: None,
+        },
+        None => return MenuImage {
+            image: None,
+            generated_image: Some(channel_icon(id)),
+        },
+    }
+}
+
+pub fn identity_image(id: &Identity, portrait: &Option<FileRef>) -> MenuImage {
+    match portrait {
+        Some(p) => return MenuImage {
+            image: Some(file_url(p)),
+            generated_image: None,
+        },
+        None => return MenuImage {
+            image: None,
+            generated_image: Some(identity_icon(id)),
+        },
+    }
+}
+
+pub fn join_preview_file_url(url: &KwaUrl, file: &FileRef) -> String {
+    return format!("{}{}", state().env.base_url, c2s::GetJoinPreviewFile {
+        url: url.clone(),
+        hash: file.hash.clone(),
+    }.serialize_path());
 }

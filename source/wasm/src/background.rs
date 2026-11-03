@@ -12,6 +12,7 @@ use {
         outbox::{
             OPFS_FILENAME_MAIN,
             OutboxMessage,
+            OutboxMessageReplyTo,
             opfs_channel_dir_entries,
             opfs_outbox,
         },
@@ -24,18 +25,26 @@ use {
     },
     flowcontrol::ta_return,
     futures::future::join_all,
-    gloo::timers::callback::Interval,
+    gloo::timers::{
+        callback::Interval,
+        future::TimeoutFuture,
+    },
     lunk::EventGraph,
     rooting::spawn_rooted,
     shared::interface::{
         shared::{
             ChannelId,
             MessageClientId,
+            MessageId,
+            MessageRel,
             QualifiedChannelId,
         },
-        wire::c2s::{
-            self,
-            ActivityOffset,
+        wire::{
+            c2s::{
+                self,
+                ActivityOffset,
+            },
+            s2c::OutboxChange,
         },
     },
     spaghettinuum::interface::identity::Identity,
@@ -43,15 +52,51 @@ use {
     web_sys::FileSystemDirectoryHandle,
 };
 
+const PUSH_BACKOFF_INITIAL_MS: u32 = 1000;
+const PUSH_BACKOFF_MAX_MS: u32 = 5 * 60 * 1000;
+
+async fn resolve_outbox_reply_target(
+    channel: &QualifiedChannelId,
+    target: &MessageClientId,
+) -> Result<MessageId, String> {
+    let Some(found) = req_get(c2s::MessageIdByClientId {
+        channel: channel.clone(),
+        client_id: target.clone(),
+    }).await? else {
+        return Err(format!("Reply target outbox message [{:?}] not yet accepted in channel [{:?}]", target, channel));
+    };
+    return Ok(found);
+}
+
+pub fn handle_outbox_change(eg: &EventGraph, change: OutboxChange) {
+    let state = state();
+    let current_chat = state.current_chat.borrow();
+    let Some(c) = &*current_chat else {
+        return;
+    };
+    let cf = c.chat_state2.channel_lookup.borrow();
+    let Some(f) = cf.get(&change.channel) else {
+        return;
+    };
+    let outboxes = f.server_outboxes.borrow();
+    let Some(o) = outboxes.get(&change.sender) else {
+        return;
+    };
+    o.notify(eg.clone());
+}
+
 pub fn trigger_push() {
     let state1 = state();
     let mut bg_sending = state1.bg_pushing.borrow_mut();
     if bg_sending.is_some() {
+        state1.bg_pushing_dirty.set(true);
         return;
     }
     *bg_sending = Some(spawn_rooted({
         async move {
+            let mut backoff = PUSH_BACKOFF_INITIAL_MS;
             loop {
+                state().bg_pushing_dirty.set(false);
                 let mut bg = vec![];
                 let outbox_dir = opfs_outbox().await;
                 for (sender_ident, ident_dir) in opfs_list_dir(&outbox_dir).await {
@@ -114,14 +159,24 @@ pub fn trigger_push() {
                                 let ident = sender_ident.clone();
                                 async move {
                                     ta_return!((), String);
-                                    for (timestamp, message) in opfs_channel_dir_entries(&channel_dir).await {
+                                    for (timestamp, message_dir) in opfs_channel_dir_entries(&channel_dir).await {
                                         let message =
-                                            opfs_read_json::<OutboxMessage>(&message, OPFS_FILENAME_MAIN).await?;
+                                            opfs_read_json::<OutboxMessage>(&message_dir, OPFS_FILENAME_MAIN).await?;
                                         let client_id = MessageClientId::from_timestamp(timestamp);
+                                        let rel = match &message.reply_to {
+                                            None => MessageRel::None,
+                                            Some(OutboxMessageReplyTo::Channel(target)) => MessageRel::ReplyTo(
+                                                target.message.clone(),
+                                            ),
+                                            Some(OutboxMessageReplyTo::Outbox(target)) => MessageRel::ReplyTo(
+                                                resolve_outbox_reply_target(&channel, target).await?,
+                                            ),
+                                        };
                                         req_post_json(&state().env.base_url, c2s::MessagePush {
                                             client_id: client_id.clone(),
                                             channel: channel.clone(),
                                             identity: ident.clone(),
+                                            rel: rel,
                                             body: message.body,
                                         })
                                             .await
@@ -158,7 +213,13 @@ pub fn trigger_push() {
                         },
                     }
                 }) {
-                    break;
+                    backoff = PUSH_BACKOFF_INITIAL_MS;
+                    if !state().bg_pushing_dirty.get() {
+                        break;
+                    }
+                } else {
+                    TimeoutFuture::new(backoff).await;
+                    backoff = (backoff * 2).min(PUSH_BACKOFF_MAX_MS);
                 }
             }
             *state().bg_pushing.borrow_mut() = None;
@@ -219,7 +280,7 @@ pub fn schedule_trigger_pull(eg: EventGraph) {
             async move {
                 ta_return!((), String);
                 let res = req_get(c2s::ActivityLatestAll {}).await?;
-                handle_notification(&eg, res.into_iter().collect());
+                handle_notification(&eg, res);
                 return Ok(());
             }
         }));

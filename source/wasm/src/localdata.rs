@@ -6,7 +6,10 @@ use {
             bg_val,
         },
         js::LogJsErr,
-        state::state,
+        state::{
+            state,
+            sync_identity_portraits,
+        },
     },
     flowcontrol::shed,
     gloo::storage::{
@@ -14,6 +17,7 @@ use {
         Storage,
     },
     jiff::Timestamp,
+    lunk::ProcessingContext,
     rooting::{
         ScopeValue,
         scope_any,
@@ -35,6 +39,7 @@ use {
             self,
             ChannelGroupRes,
             ChannelInviteRes,
+            ChannelMemberRes,
             ChannelRes,
             ContactRes,
             IdentityInviteRes,
@@ -88,6 +93,13 @@ fn get_stored_values<
     return out;
 }
 
+fn set_stored_values(k: &str, values: &impl Serialize) {
+    LocalStorage::set(k, values).log(&state().log, &format_args!("Failed to set local storage at key [{}]", k));
+    if k == LOCALSTORAGE_IDENTITIES || k == LOCALSTORAGE_CONTACTS {
+        state().eg.event(|pc| sync_identity_portraits(pc)).unwrap();
+    }
+}
+
 async fn req_api_values<
     'de,
     V: Serialize + DeserializeOwned,
@@ -118,7 +130,7 @@ async fn req_api_values<
             res: v,
         });
     }
-    LocalStorage::set(k, &out).log(&state().log, &"Failed to set local storage");
+    set_stored_values(k, &out);
     return Ok(out);
 }
 
@@ -142,15 +154,38 @@ impl<T: 'static + Clone> NowOrLater<T> {
         }
     }
 
-    pub fn then(self, f: impl 'static + FnOnce(Result<Option<T>, String>)) -> ScopeValue {
+    pub fn map_async<
+        U: 'static + Clone,
+    >(self, f: impl 'static + AsyncFnOnce(T) -> Result<U, String>) -> NowOrLater<U> {
+        return NowOrLater::Later(bg_val(async move {
+            let v = match self {
+                NowOrLater::Now(v) => v,
+                NowOrLater::Later(v) => match v.get().await? {
+                    Some(v) => v,
+                    None => return Ok(None),
+                },
+            };
+            return Ok(Some(f(v).await?));
+        }));
+    }
+
+    pub fn then(
+        self,
+        pc: &mut ProcessingContext,
+        f: impl 'static + FnOnce(&mut ProcessingContext, Result<Option<T>, String>),
+    ) -> ScopeValue {
         match self {
             NowOrLater::Now(v) => {
-                f(Ok(Some(v)));
+                f(pc, Ok(Some(v)));
                 return scope_any(());
             },
-            NowOrLater::Later(v) => return scope_any(spawn_rooted(async move {
-                f(v.get().await);
-            })),
+            NowOrLater::Later(v) => {
+                let eg = pc.eg();
+                return scope_any(spawn_rooted(async move {
+                    let v = v.get().await;
+                    eg.event(|pc| f(pc, v)).unwrap();
+                }));
+            },
         }
     }
 }
@@ -213,7 +248,7 @@ async fn ensure_api_value<
     } else {
         values.push(new_value);
     }
-    LocalStorage::set(k, values).log(&state().log, &format_args!("Failed to set local storage at key [{}]", k));
+    set_stored_values(k, &values);
 }
 
 async fn delete_api_value<
@@ -223,7 +258,7 @@ async fn delete_api_value<
 >(k: &str, access_id: fn(&V) -> K, v: V) {
     let values = get_stored_values(k, access_id, None);
     let values = values.iter().filter(|x| access_id(&x.res) != access_id(&v)).collect::<Vec<_>>();
-    LocalStorage::set(k, values).log(&state().log, &format_args!("Failed to set local storage at key [{}]", k));
+    set_stored_values(k, &values);
 }
 
 // Identity
@@ -325,13 +360,13 @@ fn key_localstorage_channelmembers(channel: &QualifiedChannelId) -> String {
     return format!("{}__{}__{}", PREFIX_LOCALSTORAGE_CHANNELMEMBERS, channel.identity.to_string(), channel.channel.0);
 }
 
-pub type LocalChannelMember = LocalValue<Identity>;
+pub type LocalChannelMember = LocalValue<ChannelMemberRes>;
 
 pub fn get_stored_api_channelmembers(
     channel: &QualifiedChannelId,
     touch: Option<&Identity>,
 ) -> Vec<LocalChannelMember> {
-    return get_stored_values(&key_localstorage_channelmembers(channel), |x| x.clone(), touch);
+    return get_stored_values(&key_localstorage_channelmembers(channel), |x| x.identity.clone(), touch);
 }
 
 pub async fn req_api_channelmembers(
@@ -341,13 +376,26 @@ pub async fn req_api_channelmembers(
     return req_api_values(
         &key_localstorage_channelmembers(channel),
         c2s::ChannelMemberList { channel: channel.clone() },
-        |x| x.clone(),
+        |x| x.identity.clone(),
         touch,
     ).await;
 }
 
+pub fn get_or_req_api_channelmember(channel: &QualifiedChannelId, id: &Identity) -> NowOrLater<LocalChannelMember> {
+    return get_or_req_api_value(
+        &key_localstorage_channelmembers(channel),
+        c2s::ChannelMemberList { channel: channel.clone() },
+        |x| x.identity.clone(),
+        id.clone(),
+        true,
+    );
+}
+
 pub async fn delete_channelmember(channel: &QualifiedChannelId, v: Identity) {
-    delete_api_value(&key_localstorage_channelmembers(channel), |x| x.clone(), v).await;
+    let k = key_localstorage_channelmembers(channel);
+    let values = get_stored_values(&k, |x: &ChannelMemberRes| x.identity.clone(), None);
+    let values = values.iter().filter(|x| x.res.identity != v).collect::<Vec<_>>();
+    set_stored_values(&k, &values);
 }
 
 // Channel invites

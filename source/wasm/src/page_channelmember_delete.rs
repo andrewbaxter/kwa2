@@ -17,7 +17,6 @@ use {
     lunk::ProcessingContext,
     rooting::{
         El,
-        el,
     },
     shared::interface::wire::c2s::{
         self,
@@ -37,11 +36,11 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelMember) -> El {
             let eg = pc.eg();
             let channel = s.channel.clone();
             move |local| (
-                el("div"),
+                None,
                 vec![
                     style_export::leaf_form_text(
                         style_export::LeafFormTextArgs {
-                            text: format!("Are you sure you want to delete member [{}]", local.res.memo_short),
+                            text: format!("Are you sure you want to delete member [{}]", local.res.name),
                         },
                     ).root
                 ],

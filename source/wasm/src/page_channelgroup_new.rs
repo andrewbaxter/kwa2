@@ -18,10 +18,10 @@ use {
 
 #[derive(rooting_forms::Form)]
 struct Form_ {
-    #[title("Short memo")]
-    memo_short: String,
-    #[title("Extra memo")]
-    memo_long: String,
+    #[title("Name")]
+    name: String,
+    #[title("Description")]
+    description: String,
 }
 
 pub fn build(pc: &mut ProcessingContext) -> El {
@@ -33,7 +33,7 @@ pub fn build(pc: &mut ProcessingContext) -> El {
         pc,
         format!("New group"),
         Ministate::TopAdd,
-        form_els.error.unwrap(),
+        form_els.error,
         form_els.elements,
         async move |idem| {
             let Ok(new_values) = form_state.parse() else {
@@ -41,8 +41,8 @@ pub fn build(pc: &mut ProcessingContext) -> El {
             };
             req_post_json(&state().env.base_url, c2s::ChannelGroupCreate {
                 idem: Some(idem.to_string()),
-                memo_short: new_values.memo_short,
-                memo_long: new_values.memo_long,
+                name: new_values.name,
+                description: new_values.description,
             }).await?;
             pull_top(&eg).await;
             eg.event(|pc| {

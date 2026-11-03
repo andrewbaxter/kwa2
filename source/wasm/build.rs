@@ -111,6 +111,11 @@ fn main() {
             args: vec![],
             returns: vec![("value", &string_)],
         },
+        Func {
+            name: "classCode",
+            args: vec![],
+            returns: vec![("value", &string_)],
+        },
         // /////////////////////////////////////////////////////////////////////////////
         // xx Components, styles: all
         Func {
@@ -143,9 +148,14 @@ fn main() {
         // /////////////////////////////////////////////////////////////////////////////
         // xx Components, styles: menu, form, top
         Func {
+            name: "leafMenuLinkImage",
+            args: vec![("image", &optstring_), ("generatedImage", &optstring_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
             name: "leafMenuLink",
-            args: vec![("text", &string_), ("link", &string_), ("image", &optstring_)],
-            returns: vec![("root", &el_), ("unread", &el_)],
+            args: vec![("text", &string_), ("link", &string_), ("image", &optstring_), ("generatedImage", &optstring_)],
+            returns: vec![("root", &el_), ("image", &optel_), ("text", &el_), ("unread", &el_)],
         },
         Func {
             name: "leafMenuButton",
@@ -154,12 +164,17 @@ fn main() {
         },
         Func {
             name: "leafMenuGroup",
-            args: vec![("text", &string_), ("link", &string_), ("children", &arrel_)],
-            returns: vec![("root", &el_), ("group", &el_), ("link", &el_), ("unread", &el_)],
+            args: vec![("text", &string_), ("link", &string_), ("image", &optstring_), ("generatedImage", &optstring_), ("children", &arrel_)],
+            returns: vec![("root", &el_), ("group", &el_), ("link", &el_), ("text", &el_), ("unread", &el_)],
         },
         Func {
             name: "leafMenuCode",
             args: vec![("text", &string_)],
+            returns: vec![("root", &el_), ("copy", &el_)],
+        },
+        Func {
+            name: "leafMenuQr",
+            args: vec![("svg", &string_)],
             returns: vec![("root", &el_)],
         },
         // /////////////////////////////////////////////////////////////////////////////
@@ -272,8 +287,13 @@ fn main() {
         // Entry - message
         Func {
             name: "contChatEntryModeMessage",
-            args: vec![("left", &bool_), ("date", &string_), ("image", &string_)],
-            returns: vec![("root", &el_), ("body", &el_)],
+            args: vec![("left", &bool_), ("date", &string_)],
+            returns: vec![("root", &el_), ("portrait", &el_), ("body", &el_)],
+        },
+        Func {
+            name: "leafChatEntryPortrait",
+            args: vec![("image", &optstring_), ("generatedImage", &optstring_)],
+            returns: vec![("root", &el_)],
         },
         Func {
             name: "leafChatEntryModeMessageTextBlock",
@@ -397,7 +417,7 @@ fn main() {
         }
         let call =
             quote!(
-                js_call(& js_get(&js_get(&gloo::utils::window().into(), "sunwetPresentation"), #method_ts_name), &a);
+                js_call(& js_get(&js_get(&gloo::utils::window().into(), "kwaPresentation"), #method_ts_name), &a);
             );
         let rust_ret;
         let rust_ret_struct_declare;

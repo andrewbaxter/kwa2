@@ -25,44 +25,41 @@ use {
 
 #[derive(rooting_forms::Form)]
 struct Form_ {
-    #[title("Short memo")]
-    memo_short: String,
-    #[title("Extra memo")]
-    memo_long: String,
+    #[title("Name")]
+    name: String,
+    #[title("Description")]
+    description: String,
 }
 
 pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
     return build_nol_form(
         //. .
         pc,
-        &Ministate::ChannelGroup(MinistateChannelGroup {
-            id: id.clone(),
-            reset_id: None,
-        }),
+        &Ministate::ChannelGroupMenu(id.clone()),
         "Edit group",
         get_or_req_channelgroup(&pc.eg(), id, false).map({
             let eg = pc.eg();
             move |value| {
                 let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
-                    memo_short: value.memo_short.get(),
-                    memo_long: value.memo_long.get(),
+                    name: value.name.get(),
+                    description: value.description.get(),
                 }));
                 let form_state = Rc::new(form_state);
-                return (form_els.error.unwrap(), form_els.elements, async move |_idem| {
+                return (form_els.error, form_els.elements, async move |_idem| {
                     let Ok(new_values) = form_state.parse() else {
                         return Ok(());
                     };
                     let res = req_post_json(&state().env.base_url, c2s::ChannelGroupModify {
                         id: value.id.clone(),
-                        memo_short: if new_values.memo_short == *value.memo_short.borrow() {
+                        name: if new_values.name == *value.name.borrow() {
                             None
                         } else {
-                            Some(new_values.memo_short)
+                            Some(new_values.name)
                         },
-                        memo_long: if new_values.memo_long == *value.memo_long.borrow() {
+                        description: if new_values.description == *value.description.borrow() {
                             None
                         } else {
-                            Some(new_values.memo_long)
+                            Some(new_values.description)
                         },
                     }).await?;
                     pull_top(&eg).await;

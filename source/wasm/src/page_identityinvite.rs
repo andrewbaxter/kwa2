@@ -5,6 +5,7 @@ use {
         pageutil::{
             LazyPage,
             build_nol_menu,
+            build_url_menu_items,
         },
         state::{
             Ministate,
@@ -14,7 +15,13 @@ use {
     },
     lunk::ProcessingContext,
     rooting::El,
-    shared::interface::shared::IdentityInviteId,
+    shared::interface::{
+        shared::IdentityInviteId,
+        wire::kwaurl::{
+            KwaUrl,
+            KwaUrlIdentityInvite,
+        },
+    },
     spaghettinuum::interface::identity::Identity,
 };
 
@@ -28,12 +35,14 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity, id: &IdentityInvit
             let identity = identity.clone();
             move |local| LazyPage {
                 center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
-                    text: local.res.memo_short.clone(),
+                    text: local.res.name.clone(),
                     link: None,
                 }).root,
-                body: vec![
+                body: build_url_menu_items(&KwaUrl::IdentityInvite(KwaUrlIdentityInvite {
+                    identity: local.res.token.identity.clone(),
+                    code: local.res.token.token.0.clone(),
+                })).into_iter().chain([
                     //. .
-                    style_export::leaf_menu_code(style_export::LeafMenuCodeArgs { text: local.res.token.token.0.clone() }).root,
                     style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                         text: format!("Edit"),
                         link: ministate_octothorpe(&Ministate::IdentityInviteEdit(MinistateIdentityInvite {
@@ -41,6 +50,7 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity, id: &IdentityInvit
                             invite: local.res.id.clone(),
                         })),
                         image: None,
+                        generated_image: None,
                     }).root,
                     style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                         text: format!("Delete"),
@@ -49,8 +59,9 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity, id: &IdentityInvit
                             invite: local.res.id.clone(),
                         })),
                         image: None,
+                        generated_image: None,
                     }).root,
-                ],
+                ]).collect(),
             }
         },
     );

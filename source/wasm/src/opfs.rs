@@ -19,6 +19,8 @@ use {
         FileSystemDirectoryHandle,
         FileSystemFileHandle,
         FileSystemGetDirectoryOptions,
+        FileSystemGetFileOptions,
+        FileSystemRemoveOptions,
         FileSystemWritableFileStream,
     },
 };
@@ -95,12 +97,11 @@ pub async fn opfs_read_json<
 pub async fn opfs_write_json<
     T: Serialize,
 >(parent: &FileSystemDirectoryHandle, seg: &str, data: T) -> Result<(), String> {
-    let f =
-        FileSystemFileHandle::from(
-            JsFuture::from(parent.get_file_handle(seg))
-                .await
-                .map_err(|e| format!("Error getting file handle at seg [{}]: {:?}", seg, e.as_string()))?,
-        );
+    let f = FileSystemFileHandle::from(JsFuture::from(parent.get_file_handle_with_options(seg, &{
+        let x = FileSystemGetFileOptions::new();
+        x.set_create(true);
+        x
+    })).await.map_err(|e| format!("Error getting file handle at seg [{}]: {:?}", seg, e.as_string()))?);
     let w =
         FileSystemWritableFileStream::from(
             JsFuture::from(f.create_writable())
@@ -114,11 +115,18 @@ pub async fn opfs_write_json<
     )
         .await
         .map_err(|e| format!("Error writing message to opfs file at seg [{}] (2): {:?}", seg, e.as_string()))?;
+    JsFuture::from(w.close())
+        .await
+        .map_err(|e| format!("Error closing opfs file at seg [{}]: {:?}", seg, e.as_string()))?;
     return Ok(());
 }
 
 pub async fn opfs_delete(parent: &FileSystemDirectoryHandle, seg: &str) {
-    if let Err(e) = JsFuture::from(parent.remove_entry(seg)).await {
+    if let Err(e) = JsFuture::from(parent.remove_entry_with_options(seg, &{
+        let x = FileSystemRemoveOptions::new();
+        x.set_recursive(true);
+        x
+    })).await {
         state().log.log_js(&format!("Error deleting opfs entry at [{}]", seg), &e);
     }
 }

@@ -8,7 +8,8 @@ use {
         state::{
             Ministate,
             MinistateChannelInvite,
-            MinistateChannelSub,
+            MinistateChannelInviteNew,
+            MinistateChannelInviteNewFrom,
             goto_replace_ministate,
             state,
         },
@@ -18,7 +19,6 @@ use {
     rooting::El,
     rooting_forms::Form,
     shared::interface::{
-        shared::QualifiedChannelId,
         wire::c2s::{
             self,
         },
@@ -28,29 +28,44 @@ use {
 
 #[derive(rooting_forms::Form)]
 struct Form_ {
-    #[title("Short memo")]
-    memo_short: String,
-    #[title("Extra memo")]
-    memo_long: String,
+    #[title("Name")]
+    name: String,
+    #[title("Description")]
+    description: String,
+    #[title("Shown name")]
+    shown_name: Option<String>,
+    #[title("Shown description")]
+    shown_description: Option<String>,
     #[title("Single use")]
     single_use: bool,
     #[title("Expiry")]
     expiry: Option<Timestamp>,
+    #[title("Joiners can post")]
+    can_post: bool,
 }
 
-pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId) -> El {
+pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelInviteNew) -> El {
+    let channel = &s.channel;
     let eg = pc.eg();
-    let (form_els, form_state) = Form_::new_form("", None);
+    let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
+        name: String::new(),
+        description: String::new(),
+        shown_name: None,
+        shown_description: None,
+        single_use: false,
+        expiry: None,
+        can_post: true,
+    }));
     let form_state = Rc::new(form_state);
     return build_form(
         //. .
         pc,
         format!("New invite"),
-        Ministate::ChannelMenu(MinistateChannelSub {
-            id: channel.clone(),
-            own_identity: channel.identity.clone(),
-        }),
-        form_els.error.unwrap(),
+        match s.from {
+            MinistateChannelInviteNewFrom::Invites => Ministate::ChannelInvites(channel.clone()),
+            MinistateChannelInviteNewFrom::Members => Ministate::ChannelMembers(channel.clone()),
+        },
+        form_els.error,
         form_els.elements,
         {
             let channel = channel.clone();
@@ -61,10 +76,13 @@ pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId) -> El {
                 let res = req_post_json(&state().env.base_url, c2s::ChannelInviteCreate {
                     channel: channel.clone(),
                     idem: Some(idem.to_string()),
-                    memo_short: new_values.memo_short,
-                    memo_long: new_values.memo_long,
+                    name: new_values.name,
+                    description: new_values.description,
+                    shown_name: new_values.shown_name,
+                    shown_description: new_values.shown_description,
                     single_use: new_values.single_use,
                     expiry: new_values.expiry,
+                    can_post: new_values.can_post,
                 }).await?;
                 localdata::ensure_channelinvite(res.clone()).await;
                 eg.event(|pc| {

@@ -3,6 +3,7 @@ use {
         GoodOrmningCustomI64,
         GoodOrmningCustomString,
     },
+    jiff::Timestamp,
     shared::interface::shared::{
         AccountId,
         ChannelGroupId,
@@ -14,6 +15,20 @@ use {
     },
 };
 
+#[derive(Clone, Copy)]
+pub struct DbTimeMs(pub Timestamp);
+
+impl GoodOrmningCustomI64<DbTimeMs> for DbTimeMs {
+    fn to_sql(value: &DbTimeMs) -> i64 {
+        return value.0.as_millisecond();
+    }
+
+    fn from_sql(value: i64) -> Result<DbTimeMs, String> {
+        return Ok(DbTimeMs(Timestamp::from_millisecond(value).map_err(|e| e.to_string())?));
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct DbAccountId(pub AccountId);
 
 impl GoodOrmningCustomI64<DbAccountId> for DbAccountId {
@@ -40,6 +55,7 @@ impl GoodOrmningCustomString<DbIdentitySecret> for DbIdentitySecret {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct DbIdentity(pub Identity);
 
 impl GoodOrmningCustomString<DbIdentity> for DbIdentity {
@@ -52,6 +68,7 @@ impl GoodOrmningCustomString<DbIdentity> for DbIdentity {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct DbChannelGroupId(pub ChannelGroupId);
 
 impl GoodOrmningCustomI64<DbChannelGroupId> for DbChannelGroupId {
@@ -64,6 +81,7 @@ impl GoodOrmningCustomI64<DbChannelGroupId> for DbChannelGroupId {
     }
 }
 
+#[derive(Clone)]
 pub struct DbChannelId(pub ChannelId);
 
 impl GoodOrmningCustomString<DbChannelId> for DbChannelId {

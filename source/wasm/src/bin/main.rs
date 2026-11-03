@@ -18,10 +18,10 @@ use {
         Prim,
     },
     rooting::set_root,
-    serde::Deserialize,
     shared::interface::{
         wire::{
             s2c,
+            sw::FromSw,
         },
     },
     std::{
@@ -29,10 +29,12 @@ use {
         panic,
         rc::Rc,
     },
+    tokio::join,
     wasm::{
         async_::bg_val,
         background::{
             handle_notification,
+            handle_outbox_change,
             schedule_trigger_pull,
             trigger_push,
         },
@@ -48,14 +50,17 @@ use {
         localdata::{
             get_stored_api_channelgroups,
             get_stored_api_channels,
+            req_api_contacts,
+            req_api_identities,
         },
         page_top,
-        serviceworker_proto::FromSw,
         state::{
             LOCALSTORAGE_PWA_MINISTATE,
             Ministate,
             SESSIONSTORAGE_POST_REDIRECT_MINISTATE,
             STATE,
+            spawn_log,
+            sync_identity_portraits,
             State_,
             build_ministate,
             merge_top,
@@ -73,6 +78,7 @@ use {
     web_sys::{
         MessageEvent,
         ServiceWorkerRegistration,
+        VisibilityState,
     },
 };
 
@@ -85,25 +91,25 @@ pub fn main() {
         let env = scan_env(&log);
         let service_worker = bg_val(async {
             let sw =
-                JsFuture::from(window().navigator().service_worker().register("./serviceworker.js"))
+                JsFuture::from(window().navigator().service_worker().register("./serviceworker_entry.js"))
                     .await
                     .map_err(|e| format!("Error registering service worker: {:?}", e.as_string()))?;
             return Ok(sw.dyn_into::<ServiceWorkerRegistration>().unwrap());
         });
-        let root0 = style_export::cont_root(style_export::ContRootArgs { menu: page_top::build(pc) });
-        let root = root0.page;
 
         // Build app state
         STATE.with(|s| *s.borrow_mut() = Some(Rc::new(State_ {
             eg: pc.eg(),
             current_chat: Default::default(),
             service_worker: service_worker,
-            page_root: root.clone(),
+            page_root: Default::default(),
             lookup_channel: Default::default(),
             lookup_channelgroup: Default::default(),
+            stored_identity_portraits: Default::default(),
+            identity_portraits: Default::default(),
             unread_any: Prim::new(false),
             top: lunk::List::new(vec![]),
-            ministate: RefCell::new(shed!{
+            ministate: Prim::new(shed!{
                 'found _;
                 shed!{
                     let m = match SessionStorage::get::<Ministate>(SESSIONSTORAGE_POST_REDIRECT_MINISTATE) {
@@ -150,22 +156,35 @@ pub fn main() {
             log1: log1,
             log: log.clone(),
             bg_pushing: Default::default(),
+            bg_pushing_dirty: Default::default(),
             bg_pulling_interval: Default::default(),
             bg_pulling: Default::default(),
         })));
         let cs = get_stored_api_channels(None);
         let cgs = get_stored_api_channelgroups(None);
         merge_top(pc, cs, cgs);
+        sync_identity_portraits(pc);
+        spawn_log("Refreshing identities and contacts", async {
+            let (identities, contacts) = join!(req_api_identities(None), req_api_contacts(None));
+            identities?;
+            contacts?;
+            return Ok(());
+        });
+
+        // Build page skeleton (menu needs state + initial top data)
+        let root0 = style_export::cont_root(style_export::ContRootArgs { menu: page_top::build(pc) });
+        let root = root0.page;
+        state().page_root.set(root.clone()).ok().unwrap();
 
         // Load initial view
-        build_ministate(pc, &state().ministate.borrow());
+        let ministate = state().ministate.borrow().clone();
+        build_ministate(pc, &ministate);
 
         // React to further state changes
         EventListener::new(&window(), "popstate", {
             let eg = pc.eg();
             move |_e| eg.event(|pc| {
                 let ministate = read_ministate(&state().log);
-                *state().ministate.borrow_mut() = ministate.clone();
                 LocalStorage::set(
                     LOCALSTORAGE_PWA_MINISTATE,
                     &ministate,
@@ -180,14 +199,15 @@ pub fn main() {
                     ev
                         .dyn_ref::<MessageEvent>()
                         .expect("Got wrong event type in service worker message event handler");
-                let data =
-                    <JsValue as JsValueSerdeExt>::into_serde::<FromSw>(
-                        &ev.data(),
-                    ).expect("Got wrong data type from service worker");
-                match data {
-                    FromSw::Reload => {
-                        document().location().unwrap().reload().expect("Error triggering reload");
+                let data = match <JsValue as JsValueSerdeExt>::into_serde::<FromSw>(&ev.data()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        state().log.log(&format!("Received invalid message from service worker, skipping: {}", e));
+                        return;
                     },
+                };
+                match data {
+                    FromSw::Reload(_) => { },
                     FromSw::Notification(n) => {
                         handle_notification(&eg, vec![(n.channel, n.offset)]);
                     },
@@ -195,67 +215,59 @@ pub fn main() {
                 ev.data();
             }
         }).forget();
-        schedule_trigger_pull(pc.eg());
-        let ws: Rc<RefCell<Option<Ws<(), s2c::Notification>>>> = Rc::new(RefCell::new(None));
+        let ws: Rc<RefCell<Option<Ws<(), s2c::WsEvent>>>> = Rc::new(RefCell::new(None));
         let create_ws = {
             let ws = ws.clone();
             let eg = pc.eg();
             move || {
-                *ws.borrow_mut() = Some(Ws::new(state().log.clone(), &state().env.base_url, "", {
+                match Ws::new(state().log.clone(), &state().env.base_url, "", {
                     let eg = eg.clone();
-                    move |_ws, m: s2c::Notification| {
-                        handle_notification(&eg, vec![(m.channel, m.offset)]);
+                    move |_ws, m: s2c::WsEvent| {
+                        match m {
+                            s2c::WsEvent::Activity(n) => {
+                                handle_notification(&eg, vec![(n.channel, n.offset)]);
+                            },
+                            s2c::WsEvent::Outbox(o) => {
+                                handle_outbox_change(&eg, o);
+                            },
+                        }
                     }
-                }));
+                }, {
+                    let eg = eg.clone();
+                    move |_ws| {
+                        schedule_trigger_pull(eg.clone());
+                    }
+                }) {
+                    Ok(w) => {
+                        *ws.borrow_mut() = Some(w);
+                    },
+                    Err(e) => {
+                        state().log.log(&format!("Error creating websocket: {}", e));
+                    },
+                }
             }
         };
-        create_ws();
-        EventListener::new(&window(), "focus", {
+        if document().visibility_state() == VisibilityState::Visible {
+            schedule_trigger_pull(pc.eg());
+            create_ws();
+        }
+        EventListener::new(&document(), "visibilitychange", {
             let eg = pc.eg();
             move |_| {
-                schedule_trigger_pull(eg.clone());
-                create_ws();
-            }
-        }).forget();
-        EventListener::new(&window(), "blur", {
-            move |_| {
-                *state().bg_pulling_interval.borrow_mut() = None;
-                *ws.borrow_mut() = None;
+                match document().visibility_state() {
+                    VisibilityState::Visible => {
+                        schedule_trigger_pull(eg.clone());
+                        create_ws();
+                    },
+                    VisibilityState::Hidden => {
+                        *state().bg_pulling_interval.borrow_mut() = None;
+                        *ws.borrow_mut() = None;
+                    },
+                    _ => { },
+                }
             }
         }).forget();
         trigger_push();
-        root.ref_own(|_| (
-            //. .
-            EventListener::new(&window(), "message", |ev| {
-                let ev = ev.dyn_ref::<MessageEvent>().unwrap();
-
-                #[derive(Deserialize)]
-                #[serde(rename_all = "snake_case", deny_unknown_fields)]
-                enum Message {
-                    Log(String),
-                    Reload,
-                }
-
-                let message = match JsValueSerdeExt::into_serde::<Message>(&ev.data()) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        state().log.log(&format!("Error parsing js message: {}", e));
-                        return;
-                    },
-                };
-                match message {
-                    Message::Log(m) => {
-                        state().log.log(&format!("From service worker: {}", m));
-                    },
-                    Message::Reload => {
-                        window()
-                            .location()
-                            .reload()
-                            .log(&state().log, &"Error executing reload triggered by web worker.");
-                    },
-                }
-            }),
-        ));
 
         // Root and display
         set_root(vec![root0.root]);

@@ -16,10 +16,11 @@ use {
             ChatTimeId,
         },
         chat_feed_channel::ChannelFeed,
+        chat_controls::build_controls,
         chat_feed_controls::FeedControls,
         chat_feed_outbox::OutboxFeed,
+        chat_feed_server_outbox::ServerOutboxFeed,
         infinite::{
-            Entry,
             Infinite,
             InfiniteEls,
         },
@@ -96,6 +97,7 @@ enum PopulateResult {
 }
 
 fn populate(
+    pc: &mut ProcessingContext,
     id: &ChannelGroupId,
     inf: &Infinite<ChatEntry>,
     chat_state: &Rc<ChatState>,
@@ -105,17 +107,17 @@ fn populate(
 ) -> PopulateResult {
     struct TreeIdent {
         ident: Identity,
-        memo_short: Option<String>,
+        name: Option<String>,
     }
 
     struct Tree {
-        memo_short: String,
+        name: String,
         idents: Vec<TreeIdent>,
     }
 
     let mut idents = HashMap::new();
     for local_ident in local_identities {
-        idents.insert(local_ident.res.id.clone(), local_ident.res.memo_short.clone());
+        idents.insert(local_ident.res.id.clone(), local_ident.res.name.clone());
     }
     let mut tree = HashMap::<QualifiedChannelId, Tree>::new();
     for local_channel in local_channels {
@@ -123,29 +125,29 @@ fn populate(
             continue;
         }
         tree.entry(local_channel.res.id.clone()).or_insert_with(|| Tree {
-            memo_short: local_channel.res.memo_short.clone(),
+            name: local_channel.res.name.clone(),
             idents: Default::default(),
         }).idents.push(TreeIdent {
             ident: local_channel.res.own_identity.clone(),
-            memo_short: idents.get(&local_channel.res.own_identity).cloned(),
+            name: idents.get(&local_channel.res.own_identity).cloned(),
         });
     }
-    chat_state.channels_meta.borrow_mut().clear();
+    let mut channels_meta = vec![];
     let mut too_many_channels = chat_state2.channel_lookup.borrow().keys().cloned().collect::<HashSet<_>>();
     for (channel, channel_entry) in tree {
         too_many_channels.remove(&channel);
 
         // Build channel list entry
         for ident in &channel_entry.idents {
-            chat_state.channels_meta.borrow_mut().push((
+            channels_meta.push((
                 //. .
                 if channel_entry.idents.len() == 1 {
-                    channel_entry.memo_short.clone()
+                    channel_entry.name.clone()
                 } else {
                     format!(
                         "{} - {}",
-                        channel_entry.memo_short,
-                        ident.memo_short.clone().unwrap_or_else(|| ident.ident.to_string())
+                        channel_entry.name,
+                        ident.name.clone().unwrap_or_else(|| ident.ident.to_string())
                     )
                 },
                 ident.ident.clone(),
@@ -157,16 +159,22 @@ fn populate(
         let f_c = ChannelFeed::new(chat_state.clone(), channel.clone());
         inf.add_feed(ChatFeedId::Channel(channel.clone()), f_c.clone());
         let mut f_os = HashMap::new();
+        let mut f_sos = HashMap::new();
         for ident in &channel_entry.idents {
             let f_o = OutboxFeed::new(chat_state.clone(), ident.ident.clone(), channel.clone());
             inf.add_feed(ChatFeedId::Outbox((ident.ident.clone(), channel.clone())), f_o.clone());
             f_os.insert(ident.ident.clone(), f_o);
+            let f_so = ServerOutboxFeed::new(chat_state.clone(), ident.ident.clone(), channel.clone());
+            inf.add_feed(ChatFeedId::ServerOutbox((ident.ident.clone(), channel.clone())), f_so.clone());
+            f_sos.insert(ident.ident.clone(), f_so);
         }
         chat_state2.channel_lookup.borrow_mut().insert(channel.clone(), ChannelFeeds {
             channel: f_c,
             outboxes: RefCell::new(f_os),
+            server_outboxes: RefCell::new(f_sos),
         });
     }
+    chat_state.channels_meta.set(pc, channels_meta);
     if !too_many_channels.is_empty() {
         return PopulateResult::TooMany;
     }
@@ -221,13 +229,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
         inf = current_chat.inf;
     } 'no {
         let mode = HistPrim::new(pc, ChatMode::None);
-        let chat_state = Rc::new(ChatState {
-            channels_meta: RefCell::new(vec![]),
-            entry_channel_lookup: Default::default(),
-            entry_channel_lookup_by_client_id: Default::default(),
-            entry_outbox_lookup: Default::default(),
-            mode: mode.clone(),
-        });
+        let chat_state = Rc::new(ChatState::new(pc.eg(), vec![], mode.clone()));
         let chat_state2 = Rc::new(ChatState2 { channel_lookup: Default::default() });
         inf = Infinite::new(&pc.eg(), InfiniteEls {
             center_spinner: style_export::leaf_chat_spinner_center().root,
@@ -245,6 +247,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
         let mut own = vec![];
         if let PopulateResult::TooMany =
             populate(
+                pc,
                 &m.id,
                 &inf,
                 &chat_state,
@@ -267,17 +270,25 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                 let Some(current) = state().current_chat.borrow().clone() else {
                     return Ok(());
                 };
-                if let PopulateResult::TooMany =
-                    populate(&id, &current.inf, &chat_state, &current.chat_state2, local_idents, local_channels) {
-                    // Wipe and restart
-                    *state().current_chat.borrow_mut() = None;
-                    eg.event(|pc| {
+                eg.event(|pc| {
+                    if let PopulateResult::TooMany =
+                        populate(
+                            pc,
+                            &id,
+                            &current.inf,
+                            &chat_state,
+                            &current.chat_state2,
+                            local_idents,
+                            local_channels,
+                        ) {
+                        // Wipe and restart
+                        *state().current_chat.borrow_mut() = None;
                         set_page(build(pc, &MinistateChannelGroup {
                             id: id,
                             reset_id: reset_id.clone(),
                         }));
-                    }).unwrap();
-                }
+                    }
+                }).unwrap();
                 return Ok(());
             }
         })));
@@ -345,9 +356,10 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                                         own_identity: mode.own_identity.clone(),
                                         message: target.clone(),
                                     });
-                                    if let Some(entry) = chat_state.entry_channel_lookup.borrow().get(&target) {
+                                    let found_time = chat_state.find_time_by_message_id(&target);
+                                    if let Some(time) = found_time {
                                         if let Some(inf) = inf.upgrade() {
-                                            inf.set_sticky(&entry.time());
+                                            inf.set_sticky(&time);
                                         }
                                         set_sticky = true;
                                     } else {
@@ -382,34 +394,13 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                                 },
                                 ChatModeReplyMessageTarget::Outbox(target) => {
                                     new_reset_id = None;
-                                    if let Some(entry) =
-                                        chat_state
-                                            .entry_outbox_lookup
-                                            .borrow()
-                                            .get(
-                                                &(
-                                                    target.channel.clone(),
-                                                    mode.own_identity.clone(),
-                                                    target.message.clone(),
-                                                ),
-                                            ) {
+                                    let found_time =
+                                        chat_state.find_time_by_client_id(
+                                            &(target.channel.clone(), mode.own_identity.clone(), target.message.clone()),
+                                        );
+                                    if let Some(time) = found_time {
                                         if let Some(inf) = inf.upgrade() {
-                                            inf.set_sticky(&entry.time());
-                                        }
-                                        set_sticky = true;
-                                    } else if let Some(entry) =
-                                        chat_state
-                                            .entry_channel_lookup_by_client_id
-                                            .borrow()
-                                            .get(
-                                                &(
-                                                    target.channel.clone(),
-                                                    mode.own_identity.clone(),
-                                                    target.message.clone(),
-                                                ),
-                                            ) {
-                                        if let Some(inf) = inf.upgrade() {
-                                            inf.set_sticky(&entry.time());
+                                            inf.set_sticky(&time);
                                         }
                                         set_sticky = true;
                                     } else {
@@ -471,20 +462,25 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
 
         // Head bar
         let nol_channelgroup = get_or_req_channelgroup(&pc.eg(), &m.id, true);
-        let head_bar = build_nol_chat_bar(&Ministate::Top, nol_channelgroup.clone(), {
+        let head_bar = build_nol_chat_bar(pc, &Ministate::Top, nol_channelgroup.clone(), {
             let id = m.id.clone();
-            move |local_channel| style_export::leaf_chat_head_bar_center(style_export::LeafChatHeadBarCenterArgs {
-                text: local_channel.memo_short.get(),
-                link: Some(ministate_octothorpe(&Ministate::ChannelGroup(MinistateChannelGroup {
-                    id: id.clone(),
-                    reset_id: None,
-                }))),
-            }).root
+            move |pc, local_channelgroup| {
+                let center = style_export::leaf_chat_head_bar_center(style_export::LeafChatHeadBarCenterArgs {
+                    text: local_channelgroup.name.get(),
+                    link: Some(ministate_octothorpe(&Ministate::ChannelGroupMenu(id.clone()))),
+                }).root;
+                center.ref_own(
+                    |e| link!((_pc = pc), (name = local_channelgroup.name.clone()), (), (e = e.weak()) {
+                        let e = e.upgrade()?;
+                        e.ref_text(&*name.borrow());
+                    }),
+                );
+                center
+            }
         });
-        own.push(nol_channelgroup.then({
+        own.push(nol_channelgroup.then(pc, {
             let back_unread = head_bar.back_unread.weak();
-            let eg = pc.eg();
-            move |channelgroup| {
+            move |pc, channelgroup| {
                 let channelgroup = match channelgroup {
                     Ok(Some(x)) => x,
                     Ok(None) => {
@@ -495,26 +491,25 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                         return;
                     },
                 };
-                eg.event(|pc| {
-                    clear_unread(pc, &channelgroup);
+                clear_unread(pc, &channelgroup);
 
-                    // Link unread status
-                    if let Some(back_unread) = back_unread.upgrade() {
-                        back_unread.ref_own(
-                            |el_| link!((_pc = pc), (unread_any = state().unread_any.clone()), (), (el_ = el_.weak()) {
-                                let el_ = el_.upgrade()?;
-                                el_.ref_modify_classes(
-                                    &[(style_export::class_state_hidden().value.as_str(), !*unread_any.borrow())]
-                                )
-                            })
-                        );
-                    };
-                }).unwrap();
+                // Link unread status
+                if let Some(back_unread) = back_unread.upgrade() {
+                    back_unread.ref_own(
+                        |el_| link!((_pc = pc), (unread_any = state().unread_any.clone()), (), (el_ = el_.weak()) {
+                            let el_ = el_.upgrade()?;
+                            el_.ref_modify_classes(
+                                &[(style_export::class_state_hidden().value.as_str(), !*unread_any.borrow())]
+                            )
+                        })
+                    );
+                };
             }
         }));
 
         // Assembly
         inf.padding_pre_el().ref_push(head_bar.root);
+        build_controls(pc, &inf.padding_post_el(), chat_state.clone(), chat_state2.clone());
         inf.el().ref_own(move |_| own);
     });
     return inf.el();

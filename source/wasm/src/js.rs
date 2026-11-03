@@ -607,6 +607,16 @@ pub fn copy(log: &Rc<dyn Log>, data: impl serde::Serialize) {
     });
 }
 
+pub fn copy_text(log: &Rc<dyn Log>, text: &str) {
+    let a = window().navigator().clipboard().write_text(text);
+    spawn_local({
+        let log = log.clone();
+        async move {
+            JsFuture::from(a).await.log(&log, &"Error copying");
+        }
+    });
+}
+
 pub fn download(filename: String, data: impl serde::Serialize) {
     let document = document();
     let body = document.body().unwrap();

@@ -32,14 +32,20 @@ use {
 
 #[derive(rooting_forms::Form)]
 struct Form_ {
-    #[title("Short memo")]
-    memo_short: String,
-    #[title("Extra memo")]
-    memo_long: String,
+    #[title("Name")]
+    name: String,
+    #[title("Description")]
+    description: String,
+    #[title("Shown name")]
+    shown_name: Option<String>,
+    #[title("Shown description")]
+    shown_description: Option<String>,
     #[title("Single use")]
     single_use: bool,
     #[title("Expiry")]
     expiry: Option<Timestamp>,
+    #[title("Joiners can post")]
+    can_post: bool,
 }
 
 pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
@@ -56,27 +62,40 @@ pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &Chan
             let channel = channel.clone();
             move |local| {
                 let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
-                    memo_short: local.res.memo_short.clone(),
-                    memo_long: local.res.memo_long.clone(),
+                    name: local.res.name.clone(),
+                    description: local.res.description.clone(),
+                    shown_name: local.res.shown_name.clone(),
+                    shown_description: local.res.shown_description.clone(),
                     single_use: local.res.single_use.clone(),
                     expiry: local.res.expiry.clone(),
+                    can_post: local.res.can_post,
                 }));
                 let form_state = Rc::new(form_state);
-                return (form_els.error.unwrap(), form_els.elements, async move |_idem| {
+                return (form_els.error, form_els.elements, async move |_idem| {
                     let Ok(new_values) = form_state.parse() else {
                         return Ok(());
                     };
                     let res = req_post_json(&state().env.base_url, c2s::ChannelInviteModify {
                         id: local.res.id.clone(),
-                        memo_short: if new_values.memo_short == local.res.memo_short {
+                        name: if new_values.name == local.res.name {
                             None
                         } else {
-                            Some(new_values.memo_short)
+                            Some(new_values.name)
                         },
-                        memo_long: if new_values.memo_long == local.res.memo_long {
+                        description: if new_values.description == local.res.description {
                             None
                         } else {
-                            Some(new_values.memo_long)
+                            Some(new_values.description)
+                        },
+                        shown_name: if new_values.shown_name == local.res.shown_name {
+                            None
+                        } else {
+                            Some(ModifyOption { value: new_values.shown_name })
+                        },
+                        shown_description: if new_values.shown_description == local.res.shown_description {
+                            None
+                        } else {
+                            Some(ModifyOption { value: new_values.shown_description })
                         },
                         single_use: if new_values.single_use == local.res.single_use {
                             None
@@ -87,6 +106,11 @@ pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &Chan
                             None
                         } else {
                             Some(ModifyOption { value: new_values.expiry })
+                        },
+                        can_post: if new_values.can_post == local.res.can_post {
+                            None
+                        } else {
+                            Some(new_values.can_post)
                         },
                     }).await?;
                     localdata::ensure_channelinvite(res.clone()).await;

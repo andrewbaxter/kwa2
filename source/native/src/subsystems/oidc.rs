@@ -1,13 +1,18 @@
 use {
     crate::{
         cap_fn,
+        db,
+        dbutil::tx,
         interface::{
             config::OidcConfig,
             AccountExternalId,
         },
     },
-    cookie::CookieBuilder,
-    flowcontrol::shed,
+    cookie::{
+        CookieBuilder,
+        SameSite,
+    },
+    deadpool_sqlite::Pool,
     http::{
         header::HOST,
         request::Parts,
@@ -30,7 +35,10 @@ use {
                 VisErr,
             },
         },
-        url::UriJoin,
+        url::{
+            new_abs_url,
+            UriJoin,
+        },
     },
     loga::{
         ea,
@@ -39,25 +47,10 @@ use {
         ResultContext,
     },
     moka::future::Cache,
-    oauth2::{
-        basic::{
-            BasicErrorResponseType,
-            BasicTokenType,
-        },
-        StandardRevocableToken,
-    },
     openidconnect::{
         core::{
-            CoreAuthDisplay,
-            CoreAuthPrompt,
             CoreAuthenticationFlow,
             CoreClient,
-            CoreGenderClaim,
-            CoreJsonWebKey,
-            CoreJsonWebKeyType,
-            CoreJsonWebKeyUse,
-            CoreJweContentEncryptionAlgorithm,
-            CoreJwsSigningAlgorithm,
             CoreProviderMetadata,
         },
         AccessTokenHash,
@@ -65,19 +58,15 @@ use {
         ClientId,
         ClientSecret,
         CsrfToken,
-        EmptyAdditionalClaims,
-        EmptyExtraTokenFields,
-        IdTokenFields,
+        EndpointMaybeSet,
+        EndpointNotSet,
+        EndpointSet,
         IssuerUrl,
         Nonce,
         OAuth2TokenResponse,
         PkceCodeChallenge,
         PkceCodeVerifier,
         RedirectUrl,
-        RevocationErrorResponseType,
-        StandardErrorResponse,
-        StandardTokenIntrospectionResponse,
-        StandardTokenResponse,
         TokenResponse,
     },
     rand::distr::{
@@ -86,7 +75,6 @@ use {
     },
     serde::Deserialize,
     std::{
-        borrow::Cow,
         sync::{
             Arc,
             Mutex,
@@ -96,136 +84,94 @@ use {
 };
 
 pub const COOKIE_SESSION: &str = "kwa_session";
+const PRE_SESSION_CAPACITY: u64 = 10_000;
+const SESSION_IDLE_TIMEOUT: jiff::SignedDuration = jiff::SignedDuration::from_hours(24 * 7);
+const SESSION_TOUCH_INTERVAL: jiff::SignedDuration = jiff::SignedDuration::from_hours(1);
 
 async fn oidc_http_client(
     log: &loga::Log,
     req: openidconnect::HttpRequest,
 ) -> Result<openidconnect::HttpResponse, loga::Error> {
-    let log = log.clone();
-    let mut conn = htreq::connect(htreq::Limits::default(), &Uri::try_from(&req.url.to_string()).unwrap()).await?;
-    let mut req1 = Request::builder();
-    req1 = req1.uri(req.url.to_string());
-    req1 = req1.method(match req.method {
-        openidconnect::http::Method::GET => http::Method::GET,
-        openidconnect::http::Method::POST => http::Method::POST,
-        openidconnect::http::Method::HEAD => http::Method::HEAD,
-        _ => panic!(),
-    });
-    req1 = req1.header(HOST, req.url.host_str().unwrap_or_default());
-    for (k, v) in req.headers {
-        let Some(k) = k else {
-            panic!();
-        };
-        req1 = req1.header(k.to_string(), http::HeaderValue::from_bytes(v.as_bytes()).unwrap());
-    }
-    let req1 = req1.body(body_full(req.body)).unwrap();
-    let (code, headers, continue_) = htreq::send(&log, htreq::Limits::default(), &mut conn, req1).await?;
+    let (mut parts, body) = req.into_parts();
+    let mut conn = htreq::connect(htreq::Limits::default(), &parts.uri).await?;
+    let authority = parts.uri.authority().context("OIDC request URL has no host")?.as_str().to_string();
+    parts.headers.insert(HOST, http::HeaderValue::from_str(&authority).context("Invalid OIDC request host")?);
+    let (code, headers, continue_) =
+        htreq::send(log, htreq::Limits::default(), &mut conn, Request::from_parts(parts, body_full(body))).await?;
     let body = htreq::receive(htreq::Limits::default(), continue_).await?;
-    return Ok(openidconnect::HttpResponse {
-        status_code: openidconnect::http::StatusCode::from_u16(code.as_u16()).unwrap(),
-        headers: {
-            let mut headers1 = openidconnect::http::HeaderMap::new();
-            for (k, v) in headers {
-                let Some(k) = k else {
-                    panic!();
-                };
-                headers1.append(
-                    openidconnect::http::HeaderName::from_bytes(k.as_ref()).unwrap(),
-                    openidconnect::http::HeaderValue::from_bytes(v.as_bytes()).unwrap(),
-                );
-            }
-            headers1
-        },
-        body: body,
-    });
+    let mut resp = openidconnect::HttpResponse::new(body);
+    *resp.status_mut() = code;
+    *resp.headers_mut() = headers;
+    return Ok(resp);
 }
 
 struct OidcPreSession {
-    original_url: Uri,
     pkce_verifier: Mutex<Option<PkceCodeVerifier>>,
     nonce: Nonce,
 }
 
 pub struct OidcState {
     log: loga::Log,
-    client: openidconnect
-    ::Client<
-        EmptyAdditionalClaims,
-        CoreAuthDisplay,
-        CoreGenderClaim,
-        CoreJweContentEncryptionAlgorithm,
-        CoreJwsSigningAlgorithm,
-        CoreJsonWebKeyType,
-        CoreJsonWebKeyUse,
-        CoreJsonWebKey,
-        CoreAuthPrompt,
-        StandardErrorResponse<BasicErrorResponseType>,
-        StandardTokenResponse<
-            IdTokenFields<
-                EmptyAdditionalClaims,
-                EmptyExtraTokenFields,
-                CoreGenderClaim,
-                CoreJweContentEncryptionAlgorithm,
-                CoreJwsSigningAlgorithm,
-                CoreJsonWebKeyType,
-            >,
-            BasicTokenType,
-        >,
-        BasicTokenType,
-        StandardTokenIntrospectionResponse<EmptyExtraTokenFields, BasicTokenType>,
-        StandardRevocableToken,
-        StandardErrorResponse<RevocationErrorResponseType>,
-    >,
+    public_url: Uri,
+    client: CoreClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointMaybeSet, EndpointMaybeSet>,
     pre_sessions: Cache<String, Arc<OidcPreSession>>,
-    pub(crate) sessions: Cache<String, AccountExternalId>,
 }
 
-pub async fn new_state(log: &Log, oidc_config: OidcConfig) -> Result<OidcState, loga::Error> {
+pub async fn new_state(log: &Log, public_url: &str, oidc_config: OidcConfig) -> Result<OidcState, loga::Error> {
     let log = log.fork(ea!(subsystem = "oidc"));
+    let public_url = new_abs_url(public_url).context("Invalid public url")?;
+    let redirect_url =
+        RedirectUrl::new(
+            public_url.join("/oidc").context("Error building OIDC redirect url from public url")?.to_string(),
+        ).context("Invalid OIDC redirect url")?;
     let client =
         CoreClient::from_provider_metadata(
-            CoreProviderMetadata::discover_async(IssuerUrl::new(oidc_config.provider_url)?, cap_fn!((r)(log) {
+            CoreProviderMetadata::discover_async(IssuerUrl::new(oidc_config.provider_url)?, &cap_fn!((r)(log) {
                 return oidc_http_client(&log, r).await.map_err(|e| std::io::Error::other(e.to_string()));
             })).await?,
             ClientId::new(oidc_config.client_id.clone()),
             oidc_config.client_secret.as_ref().map(|s| ClientSecret::new(s.clone())),
-        );
+        ).set_redirect_uri(redirect_url);
     return Ok(OidcState {
         log: log,
+        public_url: public_url,
         client: client,
-        pre_sessions: Cache::builder().max_capacity(10).time_to_live(Duration::from_secs(60 * 10)).build(),
-        sessions: Cache::builder().time_to_idle(Duration::from_secs(60 * 60 * 24 * 7)).build(),
+        pre_sessions: Cache::builder()
+            .max_capacity(PRE_SESSION_CAPACITY)
+            .time_to_live(Duration::from_secs(60 * 10))
+            .build(),
     });
 }
 
-pub async fn handle_oidc(state: &OidcState, head: Parts) -> Result<Response<Body>, VisErr<loga::Error>> {
+pub async fn handle_oidc(
+    state: &OidcState,
+    db: &Pool,
+    head: Parts,
+) -> Result<Response<Body>, VisErr<loga::Error>> {
     let log = state.log.clone();
-    let Some(query) = head.uri.query() else {
-        return Ok(response_400("Missing query"));
-    };
 
-    // Try handling received token from completed oidc
-    shed!{
-        #[derive(Deserialize)]
-        struct Params {
-            code: String,
-            state: String,
-        }
+    #[derive(Deserialize)]
+    struct CallbackParams {
+        code: String,
+        state: String,
+    }
 
-        let Ok(params) = serde_urlencoded::from_str::<Params>(query) else {
-            break;
-        };
+    if let Some(params) = head.uri.query().and_then(|q| serde_urlencoded::from_str::<CallbackParams>(q).ok()) {
         let Some(pre_session_state) = state.pre_sessions.remove(&params.state).await else {
             log.log_with(loga::DEBUG, "Missing pre-session state for state", ea!(state = params.state));
-            break;
+            return Ok(response_400("Login attempt expired or unknown"));
         };
-        let pkce_verifier = pre_session_state.pkce_verifier.lock().unwrap().take().unwrap();
+        let Some(pkce_verifier) = pre_session_state.pkce_verifier.lock().unwrap().take() else {
+            return Ok(response_400("Login attempt already used"));
+        };
         let token_response =
             state
                 .client
                 .exchange_code(AuthorizationCode::new(params.code))
+                .context("OIDC provider has no token endpoint")
+                .err_internal()?
                 .set_pkce_verifier(pkce_verifier)
-                .request_async(cap_fn!((r)(log) {
+                .request_async(&cap_fn!((r)(log) {
                     return oidc_http_client(&log, r).await.map_err(|e| std::io::Error::other(e.to_string()));
                 }))
                 .await
@@ -241,7 +187,11 @@ pub async fn handle_oidc(state: &OidcState, head: Parts) -> Result<Response<Body
             let actual_access_token_hash =
                 AccessTokenHash::from_token(
                     token_response.access_token(),
-                    &id_token.signing_alg().context("Error getting signing alg from server response").err_internal()?,
+                    id_token.signing_alg().context("Error getting signing alg from server response").err_internal()?,
+                    id_token
+                        .signing_key(&state.client.id_token_verifier())
+                        .context("Error getting signing key from server response")
+                        .err_internal()?,
                 )
                     .context("Error hashing access token in server response")
                     .err_internal()?;
@@ -251,11 +201,13 @@ pub async fn handle_oidc(state: &OidcState, head: Parts) -> Result<Response<Body
                     "Access token hash mismatch",
                     ea!(want = *expected_access_token_hash, got = actual_access_token_hash),
                 );
-                break;
+                return Ok(response_400("Access token hash mismatch"));
             }
         }
         let session_cookie = Alphanumeric.sample_string(&mut rand::rng(), 32);
-        state.sessions.insert(session_cookie.clone(), AccountExternalId(claims.subject().to_string())).await;
+        session_create(db, session_cookie.clone(), AccountExternalId(claims.subject().to_string()))
+            .await
+            .err_internal()?;
         return Ok(
             http::Response::builder()
                 .status(http::StatusCode::TEMPORARY_REDIRECT)
@@ -264,49 +216,25 @@ pub async fn handle_oidc(state: &OidcState, head: Parts) -> Result<Response<Body
                     CookieBuilder::new(COOKIE_SESSION, session_cookie)
                         .http_only(true)
                         .secure(true)
+                        .same_site(SameSite::Lax)
                         .permanent()
                         .build()
                         .to_string(),
                 )
-                .header(http::header::LOCATION, &pre_session_state.original_url.to_string())
+                .header(http::header::LOCATION, state.public_url.to_string())
                 .body(body_empty())
                 .unwrap(),
         );
-    };
-
-    // Start a new auth flow
-    #[derive(Deserialize)]
-    struct Params {
-        #[serde(with = "http_serde::uri")]
-        url: Uri,
     }
 
-    let params = match serde_urlencoded::from_str::<Params>(query) {
-        Ok(p) => p,
-        Err(e) => {
-            log.log_err(
-                loga::DEBUG,
-                e.context(format!("Received new auth request with invalid query string: [{}]", query)),
-            );
-            return Ok(response_400("Invalid query params"));
-        },
-    };
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
     let (auth_url, csrf_token, nonce) =
         state
             .client
             .authorize_url(CoreAuthenticationFlow::AuthorizationCode, CsrfToken::new_random, Nonce::new_random)
-            .set_redirect_uri(
-                Cow::Owned(
-                    RedirectUrl::new(params.url.join("../oidc").to_string())
-                        .context("Error creating redirect url from current state url")
-                        .err_internal()?,
-                ),
-            )
             .set_pkce_challenge(pkce_challenge)
             .url();
     state.pre_sessions.insert(csrf_token.secret().clone(), Arc::new(OidcPreSession {
-        original_url: params.url,
         pkce_verifier: Mutex::new(Some(pkce_verifier)),
         nonce: nonce,
     })).await;
@@ -338,8 +266,77 @@ pub fn get_req_session<'a>(log: &Log, headers: &HeaderMap) -> Option<String> {
     return None;
 }
 
-pub async fn handle_logout(state: &OidcState, log: &Log, head: Parts) -> () {
-    if let Some(session) = get_req_session(log, &head.headers) {
-        state.sessions.remove(&session).await;
-    }
+async fn session_create(db: &Pool, session: String, external_id: AccountExternalId) -> Result<(), loga::Error> {
+    let now = jiff::Timestamp::now();
+    tx(db, move |db_tx| {
+        good_ormning::sqlite::good_query!(
+            db,
+            r#"insert into session (id, external_id, last_used) values (${string = session.as_str()}, ${string = external_id.0.as_str()}, ${time_ms_t = &crate::interface::db::DbTimeMs(now)})"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
+        return Ok(());
+    }).await.context("Error storing session")?;
+    return Ok(());
+}
+
+pub async fn session_lookup(db: &Pool, session: String) -> Result<Option<AccountExternalId>, loga::Error> {
+    let now = jiff::Timestamp::now();
+    let idle_cutoff = now.checked_sub(SESSION_IDLE_TIMEOUT).context("Session idle cutoff out of range")?;
+    let touch_cutoff = now.checked_sub(SESSION_TOUCH_INTERVAL).context("Session touch cutoff out of range")?;
+    return Ok(tx(db, move |db_tx| {
+        let Some(row) =
+            good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select external_id, last_used from session where id = ${string = session.as_str()}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))? else {
+                return Ok(None);
+            };
+        if row.last_used.0 < idle_cutoff {
+            good_ormning::sqlite::good_query!(
+                db,
+                r#"delete from session where id = ${string = session.as_str()}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
+            return Ok(None);
+        }
+        if row.last_used.0 < touch_cutoff {
+            good_ormning::sqlite::good_query!(
+                db,
+                r#"update session set last_used = ${time_ms_t = &crate::interface::db::DbTimeMs(now)} where id = ${string = session.as_str()}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
+        }
+        return Ok(Some(AccountExternalId(row.external_id)));
+    }).await.context("Error looking up session")?);
+}
+
+pub async fn delete_req_session(db: &Pool, log: &Log, headers: &HeaderMap) -> Result<(), loga::Error> {
+    let Some(session) = get_req_session(log, headers) else {
+        return Ok(());
+    };
+    tx(db, move |db_tx| {
+        good_ormning::sqlite::good_query!(
+            db,
+            r#"delete from session where id = ${string = session.as_str()}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
+        return Ok(());
+    }).await.context("Error deleting session")?;
+    return Ok(());
+}
+
+pub async fn handle_logout(
+    state: &OidcState,
+    db: &Pool,
+    head: Parts,
+) -> Result<Response<Body>, VisErr<loga::Error>> {
+    delete_req_session(db, &state.log, &head.headers).await.err_internal()?;
+    return Ok(
+        http::Response::builder()
+            .status(http::StatusCode::TEMPORARY_REDIRECT)
+            .header(http::header::LOCATION, state.public_url.to_string())
+            .body(body_empty())
+            .unwrap(),
+    );
 }

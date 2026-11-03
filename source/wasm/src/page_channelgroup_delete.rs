@@ -5,7 +5,6 @@ use {
         pageutil::build_nol_form,
         state::{
             Ministate,
-            MinistateChannelGroup,
             get_or_req_channelgroup,
             goto_replace_ministate,
             pull_top,
@@ -15,7 +14,6 @@ use {
     lunk::ProcessingContext,
     rooting::{
         El,
-        el,
     },
     shared::interface::{
         shared::ChannelGroupId,
@@ -29,19 +27,16 @@ pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
     return build_nol_form(
         //. .
         pc,
-        &Ministate::ChannelGroup(MinistateChannelGroup {
-            id: id.clone(),
-            reset_id: None,
-        }),
+        &Ministate::ChannelGroupMenu(id.clone()),
         "Delete group",
         get_or_req_channelgroup(&pc.eg(), id, false).map({
             let eg = pc.eg();
             move |local| (
-                el("div"),
+                None,
                 vec![
                     style_export::leaf_form_text(
                         style_export::LeafFormTextArgs {
-                            text: format!("Are you sure you want to delete group [{}]", &*local.memo_short.borrow()),
+                            text: format!("Are you sure you want to delete group [{}]", &*local.name.borrow()),
                         },
                     ).root
                 ],

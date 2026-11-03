@@ -29,7 +29,7 @@ pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
         {
             move |local| LazyPage {
                 center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
-                    text: local.memo_short.get(),
+                    text: local.name.get(),
                     link: None,
                 }).root,
                 body: vec![
@@ -38,11 +38,13 @@ pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
                         text: format!("Edit"),
                         link: ministate_octothorpe(&Ministate::ChannelGroupEdit(local.id.clone())),
                         image: None,
+                        generated_image: None,
                     }).root,
                     style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                         text: format!("Delete"),
                         link: ministate_octothorpe(&Ministate::ChannelGroupDelete(local.id.clone())),
                         image: None,
+                        generated_image: None,
                     }).root,
                 ],
             }

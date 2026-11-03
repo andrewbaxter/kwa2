@@ -23,16 +23,19 @@ pub fn build() -> El {
                 text: format!("Join (URL)"),
                 link: ministate_octothorpe(&Ministate::ChannelJoinUrl),
                 image: None,
+                generated_image: None,
             }).root,
             style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                 text: format!("New group"),
                 link: ministate_octothorpe(&Ministate::ChannelGroupNew),
                 image: None,
+                generated_image: None,
             }).root,
             style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                 text: format!("New channel"),
                 link: ministate_octothorpe(&Ministate::ChannelNew),
                 image: None,
+                generated_image: None,
             }).root,
         ],
     }).root;

@@ -5,7 +5,6 @@ use {
         pageutil::build_nol_form,
         state::{
             Ministate,
-            MinistateChannel,
             MinistateChannelSub,
             get_or_req_channel,
             goto_replace_ministate,
@@ -16,7 +15,6 @@ use {
     lunk::ProcessingContext,
     rooting::{
         El,
-        el,
     },
     shared::interface::wire::c2s::{
         self,
@@ -27,20 +25,16 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
     return build_nol_form(
         //. .
         pc,
-        &Ministate::Channel(MinistateChannel {
-            id: s.id.clone(),
-            own_identity: s.own_identity.clone(),
-            reset_id: None,
-        }),
+        &Ministate::ChannelMenu(s.clone()),
         "Delete channel",
         get_or_req_channel(&pc.eg(), &s.id, false).map({
             let eg = pc.eg();
             |local| (
-                el("div"),
+                None,
                 vec![
                     style_export::leaf_form_text(
                         style_export::LeafFormTextArgs {
-                            text: format!("Are you sure you want to delete channel [{}]", &*local.memo_short.borrow()),
+                            text: format!("Are you sure you want to delete channel [{}]", &*local.name.borrow()),
                         },
                     ).root
                 ],

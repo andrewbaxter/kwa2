@@ -1,5 +1,6 @@
 use {
     crate::{
+        api::identity_image,
         js::{
             el_async,
             style_export,
@@ -15,6 +16,9 @@ use {
         state::{
             Ministate,
             MinistateChannelMember,
+            MinistateChannelInviteNew,
+            MinistateChannelInviteNewFrom,
+            MinistateChannelSub,
             ministate_octothorpe,
             state,
         },
@@ -40,21 +44,25 @@ fn build_member(
     contacts: &HashMap<Identity, LocalContact>,
 ) -> El {
     let text;
-    match contacts.get(&member.res) {
+    let image;
+    match contacts.get(&member.res.identity) {
         Some(contact) => {
-            text = contact.res.memo_short.clone();
+            text = contact.res.name.clone();
+            image = identity_image(&member.res.identity, &contact.res.portrait);
         },
         None => {
-            text = member.res.to_string();
+            text = member.res.identity.to_string();
+            image = identity_image(&member.res.identity, &None);
         },
     }
     return style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
         text: text,
         link: ministate_octothorpe(&Ministate::ChannelMember(MinistateChannelMember {
             channel: channel.clone(),
-            identity: member.res.clone(),
+            identity: member.res.identity.clone(),
         })),
-        image: None,
+        image: image.image,
+        generated_image: image.generated_image,
     }).root;
 }
 
@@ -68,7 +76,7 @@ pub fn build(channel: &QualifiedChannelId) -> El {
     // Build the immediately available options
     for old_member in old_members.clone() {
         let out = build_member(channel, &old_member, &old_contacts);
-        lookup_el_members.borrow_mut().insert(old_member.res, out.clone());
+        lookup_el_members.borrow_mut().insert(old_member.res.identity.clone(), out.clone());
         contact_elements.ref_push(out);
     }
 
@@ -92,10 +100,10 @@ pub fn build(channel: &QualifiedChannelId) -> El {
             {
                 let mut old_members = HashMap::new();
                 for old_invite in old_members1 {
-                    old_members.insert(old_invite.res, old_invite);
+                    old_members.insert(old_invite.res.identity.clone(), old_invite);
                 }
                 for new_member in new_members {
-                    if let Some(_) = old_members.remove(&new_member.res) {
+                    if let Some(_) = old_members.remove(&new_member.res.identity) {
                         // nop
                     } else {
                         let out = build_member(&channel, &new_member, &new_contacts);
@@ -125,7 +133,10 @@ pub fn build(channel: &QualifiedChannelId) -> El {
     // Other widgets, assemble and return
     let out = style_export::cont_page_menu(style_export::ContPageMenuArgs {
         head_bar: style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
-            back_link: ministate_octothorpe(&Ministate::Top),
+            back_link: ministate_octothorpe(&Ministate::ChannelMenu(MinistateChannelSub {
+                id: channel.clone(),
+                own_identity: channel.identity.clone(),
+            })),
             center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
                 text: format!("Members"),
                 link: None,
@@ -133,7 +144,10 @@ pub fn build(channel: &QualifiedChannelId) -> El {
             right: Some(
                 style_export::leaf_menu_head_bar_right_add(
                     style_export::LeafMenuHeadBarRightAddArgs {
-                        link: ministate_octothorpe(&Ministate::ChannelInviteNew(channel.clone())),
+                        link: ministate_octothorpe(&Ministate::ChannelInviteNew(MinistateChannelInviteNew {
+                            channel: channel.clone(),
+                            from: MinistateChannelInviteNewFrom::Members,
+                        })),
                     },
                 ).root,
             ),

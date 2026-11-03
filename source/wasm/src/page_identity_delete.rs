@@ -15,7 +15,6 @@ use {
     },
     lunk::ProcessingContext,
     rooting::{
-        el,
         El,
     },
     shared::interface::wire::c2s::{
@@ -33,11 +32,11 @@ pub fn build(pc: &mut ProcessingContext, id: &Identity) -> El {
         get_or_req_api_identity(id, false).map({
             let eg = pc.eg();
             move |local| (
-                el("div"),
+                None,
                 vec![
                     style_export::leaf_form_text(
                         style_export::LeafFormTextArgs {
-                            text: format!("Are you sure you want to delete identity [{}]", local.res.memo_short),
+                            text: format!("Are you sure you want to delete identity [{}]", local.res.name),
                         },
                     ).root
                 ],

@@ -109,10 +109,6 @@ use {
             Rc,
             Weak,
         },
-        time::{
-            Duration,
-            Instant,
-        },
     },
     wasm_bindgen::JsCast,
     web_sys::{
@@ -259,7 +255,8 @@ struct Infiniscroll_<E: Entry> {
     entry_resize_observer: RefCell<Option<ResizeObserver>>,
     // After making content layout changes, the next scroll event will be synthetic
     // (not human-volitional), so ignore it for anchor modification.
-    mute_scroll: Cell<Instant>,
+    /// Epoch millis (`js_sys::Date::now`); `std::time::Instant` panics on wasm.
+    mute_scroll: Cell<f64>,
     // After human-volitional scrolling, more scrolling may soon come so push back
     // shake for this number of ms.
     delay_shake: Cell<u32>,
@@ -354,8 +351,10 @@ impl<E: Entry> Infiniscroll_<E> {
         let first_el_height = first_el.offset_height();
         let first_el_bottom = first_el_top + first_el_height;
 
+        let hovering_late = candidate_late_real_origin_y >= last_el_top;
+
         // # Hovering late end, align to late end
-        if late_all_stop && candidate_late_real_origin_y >= last_el_top {
+        if late_all_stop && hovering_late {
             self.anchor_alignment.set(1.);
             self.anchor_i.set(Some(self.real.borrow().len() - 1));
             self
@@ -372,7 +371,7 @@ impl<E: Entry> Infiniscroll_<E> {
         }
 
         // # Hovering early end, align to early end
-        if early_all_stop && candidate_early_real_origin_y <= first_el_bottom {
+        if early_all_stop && !hovering_late && candidate_early_real_origin_y <= first_el_bottom {
             self.anchor_alignment.set(0.);
             self.anchor_i.set(Some(0));
             self
@@ -515,6 +514,8 @@ impl<E: 'static + Entry> Infinite<E> {
         {
             let s = el_style(&content_layout);
             s.set_property("position", "absolute").unwrap();
+            s.set_property("left", "0").unwrap();
+            s.set_property("right", "0").unwrap();
             s.set_property("display", "flex").unwrap();
             s.set_property("flex-direction", "column").unwrap();
         }
@@ -565,10 +566,15 @@ impl<E: 'static + Entry> Infinite<E> {
         outer_stack.ref_extend(
             vec![
                 set_el_col(scroll_outer.clone(), "1"),
-                set_el_col(
-                    el("div").extend(vec![padding_pre.clone(), center_spinner.clone(), padding_post.clone()]),
-                    "1",
-                )
+                set_el_col({
+                    let overlay =
+                        el("div").extend(vec![padding_pre.clone(), center_spinner.clone(), padding_post.clone()]);
+                    let s = el_style(&overlay);
+                    s.set_property("display", "flex").unwrap();
+                    s.set_property("flex-direction", "column").unwrap();
+                    s.set_property("justify-content", "space-between").unwrap();
+                    overlay
+                }, "1")
             ],
         );
         scroll_outer.ref_push(scroll_inner.clone());
@@ -610,7 +616,7 @@ impl<E: 'static + Entry> Infinite<E> {
             anchor_offset: Cell::new(0.),
             shake_future: RefCell::new(None),
             entry_resize_observer: RefCell::new(None),
-            mute_scroll: Cell::new(Instant::now() + Duration::from_millis(300)),
+            mute_scroll: Cell::new(js_sys::Date::now() + 300.),
             delay_shake: Cell::new(0),
         }));
         {
@@ -620,7 +626,7 @@ impl<E: 'static + Entry> Infinite<E> {
                     let Some(state) = state.upgrade() else {
                         return;
                     };
-                    state.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
+                    state.0.mute_scroll.set(js_sys::Date::now() + 50.);
                     state.shake();
                 }
             }));
@@ -631,7 +637,7 @@ impl<E: 'static + Entry> Infinite<E> {
                 let Some(state) = state.upgrade() else {
                     return;
                 };
-                if state.0.mute_scroll.get() >= Instant::now() {
+                if state.0.mute_scroll.get() >= js_sys::Date::now() {
                     return;
                 }
                 state.0.logical_scroll_top.set(state.0.scroll_outer.raw().scroll_top() as f64);
@@ -652,7 +658,7 @@ impl<E: 'static + Entry> Infinite<E> {
                     return;
                 }
                 state.0.cached_frame_height.set(frame_height);
-                state.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
+                state.0.mute_scroll.set(js_sys::Date::now() + 50.);
                 state.shake();
             }
         });
@@ -668,8 +674,8 @@ impl<E: 'static + Entry> Infinite<E> {
                     return;
                 }
                 old_content_height.set(content_height);
-                state.0.scroll_outer.raw().set_scroll_top(state.0.logical_scroll_top.get().round() as i32);
-                state.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
+                state.0.scroll_outer.raw().set_scroll_top(state.0.logical_scroll_top.get().round());
+                state.0.mute_scroll.set(js_sys::Date::now() + 50.);
             }
         });
         padding_pre.ref_on_resize({
@@ -685,8 +691,9 @@ impl<E: 'static + Entry> Infinite<E> {
                     .dyn_ref::<HtmlElement>()
                     .unwrap()
                     .style()
-                    .set_property("padding-top", &h.to_string())
+                    .set_property("padding-top", &format!("{}px", h))
                     .unwrap();
+                state.0.mute_scroll.set(js_sys::Date::now() + 50.);
             }
         });
         padding_post.ref_on_resize({
@@ -702,8 +709,9 @@ impl<E: 'static + Entry> Infinite<E> {
                     .dyn_ref::<HtmlElement>()
                     .unwrap()
                     .style()
-                    .set_property("padding-bottom", &h.to_string())
+                    .set_property("padding-bottom", &format!("{}px", h))
                     .unwrap();
+                state.0.mute_scroll.set(js_sys::Date::now() + 50.);
             }
         });
         return state;
@@ -1014,11 +1022,12 @@ impl<E: 'static + Entry> Infinite<E> {
             }
 
             // ### Late elements
+            let real_len = self.0.real.borrow().len();
             for evicted_e_state in self
                 .0
                 .real
                 .borrow_mut()
-                .splice(self.0.real.borrow().len() - unrealize_late, unrealize_late, realized_late)
+                .splice(real_len - unrealize_late, unrealize_late, realized_late)
                 .rev() {
                 let mut feeds = self.0.feeds.borrow_mut();
                 let feed = feeds.get_mut(&evicted_e_state.feed_id).unwrap();
@@ -1142,13 +1151,13 @@ impl<E: 'static + Entry> Infinite<E> {
                         )
                         .max(0.),
                 );
-            self.0.scroll_outer.raw().set_scroll_top(self.0.logical_scroll_top.get().round() as i32);
-            self.0.mute_scroll.set(Instant::now() + Duration::from_millis(50));
+            self.0.scroll_outer.raw().set_scroll_top(self.0.logical_scroll_top.get().round());
+            self.0.mute_scroll.set(js_sys::Date::now() + 50.);
         });
     }
 
     fn shake(&self) {
-        let mute_scroll = self.0.mute_scroll.get() >= Instant::now();
+        let mute_scroll = self.0.mute_scroll.get() >= js_sys::Date::now();
         if mute_scroll || self.0.delay_shake.get() == 0 {
             self.shake_immediate();
         } else {
@@ -1257,9 +1266,6 @@ impl<E: 'static + Entry> Infinite<E> {
         entries: Vec<Rc<E>>,
         mut stop: bool,
     ) {
-        if entries.is_empty() {
-            return;
-        }
         assert!(shed!{
             'assert _;
             // Assert properly ordered and >= pivot
@@ -1291,7 +1297,9 @@ impl<E: 'static + Entry> Infinite<E> {
                             stop = false;
                         }
                     }
-                    feed_state.update_earliest_known(entries.last().unwrap().time());
+                    if let Some(last) = entries.last() {
+                        feed_state.update_earliest_known(last.time());
+                    }
                     for e in entries.iter().rev() {
                         if self.0.want_sticky.borrow().iter().any(|s| s == &e.time()) {
                             let real =
@@ -1329,27 +1337,34 @@ impl<E: 'static + Entry> Infinite<E> {
         mut entries: Vec<Rc<E>>,
         mut stop: bool,
     ) {
-        if entries.is_empty() {
-            return;
-        }
-        assert!(shed!{
-            'assert _;
-            // Confirm sorting
-            let mut at = initial_pivot.clone();
-            for e in &entries {
-                if e.time() <= at {
-                    break 'assert false;
-                }
-                at = e.time();
-            }
-            true
-        });
         {
-            let Some(current_pivot) =
-                get_pivot_late(&self.0.real.borrow(), feed_id, self.0.feeds.borrow().get(feed_id).unwrap()) else {
-                    return;
-                };
+            let current_pivot =
+                get_pivot_late(&self.0.real.borrow(), feed_id, self.0.feeds.borrow().get(feed_id).unwrap());
+            let feed_has_entries = current_pivot.is_some();
+            let current_pivot = current_pivot.unwrap_or_else(|| self.0.reset_time.borrow().clone());
             if initial_pivot != &current_pivot {
+                return;
+            }
+            assert!(shed!{
+                'assert _;
+                let mut at = if feed_has_entries {
+                    Some(initial_pivot.clone())
+                } else {
+                    None
+                };
+                for e in &entries {
+                    if let Some(at) = &at {
+                        if e.time() <= *at {
+                            break 'assert false;
+                        }
+                    }
+                    at = Some(e.time());
+                }
+                true
+            });
+            if entries.is_empty() {
+                self.0.feeds.borrow_mut().get_mut(feed_id).unwrap().late_stop = stop;
+                self.shake();
                 return;
             }
             self.0.eg.event(|pc| {
@@ -1393,7 +1408,7 @@ impl<E: 'static + Entry> Infinite<E> {
                             };
                         }
                         // Already a reserve, new elements guaranteed to be ordered afterwards
-                        if !feed_state.late_reserve.is_empty() {
+                        if !feed_state.late_reserve.is_empty() || self.0.real.borrow().is_empty() {
                             add_to_reserve!();
                             feed_state.late_stop = stop;
                             break 'done_adding;
@@ -1492,6 +1507,10 @@ impl<E: 'static + Entry> Infinite<E> {
         if !f_state.late_stop {
             return None;
         }
-        return get_pivot_late(&self.0.real.borrow(), &feed_id, f_state);
+        return Some(
+            get_pivot_late(&self.0.real.borrow(), &feed_id, f_state).unwrap_or_else(
+                || self.0.reset_time.borrow().clone(),
+            ),
+        );
     }
 }

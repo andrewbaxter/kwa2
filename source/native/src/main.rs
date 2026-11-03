@@ -8,17 +8,31 @@ good_ormning::good_module!(pub db);
 
 use {
     crate::{
-        dbutil::tx,
         fsutil::create_dirs,
         interface::{
-            config::OidcConfig,
-            s2s::s2sv1t::GetLastPageRes,
-            AccountExternalId,
+            config::{
+                FdapConfig,
+                MaybeFdap,
+                OidcConfig,
+                UsersConfig,
+            },
+            s2s::{
+                s2sv1,
+                SpaghRecord,
+                SpaghRecordV1,
+            },
         },
-        subsystems::oidc::{
-            self,
-            get_req_session,
-            OidcState,
+        subsystems::{
+            accounts::{
+                build_users_state,
+                identify_c2s,
+                UsersState,
+            },
+            oidc::{
+                self,
+                OidcState,
+            },
+            s2s::S2sState,
         },
     },
     aargvark::{
@@ -26,51 +40,50 @@ use {
         vark,
         Aargvark,
     },
-    cookie::Cookie,
     deadpool_sqlite::Pool,
     flowcontrol::{
         shed,
         ta_return,
     },
-    glove::reqresp,
     http::{
         header::{
-            COOKIE,
+            ACCEPT_ENCODING,
+            AUTHORIZATION,
+            CACHE_CONTROL,
+            CONTENT_ENCODING,
+            CONTENT_TYPE,
             ETAG,
+            HOST,
             IF_NONE_MATCH,
+            ORIGIN,
+            VARY,
+            X_CONTENT_TYPE_OPTIONS,
         },
+        request::Parts,
         status,
         HeaderMap,
         Method,
         Request,
         Response,
+        Uri,
     },
     http_body_util::{
         combinators::BoxBody,
         BodyExt,
     },
-    htwrap::{
-        handler,
-        htserve::{
-            self,
-            handler::{
-                Handler,
-                PathRouter,
-            },
-            responses::{
-                body_full,
-                response_200_json,
-                response_400,
-                response_401,
-                response_403,
-                response_404,
-                response_503,
-                Body,
-            },
-            viserr::{
-                ResultVisErr,
-                VisErr,
-            },
+    htwrap::htserve::{
+        responses::{
+            body_full,
+            response_200_json,
+            response_400,
+            response_401,
+            response_403,
+            response_404,
+            Body,
+        },
+        viserr::{
+            ResultVisErr,
+            VisErr,
         },
     },
     hyper::{
@@ -89,48 +102,39 @@ use {
         Log,
         ResultContext,
     },
-    rand::rng,
-    rust_embed::RustEmbed,
+    rust_embed_for_web::{
+        EmbedableFile,
+        RustEmbed,
+    },
     schemars::JsonSchema,
     serde::{
         Deserialize,
         Serialize,
     },
-    shared::interface::wire::{
-        c2s::{
-            self,
-            ChannelGroupRes,
-            ChannelOrChannelGroup,
-            ChannelOrChannelGroupGroup,
-            ChannelRes,
-        },
+    shared::interface::{
+        shared::AccountId,
+        wire::c2s,
     },
-    spaghettinuum::interface::identity::Identity,
     spaghettinuum_native::{
-        interface::config::shared::{
-            GlobalAddrConfig,
-            StrSocketAddr,
+        interface::{
+            config::shared::{
+                GlobalAddrConfig,
+                StrSocketAddr,
+            },
+            wire::api::publish::latest::InfoResponse,
         },
         utils::system_addr::resolve_global_ip,
     },
     std::{
-        collections::BTreeMap,
         net::SocketAddr,
         path::PathBuf,
         str::FromStr,
         sync::Arc,
-        time::Duration,
     },
     taskmanager::TaskManager,
     tokio::{
-        net::{
-            TcpListener,
-            TcpStream,
-        },
+        net::TcpListener,
         runtime,
-        select,
-        spawn,
-        sync::mpsc,
     },
     tokio_stream::wrappers::TcpListenerStream,
 };
@@ -138,15 +142,26 @@ use {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct Config {
+    pub public_url: String,
     pub bind_sockaddr: StrSocketAddr,
     pub spagh_node_bind_sockaddr: StrSocketAddr,
     pub spagh_publisher_bind_sockaddr: StrSocketAddr,
-    pub spagh_publisher_advertise_global_addr: GlobalAddrConfig,
-    pub spagh_publisher_advertise_global_port: Option<u16>,
-    pub public_http_resp_cache_duration: Duration,
+    pub spagh_publisher_advertise_port: Option<u16>,
+    pub s2s_bind_sockaddr: StrSocketAddr,
+    pub s2s_advertise_port: Option<u16>,
+    pub global_addrs: Vec<GlobalAddrConfig>,
     pub cache_dir: PathBuf,
     pub persistent_dir: PathBuf,
     pub oidc_config: OidcConfig,
+    pub users: MaybeFdap<UsersConfig>,
+    #[serde(default)]
+    pub fdap: Option<FdapConfig>,
+    #[serde(default = "default_page_size_default")]
+    pub default_page_size: usize,
+}
+
+fn default_page_size_default() -> usize {
+    return 100;
 }
 
 #[derive(Aargvark)]
@@ -156,276 +171,495 @@ struct Args {
     validate: Option<()>,
 }
 
-struct State {
+pub struct State {
     log: loga::Log,
     db: Pool,
     oidc_state: OidcState,
+    users_state: UsersState,
+    s2s_state: S2sState,
+    s2s_client: Arc<crate::subsystems::s2s_client::S2sClient>,
+    spagh_publish: crate::subsystems::spagh_publish::SpaghPublishState,
+    ws_bus: Arc<crate::subsystems::ws_bus::WsBus>,
+    vapid_keys: crate::subsystems::push::VapidKeypair,
+    default_page_size: usize,
+    pull_scheduler: Arc<crate::subsystems::pull_scheduler::PullScheduler>,
+    files_dir: PathBuf,
 }
 
-pub async fn identify_c2s(
-    state: &State,
-    headers: &HeaderMap,
-) -> Result<Option<AccountExternalId>, VisErr<loga::Error>> {
-    shed!{
-        let Some(session) = get_req_session(&state.log, headers) else {
-            break;
-        };
-        let Some(user) = state.oidc_state.sessions.get(&session).await else {
-            state.log.log(loga::DEBUG, format!("Request has session id [{}] but no matching session found", session));
-            break;
-        };
-        return Ok(Some(user));
+fn api_resp<T: Serialize>(state: &State, r: Result<T, loga::Error>) -> Response<Body> {
+    match r {
+        Ok(v) => {
+            return response_200_json(&v);
+        },
+        Err(e) => {
+            let text = e.to_string();
+            state.log.log_err(loga::DEBUG, e.context("Error handling api request"));
+            return Response::builder()
+                .status(status::StatusCode::INTERNAL_SERVER_ERROR)
+                .header(CONTENT_TYPE, "text/plain; charset=utf-8")
+                .body(body_full(text.into_bytes()))
+                .unwrap();
+        },
     }
-    return Ok(None);
 }
 
-async fn handle_req(state: &Arc<State>, mut req: Request<Incoming>) -> Response<BoxBody<Bytes, std::io::Error>> {
-    let url = req.uri().clone();
-    match {
-        let state = state.clone();
-        async move {
-            if (|| false)() {
-                return Err(loga::err("")).err_internal() as Result<_, VisErr<loga::Error>>;
+fn same_origin(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(ORIGIN).and_then(|o| o.to_str().ok()) else {
+        return false;
+    };
+    let Some(host) = headers.get(HOST).and_then(|h| h.to_str().ok()) else {
+        return false;
+    };
+    let Ok(origin) = Uri::from_str(origin) else {
+        return false;
+    };
+    return origin.authority().map(|a| a.as_str() == host).unwrap_or(false);
+}
+
+async fn handle_api(state: &Arc<State>, head: &Parts, account: AccountId, req: c2s::proto::Req) -> Response<Body> {
+    use crate::subsystems::c2s as h;
+
+    match req.to_server_req() {
+        c2s::proto::ServerReq::Logout(_, _) => {
+            return api_resp(state, oidc::delete_req_session(&state.db, &state.log, &head.headers).await);
+        },
+        c2s::proto::ServerReq::NotificationRegister(_, r) => {
+            return api_resp(state, h::notification_register(state, account, r).await);
+        },
+        c2s::proto::ServerReq::IdentityCreate(_, r) => {
+            return api_resp(state, h::identity_create(state, account, r).await);
+        },
+        c2s::proto::ServerReq::IdentityModify(_, r) => {
+            return api_resp(state, h::identity_modify(state, account, r).await);
+        },
+        c2s::proto::ServerReq::IdentityDelete(_, r) => {
+            return api_resp(state, h::identity_delete(state, account, r).await);
+        },
+        c2s::proto::ServerReq::IdentityList(_, _) => {
+            return api_resp(state, h::identity_list(state, account).await);
+        },
+        c2s::proto::ServerReq::IdentityInviteCreate(_, r) => {
+            return api_resp(state, h::identity_invite_create(state, account, r).await);
+        },
+        c2s::proto::ServerReq::IdentityInviteModify(_, r) => {
+            return api_resp(state, h::identity_invite_modify(state, account, r).await);
+        },
+        c2s::proto::ServerReq::IdentityInviteDelete(_, r) => {
+            return api_resp(state, h::identity_invite_delete(state, account, r).await);
+        },
+        c2s::proto::ServerReq::IdentityInviteList(_, _) => {
+            return api_resp(state, h::identity_invite_list(state, account).await);
+        },
+        c2s::proto::ServerReq::ChannelGroupCreate(_, r) => {
+            return api_resp(state, h::channel_group_create(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelGroupModify(_, r) => {
+            return api_resp(state, h::channel_group_modify(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelGroupDelete(_, r) => {
+            return api_resp(state, h::channel_group_delete(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelGroupList(_, _) => {
+            return api_resp(state, h::channel_group_list(state, account).await);
+        },
+        c2s::proto::ServerReq::ChannelCreate(_, r) => {
+            return api_resp(state, h::channel_create(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelJoinChannel(_, r) => {
+            return api_resp(state, h::channel_join_channel(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelJoinIdentity(_, r) => {
+            return api_resp(state, h::channel_join_identity(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelAdd(_, r) => {
+            return api_resp(state, h::channel_add(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelJoinPreview(_, r) => {
+            return api_resp(state, h::channel_join_preview(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelModify(_, r) => {
+            return api_resp(state, h::channel_modify(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelDelete(_, r) => {
+            return api_resp(state, h::channel_delete(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelList(_, r) => {
+            return api_resp(state, h::channel_list(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelMemberList(_, r) => {
+            return api_resp(state, h::channel_member_list(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelMemberModify(_, r) => {
+            return api_resp(state, h::channel_member_modify(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelMemberDelete(_, r) => {
+            return api_resp(state, h::channel_member_delete(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelInviteCreate(_, r) => {
+            return api_resp(state, h::channel_invite_create(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelInviteModify(_, r) => {
+            return api_resp(state, h::channel_invite_modify(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelInviteDelete(_, r) => {
+            return api_resp(state, h::channel_invite_delete(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ChannelInviteList(_, r) => {
+            return api_resp(state, h::channel_invite_list(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ContactList(_, r) => {
+            return api_resp(state, h::contact_list(state, account, r).await);
+        },
+        c2s::proto::ServerReq::ContactModify(_, r) => {
+            return api_resp(state, h::contact_modify(state, account, r).await);
+        },
+        c2s::proto::ServerReq::MessagePush(_, r) => {
+            return api_resp(state, h::message_push(state, account, r).await);
+        },
+    }
+}
+
+fn s2s_error_response(state: &State, e: crate::subsystems::s2s_error::S2sError) -> Response<Body> {
+    if let crate::subsystems::s2s_error::S2sError::Internal(inner) = &e {
+        state.log.log_err(loga::WARN, inner.clone().context("Error handling s2s request"));
+    }
+    return Response::builder()
+        .status(e.status())
+        .header(CONTENT_TYPE, "application/json")
+        .header(CACHE_CONTROL, crate::subsystems::s2s_error::CachePolicy::NoStore.header_value())
+        .body(body_full(serde_json::to_vec(&e.body()).unwrap()))
+        .unwrap();
+}
+
+fn s2s_respond<R: s2sv1::ReqTrait>(
+    state: &State,
+    r: Result<R::Resp, crate::subsystems::s2s_error::S2sError>,
+) -> Response<Body> {
+    match r {
+        Ok(v) => return Response::builder()
+            .status(200)
+            .header(CONTENT_TYPE, "application/json")
+            .header(CACHE_CONTROL, crate::subsystems::s2s_error::CachePolicy::NoStore.header_value())
+            .body(body_full(serde_json::to_vec(&v).unwrap()))
+            .unwrap(),
+        Err(e) => return s2s_error_response(state, e),
+    }
+}
+
+fn s2s_respond_get<R: c2s::PathReqTrait>(
+    state: &State,
+    r: Result<crate::subsystems::s2s_error::Cached<R::Resp>, crate::subsystems::s2s_error::S2sError>,
+) -> Response<Body> where R::Resp: Serialize {
+    match r {
+        Ok(v) => return Response::builder()
+            .status(200)
+            .header(CONTENT_TYPE, "application/json")
+            .header(CACHE_CONTROL, v.policy.header_value())
+            .body(body_full(serde_json::to_vec(&v.value).unwrap()))
+            .unwrap(),
+        Err(e) => return s2s_error_response(state, e),
+    }
+}
+
+fn auth_token(head: &Parts) -> String {
+    return head
+        .headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+}
+
+async fn handle_s2s(state: &Arc<State>, head: &Parts, body: Incoming) -> Result<Response<Body>, VisErr<loga::Error>> {
+    use crate::{
+        interface::s2s::*,
+        subsystems::messages as m,
+        subsystems::s2s_error::S2sError,
+    };
+
+    let auth_token = auth_token(head);
+    let body_bytes = body.collect().await.err_external()?.to_bytes();
+    let req = match serde_json::from_slice::<s2sv1::Req>(&body_bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(
+                s2s_error_response(
+                    state,
+                    S2sError::BadRequest(format!("Request body is not a valid s2s request: {}", e)),
+                ),
+            );
+        },
+    };
+    match req {
+        s2sv1::Req::StartIdentify(r) => {
+            return Ok(s2s_respond::<StartIdentify>(state, Ok(state.s2s_state.start_identify(r).await)));
+        },
+        s2sv1::Req::Identify(r) => {
+            return Ok(s2s_respond::<Identify>(state, state.s2s_state.identify(&state.db, r).await));
+        },
+        s2sv1::Req::Notify(r) => {
+            return Ok(s2s_respond::<Notify>(state, m::handle_notify(state, r).await));
+        },
+        s2sv1::Req::Join(r) => {
+            return Ok(s2s_respond::<Join>(state, m::handle_join(state, &auth_token, r).await));
+        },
+        s2sv1::Req::PullOutbox(r) => {
+            return Ok(s2s_respond::<PullOutbox>(state, m::handle_pull_outbox(state, &auth_token, r).await));
+        },
+    }
+}
+
+async fn handle_s2s_get(state: &Arc<State>, head: &Parts, rest: &str) -> Response<Body> {
+    use crate::{
+        interface::s2s::*,
+        subsystems::messages as m,
+        subsystems::s2s_error::S2sError,
+    };
+
+    let auth_token = auth_token(head);
+    let first = rest.split('/').next().unwrap();
+    macro_rules! dispatch{
+        ($req: ty, $handler: expr) => {
+            {
+                let req = match < $req as c2s:: PathReqTrait >:: deserialize_path(rest) {
+                    Ok(r) => r,
+                    Err(e) => return s2s_error_response(state, S2sError::BadRequest(e)),
+                };
+                return s2s_respond_get::<$req>(state, $handler(state, &auth_token, req).await);
             }
-            let (head, body) = req.into_parts();
-            let mut path_iter = head.uri.path().trim_matches('/').split('/');
-            match path_iter.next().unwrap() {
-                "s1" => match path_iter.next().unwrap() {
-                    _ => {
-                        todo!();
-                    },
+        };
+    }
+    match first {
+        GET_PREFIX_CHANNEL_INFO => dispatch!(GetChannelInfo, m::handle_channel_info),
+        GET_PREFIX_ACTIVITY => dispatch!(GetActivity, m::handle_get_activity),
+        GET_PREFIX_SNAP_PAGE => dispatch!(GetSnapPage, m::handle_get_snap_page),
+        GET_PREFIX_SNAP_PAGE_CONTAINING_TIME => dispatch!(
+            GetSnapPageContainingTime,
+            m::handle_snap_page_containing_time
+        ),
+        GET_PREFIX_SNAP_LOOKUP => dispatch!(GetSnapLookup, m::handle_snap_lookup),
+        GET_PREFIX_JOIN_PREVIEW => dispatch!(GetJoinPreview, m::handle_join_preview),
+        GET_PREFIX_FILE => {
+            let req = match <GetFile as c2s::PathReqTrait>::deserialize_path(rest) {
+                Ok(r) => r,
+                Err(e) => return s2s_error_response(state, S2sError::BadRequest(e)),
+            };
+            match m::handle_get_file(state, &auth_token, req).await {
+                Ok((mime, bytes)) => {
+                    return Response::builder()
+                        .status(200)
+                        .header(CONTENT_TYPE, mime)
+                        .header(X_CONTENT_TYPE_OPTIONS, "nosniff")
+                        .header(CACHE_CONTROL, crate::subsystems::s2s_error::CachePolicy::Immutable.header_value())
+                        .body(body_full(bytes))
+                        .unwrap();
                 },
-                "c1" => {
-                    if hyper_tungstenite::is_upgrade_request(&req) {
-                        // Websocket req
-                        let upgrade = hyper_tungstenite::upgrade(&mut req, None);
-                        let (head, _) = req.into_parts();
-                        return Ok(response_503());
-                        //. return Ok(handle_ws(state, head, upgrade, handle_ws_link).await);
-                    } else {
-                        let identity = identify_c2s(&state, &head.headers).await?;
-                        match path_iter.next().unwrap() {
-                            "client" => {
-                                let path = head.uri.path().trim_matches('/');
+                Err(e) => return s2s_error_response(state, e),
+            }
+        },
+        _ => return response_404(),
+    }
+}
 
-                                #[derive(RustEmbed)]
-                                #[folder = "$STATIC_DIR"]
-                                struct Static;
+fn accepts_encoding(headers: &HeaderMap, encoding: &str) -> bool {
+    for v in headers.get_all(ACCEPT_ENCODING) {
+        let Ok(v) = v.to_str() else {
+            continue;
+        };
+        for item in v.split(',') {
+            let mut parts = item.split(';');
+            if !parts.next().unwrap().trim().eq_ignore_ascii_case(encoding) {
+                continue;
+            }
+            let mut q = 1.;
+            for param in parts {
+                let Some((k, v)) = param.split_once('=') else {
+                    continue;
+                };
+                if !k.trim().eq_ignore_ascii_case("q") {
+                    continue;
+                }
+                q = v.trim().parse::<f32>().unwrap_or(0.);
+            }
+            return q > 0.;
+        }
+    }
+    return false;
+}
 
-                                let mut f = Static::get(path);
-                                if f.is_none() {
-                                    f = Static::get("index.html");
-                                }
-                                match f {
-                                    Some(f) => {
-                                        let etag = format!("\"{}\"", hex::encode(f.metadata.sha256_hash()));
-                                        if let Some(h) = head.headers.get(IF_NONE_MATCH) {
-                                            if h == etag.as_bytes() {
-                                                return Ok(
-                                                    Response::builder().status(304).body(body_full(vec![])).unwrap(),
-                                                );
-                                            }
-                                        }
-                                        let mut resp = Response::builder().status(200);
-                                        resp = resp.header("Content-type", f.metadata.mimetype());
-                                        resp = resp.header(ETAG, etag);
-                                        return Ok(resp.body(body_full(f.data.to_vec())).unwrap());
-                                    },
-                                    None => {
-                                        return Ok(response_404());
-                                    },
-                                }
-                            },
-                            "login" => {
-                                return Ok(oidc::handle_oidc(&state.oidc_state, head).await?);
-                            },
-                            "post" => {
-                                let Some(acc) = identify_c2s(&state, &head.headers).await? else {
-                                    return Ok(response_401());
-                                };
-                                let resp;
-                                match serde_json::from_slice::<c2s::proto::Req>(
-                                    &body.collect().await.err_external()?.to_bytes(),
-                                )
-                                    .err_external()?
-                                    .to_server_req() {
-                                    c2s::proto::ServerReq::Logout(rr, r2) => {
-                                        oidc::handle_logout(&state.oidc_state, &state.log, head).await;
-                                        resp = rr(());
-                                    },
-                                    //.                                    c2s::proto::ServerReq::IdentityCreate(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::IdentityModify(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::IdentityDelete(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::IdentityGet(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::IdentityList(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::ChannelCreate(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::ChannelJoin(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::ChannelModify(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::ChannelDelete(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::ChannelGet(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::ChannelGroupCreate(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::ChannelGroupModify(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::ChannelGroupDelete(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    //.                                    c2s::proto::ServerReq::ChannelGroupGet(rr, r2) => {
-                                    //.                                        resp = rr(());
-                                    //.                                    },
-                                    c2s::proto::ServerReq::ChannelOrChannelGroupTree(rr, channel_or_channel_group_tree) => {
-                                        let (channels, channelgroups) = tx(&state.db, |db_tx| {
-                                            use good_ormning::sqlite::{
-                                                good_query_many,
-                                            };
-                                            let channels = good_query_many!(
-                                                db,
-                                                //# genemichaels-external: sql-formatter-sqlite
-                                                r#"select
-                                                     identity,
-                                                     id,
-                                                     idem,
-                                                     channel_group,
-                                                     memo_short,
-                                                     memo_long
-                                                   from
-                                                     channel
-                                                   where
-                                                     account_id = ${account_id_t = account}
-                                                   "#;
-                                                &mut db_tx
-                                            ).map_err(|e| loga::err(e.0))?;
-                                            let channelgroups = good_query_many!(
-                                                db,
-                                                //# genemichaels-external: sql-formatter-sqlite
-                                                r#"select
-                                                     rowid,
-                                                     idem,
-                                                     memo_short,
-                                                     memo_long
-                                                   from
-                                                     channelgroup
-                                                   where
-                                                     account_id = ${account_id_t = account}
-                                                   "#;
-                                                &mut db_tx
-                                            ).map_err(|e| loga::err(e.0))?;
-                                            return Ok((channels, channelgroups));
-                                        }).await.err_internal()?;
-                                        let mut out = vec![];
-                                        let mut channelgroup_children = HashMap::new();
-                                        for channel in channels {
-                                            let channel1 = ChannelRes {
-                                                identity: channel.identity,
-                                                id: channel.id,
-                                                idem: channel.idem,
-                                                memo_short: channel.memo_short,
-                                                memo_long: channel.memo_long,
-                                                group: channel.channel_group.clone(),
-                                            };
-                                            if let Some(group) = channel.channel_group {
-                                                channelgroup_children
-                                                    .entry(group.0.clone())
-                                                    .or_default()
-                                                    .push(channel1);
-                                            } else {
-                                                out.push(ChannelOrChannelGroup::Channel(channel1));
-                                            }
-                                        }
-                                        for cg in channelgroups {
-                                            out.push(ChannelOrChannelGroup::ChannelGroup(ChannelOrChannelGroupGroup {
-                                                group: ChannelGroupRes {
-                                                    id: cg.rowid,
-                                                    idem: cg.idem,
-                                                    memo_short: cg.memo_short,
-                                                    memo_long: cg.memo_long,
-                                                },
-                                                children: channelgroup_children
-                                                    .remove(cg.rowid.clone())
-                                                    .unwrap_or_default(),
-                                            }));
-                                        }
-                                        resp = rr(out);
-                                    },
-                                //.                                    c2s::proto::ServerReq::IdentityInvitationCreate(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::IdentityInvitationModify(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::IdentityInvitationDelete(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::IdentityInvitationList(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::ChannelInvitationCreate(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::ChannelInvitationModify(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::ChannelInvitationDelete(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::ChannelInvitationList(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::MemberAdd(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::MemberDelete(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::MemberList(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::MessagePush(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::MessageLastPage(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::MessagePageContaining(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::MessageGetPage(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                //.                                    c2s::proto::ServerReq::MessageDelete(rr, r2) => {
-                                //.                                        resp = rr(());
-                                //.                                    },
-                                }
-                                return Ok(Response::builder().status(200).body(body_full(resp.0)).unwrap());
-                            },
-                        }
-                    }
-                },
+const STATIC_VERSIONED_PREFIX: &str = "v/";
+
+fn handle_static(head: &Parts) -> Response<Body> {
+    #[derive(RustEmbed)]
+    #[folder = "$STATIC_DIR"]
+    struct Static;
+
+    let path = head.uri.path().trim_start_matches('/');
+    let path = if path.is_empty() {
+        "index.html"
+    } else {
+        path
+    };
+    let versioned = path.starts_with(STATIC_VERSIONED_PREFIX);
+    let Some(f) = Static::get(path) else {
+        return response_404();
+    };
+    let (encoding, data) = shed!{
+        'found _;
+        if accepts_encoding(&head.headers, "br") {
+            if let Some(d) = f.data_br() {
+                break 'found (Some("br"), d);
             }
         }
-    }.await {
+        if accepts_encoding(&head.headers, "gzip") {
+            if let Some(d) = f.data_gzip() {
+                break 'found (Some("gzip"), d);
+            }
+        }
+        break 'found (None, f.data());
+    };
+    let etag = match encoding {
+        Some(e) => format!("\"{}-{}\"", f.hash(), e),
+        None => f.etag().to_string(),
+    };
+    if let Some(h) = head.headers.get(IF_NONE_MATCH) {
+        if h == etag.as_bytes() {
+            let mut resp = Response::builder().status(304).header(ETAG, etag).header(VARY, ACCEPT_ENCODING.as_str());
+            if versioned {
+                resp =
+                    resp.header(CACHE_CONTROL, crate::subsystems::s2s_error::CachePolicy::Immutable.header_value());
+            }
+            return resp.body(body_full(vec![])).unwrap();
+        }
+    }
+    let mut resp =
+        Response::builder()
+            .status(200)
+            .header(CONTENT_TYPE, f.mime_type().unwrap_or("application/octet-stream"))
+            .header(ETAG, etag)
+            .header(VARY, ACCEPT_ENCODING.as_str());
+    if versioned {
+        resp = resp.header(CACHE_CONTROL, crate::subsystems::s2s_error::CachePolicy::Immutable.header_value());
+    }
+    if let Some(e) = encoding {
+        resp = resp.header(CONTENT_ENCODING, e);
+    }
+    return resp.body(body_full(data.to_vec())).unwrap();
+}
+
+async fn handle_req_inner(state: &Arc<State>, req: Request<Incoming>) -> Result<Response<Body>, VisErr<loga::Error>> {
+    let is_ws = hyper_tungstenite::is_upgrade_request(&req);
+    let (head, body) = req.into_parts();
+    let path = head.uri.path().to_string();
+    let mut segs = path.trim_start_matches('/').split('/');
+    let first = segs.next().unwrap();
+    if is_ws {
+        if !path.trim_start_matches('/').is_empty() {
+            return Ok(response_404());
+        }
+        if !same_origin(&head.headers) {
+            return Ok(response_403());
+        }
+        let Some(account) = identify_c2s(state, &head.headers).await.err_internal()? else {
+            return Ok(response_401());
+        };
+        let (response, ws) =
+            hyper_tungstenite::upgrade(
+                Request::from_parts(head, body),
+                None,
+            ).map_err(|e| loga::err(e.to_string())).err_external()?;
+        let state = state.clone();
+        tokio::spawn(async move {
+            let ws = match ws.await {
+                Ok(w) => w,
+                Err(e) => {
+                    state.log.log_err(loga::WARN, loga::err(e.to_string()).context("WS upgrade failed"));
+                    return;
+                },
+            };
+            crate::subsystems::ws_bus::run_ws_connection(&state, account, ws).await;
+        });
+        return Ok(response.map(|b| b.map_err(|e| std::io::Error::other(e.to_string())).boxed()));
+    }
+    match first {
+        "oidc" => {
+            return Ok(oidc::handle_oidc(&state.oidc_state, &state.db, head).await?);
+        },
+        "logout" => {
+            return Ok(oidc::handle_logout(&state.oidc_state, &state.db, head).await?);
+        },
+        "api" => {
+            if head.method != Method::POST {
+                return Ok(response_404());
+            }
+            let is_json =
+                head
+                    .headers
+                    .get(CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| v.split(';').next().unwrap().trim().eq_ignore_ascii_case("application/json"))
+                    .unwrap_or(false);
+            if !is_json {
+                return Ok(response_400("Content-Type must be application/json"));
+            }
+            let Some(account) = identify_c2s(state, &head.headers).await.err_internal()? else {
+                return Ok(response_401());
+            };
+            let req =
+                serde_json::from_slice::<c2s::proto::Req>(&body.collect().await.err_external()?.to_bytes()).err_external()?;
+            return Ok(handle_api(state, &head, account, req).await);
+        },
+        p if crate::subsystems::c2s_get::GET_PATH_PREFIXES.contains(&p) => {
+            if head.method != Method::GET {
+                return Ok(response_404());
+            }
+            let Some(account) = identify_c2s(state, &head.headers).await.err_internal()? else {
+                return Ok(response_401());
+            };
+            return crate::subsystems::c2s_get::handle(state, account, &path).await;
+        },
+        _ => {
+            return Ok(handle_static(&head));
+        },
+    }
+}
+
+async fn handle_s2s_req_inner(
+    state: &Arc<State>,
+    req: Request<Incoming>,
+) -> Result<Response<Body>, VisErr<loga::Error>> {
+    let (head, body) = req.into_parts();
+    let path = head.uri.path().to_string();
+    let Some(rest) = path.strip_prefix(crate::subsystems::s2s_client::S2SV1_PATH) else {
+        return Ok(response_404());
+    };
+    let rest = rest.trim_start_matches('/');
+    if head.method == Method::POST && rest.is_empty() {
+        return handle_s2s(state, &head, body).await;
+    }
+    if head.method == Method::GET && !rest.is_empty() {
+        return Ok(handle_s2s_get(state, &head, rest).await);
+    }
+    return Ok(response_404());
+}
+
+async fn handle_s2s_req(state: &Arc<State>, req: Request<Incoming>) -> Response<BoxBody<Bytes, std::io::Error>> {
+    let url = req.uri().clone();
+    return vis_response(state, url, handle_s2s_req_inner(state, req).await);
+}
+
+async fn handle_req(state: &Arc<State>, req: Request<Incoming>) -> Response<BoxBody<Bytes, std::io::Error>> {
+    let url = req.uri().clone();
+    return vis_response(state, url, handle_req_inner(state, req).await);
+}
+
+fn vis_response(
+    state: &Arc<State>,
+    url: Uri,
+    res: Result<Response<Body>, VisErr<loga::Error>>,
+) -> Response<BoxBody<Bytes, std::io::Error>> {
+    match res {
         Ok(r) => {
             return r;
         },
@@ -457,7 +691,7 @@ async fn handle_req(state: &Arc<State>, mut req: Request<Incoming>) -> Response<
 
 fn main() {
     let log = Log::new_root(loga::DEBUG);
-    let runtime = runtime::Builder::new_current_thread().build().unwrap();
+    let runtime = runtime::Builder::new_current_thread().enable_all().build().unwrap();
     match runtime.block_on({
         let log = log.clone();
         async move {
@@ -471,28 +705,53 @@ fn main() {
             }
             create_dirs(&config.persistent_dir).await?;
             let db_path = config.persistent_dir.join("db.sqlite3");
+            let files_dir = config.persistent_dir.join("files");
+            create_dirs(&files_dir).await?;
 
             // Spagh
+            let mut global_ips = vec![];
+            for addr in &config.global_addrs {
+                global_ips.push(resolve_global_ip(&log, addr).await?);
+            }
+            let first_global_ip = *global_ips.first().context("Config `global_addrs` must contain at least one address")?;
+            let spagh_node_bind_port =
+                config.spagh_node_bind_sockaddr.resolve().context("Error resolving spagh node bind addr")?.port();
             let spagh_node =
                 spaghettinuum_native::service::node::Node::new(
                     &log,
                     &tm,
                     config.spagh_node_bind_sockaddr,
+                    global_ips
+                        .iter()
+                        .filter(|ip| ip.is_ipv6())
+                        .chain(global_ips.iter().filter(|ip| ip.is_ipv4()))
+                        .map(|ip| SocketAddr::new(*ip, spagh_node_bind_port))
+                        .collect(),
                     &spaghettinuum_native::service::node::default_bootstrap(),
                     &config.cache_dir,
                 ).await?;
             let spagh_publisher_bind_sockaddr = config.spagh_publisher_bind_sockaddr.resolve()?;
+            let spagh_publisher_advertise_addr = SocketAddr::new(
+                first_global_ip,
+                config.spagh_publisher_advertise_port.unwrap_or(spagh_publisher_bind_sockaddr.port()),
+            );
             let spagh_publisher =
                 spaghettinuum_native::service::publisher::Publisher::new(
                     &log,
                     &tm,
                     spagh_node.clone(),
                     spagh_publisher_bind_sockaddr,
-                    SocketAddr::new(
-                        resolve_global_ip(&log, &config.spagh_publisher_advertise_global_addr).await?.into(),
-                        config.spagh_publisher_advertise_global_port.unwrap_or(spagh_publisher_bind_sockaddr.port()),
-                    ),
+                    spagh_publisher_advertise_addr,
                     &config.persistent_dir,
+                ).await?;
+            let spagh_resolver =
+                spaghettinuum_native::service::resolver::Resolver::new(
+                    &log,
+                    &tm,
+                    spagh_node.clone(),
+                    None,
+                    &config.cache_dir,
+                    Some((spagh_publisher_advertise_addr, spagh_publisher.clone())),
                 ).await?;
 
             // Db
@@ -503,20 +762,146 @@ fn main() {
                     .build()
                     .context("Error creating sqlite pool")?;
             db.get().await?.interact(move |conn| -> Result<_, loga::Error> {
-                db::migrate(&mut *conn, None).map_err(|e| loga::err(e.0))?;
+                db::migrate(&mut *conn, Some(&|v| {
+                    let db::DbVersions::V2(db) = v else {
+                        return Ok(());
+                    };
+                    for (table, column) in [
+                        ("account", "soft_deleted_at"),
+                        ("identity", "soft_deleted_at"),
+                        ("channel", "deleted"),
+                        ("identity_invite", "expiry"),
+                        ("channel_invite", "expiry"),
+                        ("message", "receive_time"),
+                        ("outbox", "created"),
+                        ("session", "last_used"),
+                    ] {
+                        let query = format!("update \"{}\" set \"{}\" = \"{}\" * 1000", table, column, column);
+                        good_ormning::runtime::sqlite::SqliteConnection::execute(&mut db.0, &query, ()).map_err(
+                            |e| good_ormning::runtime::GoodError(format!("Error executing query [{}]: {}", query, e)),
+                        )?;
+                    }
+                    return Ok(());
+                })).map_err(|e| loga::err(e.0))?;
                 return Ok(());
             }).await?.context_with("Migration failed", ea!(action = "db_init", path = db_path.to_string_lossy()))?;
 
             // State
+            let s2s_bind_sockaddr = config.s2s_bind_sockaddr.resolve().context("Error resolving s2s bind addr")?;
+            let vapid_keys = crate::subsystems::push::ensure_vapid_keypair(&db).await?;
+            let users_state = build_users_state(&config.users, &config.fdap)?;
             let state = Arc::new(State {
                 log: log.clone(),
                 db: db,
-                oidc_state: oidc::new_state(&log, config.oidc_config).await?,
+                oidc_state: oidc::new_state(&log, &config.public_url, config.oidc_config).await?,
+                users_state: users_state,
+                s2s_state: S2sState::new(spagh_resolver.clone()),
+                s2s_client: Arc::new(
+                    crate::subsystems::s2s_client::S2sClient::new(log.clone(), spagh_resolver.clone()),
+                ),
+                spagh_publish: crate::subsystems::spagh_publish::SpaghPublishState::new(
+                    spagh_publisher.clone(),
+                    InfoResponse {
+                        advertise_addr: spagh_publisher_advertise_addr,
+                        cert_pub_hash: spagh_publisher.pub_cert_hash(),
+                    },
+                    SpaghRecord::V1(SpaghRecordV1 {
+                        ips: global_ips,
+                        port: config.s2s_advertise_port.unwrap_or(s2s_bind_sockaddr.port()),
+                    }),
+                ),
+                ws_bus: Arc::new(crate::subsystems::ws_bus::WsBus::new()),
+                vapid_keys: vapid_keys,
+                default_page_size: config.default_page_size,
+                pull_scheduler: crate::subsystems::pull_scheduler::PullScheduler::new(),
+                files_dir: files_dir,
+            });
+            crate::subsystems::spagh_publish::publish_all(&state).await?;
+            tm.periodic("spagh_cert_refresh", crate::subsystems::spagh_publish::CERT_REFRESH_PERIOD, {
+                let state = state.clone();
+                move || {
+                    let state = state.clone();
+                    async move {
+                        match crate::subsystems::spagh_publish::refresh_certs(&state).await {
+                            Ok(_) => { },
+                            Err(e) => {
+                                state.log.log_err(loga::WARN, e.context("Error refreshing identity TLS certs"));
+                            },
+                        }
+                    }
+                }
+            });
+            crate::subsystems::pull_scheduler::enumerate_and_seed(&state).await?;
+            tm.critical_task("pull_scheduler", {
+                let scheduler = state.pull_scheduler.clone();
+                let state = state.clone();
+                async move {
+                    scheduler.run(state).await
+                }
+            });
+            tm.critical_task("backfill", {
+                let state = state.clone();
+                async move {
+                    crate::subsystems::messages::run_backfill(state).await
+                }
+            });
+            tm.critical_task("retention_cleanup", {
+                let state = state.clone();
+                async move {
+                    crate::subsystems::messages::run_retention_cleanup(state).await
+                }
             });
 
             // Serve
-            const S2SV1_PREFIX: &str = "/s/1";
-            const C2SV1_PREFIX: &str = "/c/1";
+            let s2s_tls = tokio_rustls::TlsAcceptor::from(Arc::new({
+                let mut server_config =
+                    spaghettinuum_native::utils::tls_util::server_config_builder().with_cert_resolver(state.spagh_publish.certs.clone());
+                server_config.alpn_protocols = vec![b"http/1.1".to_vec()];
+                server_config
+            }));
+            tm.critical_stream(
+                "s2s",
+                TcpListenerStream::new(
+                    TcpListener::bind(s2s_bind_sockaddr)
+                        .await
+                        .context_with("Error binding to s2s address", ea!(addr = s2s_bind_sockaddr))?,
+                ),
+                {
+                    let state = state.clone();
+                    move |conn| {
+                        let state = state.clone();
+                        let s2s_tls = s2s_tls.clone();
+                        async move {
+                            let conn = match conn {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    state.log.log_err(loga::DEBUG, e.context("Error receiving s2s connection"));
+                                    return Ok(());
+                                },
+                            };
+                            tokio::task::spawn(async move {
+                                match async {
+                                    ta_return!((), loga::Error);
+                                    let io =
+                                        TokioIo::new(
+                                            s2s_tls.accept(conn).await.context("Error during s2s TLS handshake")?,
+                                        );
+                                    http1::Builder::new().serve_connection(io, service_fn(cap_fn!((req)(state) {
+                                        return Ok(handle_s2s_req(&state, req).await) as Result<_, std::io::Error>;
+                                    }))).await?;
+                                    return Ok(());
+                                }.await {
+                                    Ok(_) => (),
+                                    Err(e) => {
+                                        state.log.log_err(loga::DEBUG, e.context("Error serving s2s connection"));
+                                    },
+                                }
+                            });
+                            return Ok(());
+                        }
+                    }
+                },
+            );
             tm.critical_stream(
                 "http",
                 TcpListenerStream::new(
@@ -525,28 +910,6 @@ fn main() {
                         .context_with("Error binding to address", ea!(addr = config.bind_sockaddr))?,
                 ),
                 {
-                    let mut routes = BTreeMap::<String, Box<dyn Handler<Body>>>::new();
-
-                    fn path_unshift<
-                        'a,
-                        E: std::error::Error,
-                        T: FromStr<Err = E>,
-                    >(path: &'a str, error_hint: &str) -> Result<(T, &'a str), loga::Error> {
-                        let Some(r) = path.strip_prefix("/") else {
-                            return Err(loga::err(format!("Missing path segment [{}]", error_hint)));
-                        };
-                        let next_slash = match r.find("/") {
-                            Some(l) => l,
-                            None => r.len(),
-                        };
-                        let seg =
-                            T::from_str(
-                                &r[0 .. next_slash],
-                            ).context(format!("Error parsing path segment [{}]", error_hint))?;
-                        let remainder = &r[next_slash..];
-                        return Ok((seg, remainder));
-                    }
-
                     move |conn| {
                         let state = state.clone();
                         async move {

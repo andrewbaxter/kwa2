@@ -26,10 +26,14 @@ use {
 
 #[derive(rooting_forms::Form)]
 struct Form_ {
-    #[title("Short memo")]
-    memo_short: String,
-    #[title("Extra memo")]
-    memo_long: String,
+    #[title("Name")]
+    name: String,
+    #[title("Description")]
+    description: String,
+    #[title("Shown name")]
+    shown_name: Option<String>,
+    #[title("Shown description")]
+    shown_description: Option<String>,
 }
 
 pub fn build(pc: &mut ProcessingContext) -> El {
@@ -41,7 +45,7 @@ pub fn build(pc: &mut ProcessingContext) -> El {
         pc,
         format!("New identity"),
         Ministate::Identities,
-        form_els.error.unwrap(),
+        form_els.error,
         form_els.elements,
         async move |idem| {
             let Ok(new_values) = form_state.parse() else {
@@ -49,8 +53,10 @@ pub fn build(pc: &mut ProcessingContext) -> El {
             };
             let res = req_post_json(&state().env.base_url, c2s::IdentityCreate {
                 idem: Some(idem.to_string()),
-                memo_short: new_values.memo_short,
-                memo_long: new_values.memo_long,
+                name: new_values.name,
+                description: new_values.description,
+                shown_name: new_values.shown_name,
+                shown_description: new_values.shown_description,
             }).await?;
             localdata::ensure_identity(res.clone()).await;
             eg.event(|pc| {

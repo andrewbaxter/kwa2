@@ -24,7 +24,7 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity) -> El {
         get_or_req_api_identity(identity, true),
         |local| LazyPage {
             center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
-                text: local.res.memo_short.clone(),
+                text: local.res.name.clone(),
                 link: None,
             }).root,
             body: vec![
@@ -33,16 +33,19 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity) -> El {
                     text: format!("Edit"),
                     link: ministate_octothorpe(&Ministate::IdentityEdit(local.res.id.clone())),
                     image: None,
+                    generated_image: None,
                 }).root,
                 style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: format!("Invitations"),
                     link: ministate_octothorpe(&Ministate::IdentityInvites(local.res.id.clone())),
                     image: None,
+                    generated_image: None,
                 }).root,
                 style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: format!("Delete"),
                     link: ministate_octothorpe(&Ministate::IdentityDelete(local.res.id.clone())),
                     image: None,
+                    generated_image: None,
                 }).root,
             ],
         },
