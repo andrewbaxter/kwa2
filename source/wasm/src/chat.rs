@@ -53,6 +53,15 @@ pub enum ChatModeReplyMessageTarget {
     Outbox(ChatModeReplyMessageTargetOutbox),
 }
 
+impl ChatModeReplyMessageTarget {
+    pub fn channel(&self) -> &QualifiedChannelId {
+        match self {
+            ChatModeReplyMessageTarget::Channel(m) => return &m.channel,
+            ChatModeReplyMessageTarget::Outbox(m) => return &m.channel,
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub struct ChatModeReplyMessage {
     pub target: ChatModeReplyMessageTarget,

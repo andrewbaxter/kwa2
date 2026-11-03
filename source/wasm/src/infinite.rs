@@ -166,6 +166,44 @@ struct EntryState<E: Entry> {
     entry: Rc<E>,
     entry_el: El,
     _entry_el_observe: ObserveHandle,
+    sticky: Cell<bool>,
+}
+
+impl<E: Entry> EntryState<E> {
+    fn set_sticky(&self, sticky: bool) {
+        if self.sticky.get() == sticky {
+            return;
+        }
+        self.sticky.set(sticky);
+        let s = el_style(&self.entry_el);
+        if sticky {
+            s.set_property("position", "sticky").unwrap();
+            s.set_property("top", "0px").unwrap();
+            s.set_property("bottom", "0px").unwrap();
+            s.set_property("z-index", "1").unwrap();
+        } else {
+            s.remove_property("position").unwrap();
+            s.remove_property("top").unwrap();
+            s.remove_property("bottom").unwrap();
+            s.remove_property("z-index").unwrap();
+        }
+    }
+
+    fn top(&self) -> f64 {
+        if !self.sticky.get() {
+            return self.entry_el.offset_top();
+        }
+        let raw = self.entry_el.raw();
+        if let Some(prev) = raw.previous_element_sibling() {
+            let prev = prev.dyn_into::<HtmlElement>().unwrap();
+            return (prev.offset_top() + prev.offset_height()) as f64;
+        }
+        if let Some(next) = raw.next_element_sibling() {
+            let next = next.dyn_into::<HtmlElement>().unwrap();
+            return next.offset_top() as f64 - self.entry_el.offset_height();
+        }
+        return self.entry_el.offset_top();
+    }
 }
 
 impl<E: Entry> ContainerEntry for EntryState<E> {
@@ -268,10 +306,24 @@ fn calc_anchor_offset(real_origin_y: f64, anchor_top: f64, anchor_height: f64, a
 }
 
 impl<E: Entry> Infiniscroll_<E> {
+    fn realize_entry(&self, pc: &mut ProcessingContext, feed_id: &E::FeedId, entry: Rc<E>) -> EntryState<E> {
+        let entry_el = entry.create_el(pc);
+        let sticky = self.want_sticky.borrow().iter().any(|s| s == &entry.time());
+        let out = EntryState {
+            feed_id: feed_id.clone(),
+            entry: entry,
+            entry_el: entry_el.clone(),
+            _entry_el_observe: self.entry_resize_observer.borrow().as_ref().unwrap().observe(&entry_el.raw()),
+            sticky: Cell::new(false),
+        };
+        out.set_sticky(sticky);
+        return out;
+    }
+
     fn reanchor_inner(&self, mut anchor_i: usize, real_origin_y: f64) {
         // Move anchor pointer down until directly after desired element
         while let Some(e_state) = self.real.borrow().get(anchor_i + 1) {
-            if e_state.entry_el.offset_top() > real_origin_y {
+            if e_state.top() > real_origin_y {
                 break;
             }
             anchor_i += 1;
@@ -279,7 +331,7 @@ impl<E: Entry> Infiniscroll_<E> {
 
         // Move anchor pointer up until directly above (=at) desired element.
         while let Some(e_state) = self.real.borrow().get(anchor_i) {
-            if e_state.entry_el.offset_top() <= real_origin_y {
+            if e_state.top() <= real_origin_y {
                 break;
             }
             if anchor_i == 0 {
@@ -297,7 +349,7 @@ impl<E: Entry> Infiniscroll_<E> {
                 .set(
                     calc_anchor_offset(
                         real_origin_y,
-                        anchor.entry_el.offset_top(),
+                        anchor.top(),
                         anchor.entry_el.offset_height(),
                         self.anchor_alignment.get(),
                     ),
@@ -316,8 +368,7 @@ impl<E: Entry> Infiniscroll_<E> {
         let real_origin_y = {
             let real = self.real.borrow();
             let anchor = real.get(anchor_i).unwrap();
-            anchor.entry_el.offset_top() + anchor.entry_el.offset_height() * self.anchor_alignment.get() -
-                self.anchor_offset.get()
+            anchor.top() + anchor.entry_el.offset_height() * self.anchor_alignment.get() - self.anchor_offset.get()
         };
         let candidate_early_real_origin_y =
             real_origin_y - self.cached_frame_height.get() * self.anchor_alignment.get();
@@ -330,7 +381,7 @@ impl<E: Entry> Infiniscroll_<E> {
             late_all_stop = late_all_stop && f.late_stop && f.late_reserve.is_empty();
         }
         let last_el = self.real.borrow().last().unwrap().entry_el.clone();
-        let last_el_top = last_el.offset_top();
+        let last_el_top = self.real.borrow().last().unwrap().top();
         let first_el = self.real.borrow().first().unwrap().entry_el.clone();
         let first_el_top = 0.;
         let first_el_height = first_el.offset_height();
@@ -409,23 +460,6 @@ fn get_pivot_late<
         .or_else(|| f_state.early_reserve.front().map(|entry| entry.time()));
 }
 
-fn realize_entry<
-    E: Entry,
->(
-    pc: &mut ProcessingContext,
-    entry_resize_observer: &ResizeObserver,
-    feed_id: &E::FeedId,
-    entry: Rc<E>,
-) -> EntryState<E> {
-    let entry_el = entry.create_el(pc);
-    return EntryState {
-        feed_id: feed_id.clone(),
-        entry: entry,
-        entry_el: entry_el.clone(),
-        _entry_el_observe: entry_resize_observer.observe(&entry_el.raw()),
-    };
-}
-
 pub struct WeakInfinite<E: Entry>(Weak<Infiniscroll_<E>>);
 
 impl<E: Entry> Clone for WeakInfinite<E> {
@@ -471,6 +505,7 @@ impl<E: 'static + Entry> Infinite<E> {
         {
             let s = el_style(&scroll_outer);
             s.set_property("flex-grow", "1").unwrap();
+            s.set_property("overflow-x", "hidden").unwrap();
             s.set_property("overflow-y", "scroll").unwrap();
             s.set_property("scrollbar-width", "none").unwrap();
             s.set_property("max-height", "100%").unwrap();
@@ -761,25 +796,22 @@ impl<E: 'static + Entry> Infinite<E> {
         let mut changed = false;
         shed!{
             'done _;
-            if let Some(have_id) = self.0.want_sticky.borrow().as_ref() {
-                if have_id == id {
-                    // No change
-                    break 'done;
-                } else {
-                    // Changed; clean up old sticky entry
-                    if let Some(f) = self.0.reserve_sticky_entry.borrow().as_ref() {
-                        changed = true;
-                        f.entry_el.ref_replace(vec![]);
-                    }
-                }
+            if self.0.want_sticky.borrow().as_ref() == Some(id) {
+                break 'done;
+            }
+            if let Some(f) = self.0.reserve_sticky_entry.borrow_mut().take() {
+                changed = true;
+                f.entry_el.ref_replace(vec![]);
             }
             *self.0.want_sticky.borrow_mut() = Some(id.clone());
-            // Locate rendered
+            let mut found = false;
             for e in &*self.0.real.borrow() {
-                if &e.entry.time() == id {
-                    // Element exists, must be marked sticky but otherwise all good
-                    break 'done;
-                }
+                let is_sticky = &e.entry.time() == id;
+                e.set_sticky(is_sticky);
+                found = found || is_sticky;
+            }
+            if found {
+                break 'done;
             }
             // Not rendered; clear and jump
             changed = true;
@@ -792,6 +824,9 @@ impl<E: 'static + Entry> Infinite<E> {
 
     pub fn clear_sticky(&self) {
         *self.0.want_sticky.borrow_mut() = None;
+        for e in &*self.0.real.borrow() {
+            e.set_sticky(false);
+        }
         let mut changed = false;
         if let Some(s) = self.0.reserve_sticky_entry.borrow_mut().take() {
             changed = true;
@@ -817,7 +852,7 @@ impl<E: 'static + Entry> Infinite<E> {
                 let real_height = real.el().offset_height();
                 let anchor_i = self.0.anchor_i.get().unwrap();
                 let anchor = &mut real.get(anchor_i).unwrap();
-                let anchor_top = anchor.entry_el.offset_top();
+                let anchor_top = anchor.top();
                 let anchor_height = anchor.entry_el.offset_height();
                 real_origin_y = anchor_top + anchor_height * self.0.anchor_alignment.get()
                     // Shift up becomes early usage
@@ -832,7 +867,7 @@ impl<E: 'static + Entry> Infinite<E> {
             let want_nostop_early = BUFFER + self.0.cached_frame_height.get() * self.0.anchor_alignment.get();
             let mut unrealize_early = 0usize;
             for e in &*self.0.real.borrow() {
-                let bottom = e.entry_el.offset_top() + e.entry_el.offset_height();
+                let bottom = e.top() + e.entry_el.offset_height();
                 let min_dist = real_origin_y - bottom;
                 if min_dist <= want_nostop_early {
                     break;
@@ -885,15 +920,7 @@ impl<E: 'static + Entry> Infinite<E> {
                             }
                         }
                     }
-                    let real =
-                        real.unwrap_or_else(
-                            || realize_entry(
-                                pc,
-                                self.0.entry_resize_observer.borrow().as_ref().unwrap(),
-                                &feed_id,
-                                entry,
-                            ),
-                        );
+                    let real = real.unwrap_or_else(|| self.0.realize_entry(pc, &feed_id, entry,),);
                     self.0.real.borrow_mut().el().ref_push(real.entry_el.clone());
                     let height = real.entry_el.offset_height();
                     real.entry_el.ref_replace(vec![]);
@@ -907,7 +934,7 @@ impl<E: 'static + Entry> Infinite<E> {
             let want_nostop_late = BUFFER + self.0.cached_frame_height.get() * (1. - self.0.anchor_alignment.get());
             let mut unrealize_late = 0usize;
             for e in self.0.real.borrow().iter().rev() {
-                let top = e.entry_el.offset_top();
+                let top = e.top();
                 let min_dist = top - real_origin_y;
                 if min_dist <= want_nostop_late {
                     break;
@@ -956,15 +983,7 @@ impl<E: 'static + Entry> Infinite<E> {
                             real = Some(real1);
                         }
                     }
-                    let real =
-                        real.unwrap_or_else(
-                            || realize_entry(
-                                pc,
-                                self.0.entry_resize_observer.borrow().as_ref().unwrap(),
-                                &feed_id,
-                                entry,
-                            ),
-                        );
+                    let real = real.unwrap_or_else(|| self.0.realize_entry(pc, &feed_id, entry,),);
                     self.0.content.ref_push(real.entry_el.clone());
                     let height = real.entry_el.offset_height();
                     real.entry_el.ref_replace(vec![]);
@@ -1195,8 +1214,7 @@ impl<E: 'static + Entry> Infinite<E> {
                     if time < *self.0.reset_time.borrow() {
                         prepend.push(e);
                     } else if time == *self.0.reset_time.borrow() {
-                        let real =
-                            realize_entry(pc, self.0.entry_resize_observer.borrow().as_ref().unwrap(), feed_id, e);
+                        let real = self.0.realize_entry(pc, feed_id, e);
                         self.0.real.borrow_mut().push(real);
                         self.0.anchor_i.set(Some(0));
                     } else {
@@ -1205,13 +1223,7 @@ impl<E: 'static + Entry> Infinite<E> {
                 }
                 for e in &prepend {
                     if self.0.want_sticky.borrow().iter().any(|s| s == &e.time()) {
-                        let real =
-                            realize_entry(
-                                pc,
-                                self.0.entry_resize_observer.borrow().as_ref().unwrap(),
-                                feed_id,
-                                e.clone(),
-                            );
+                        let real = self.0.realize_entry(pc, feed_id, e.clone());
                         self.0.early_sticky.ref_push(real.el().clone());
                         *self.0.reserve_sticky_entry.borrow_mut() = Some(real);
                     }
@@ -1220,13 +1232,7 @@ impl<E: 'static + Entry> Infinite<E> {
                 feed.early_reserve.extend(prepend);
                 for e in &postpend {
                     if self.0.want_sticky.borrow().iter().any(|s| s == &e.time()) {
-                        let real =
-                            realize_entry(
-                                pc,
-                                self.0.entry_resize_observer.borrow().as_ref().unwrap(),
-                                feed_id,
-                                e.clone(),
-                            );
+                        let real = self.0.realize_entry(pc, feed_id, e.clone());
                         self.0.late_sticky.ref_push(real.el().clone());
                         *self.0.reserve_sticky_entry.borrow_mut() = Some(real);
                     }
@@ -1291,13 +1297,7 @@ impl<E: 'static + Entry> Infinite<E> {
                     }
                     for e in entries.iter().rev() {
                         if self.0.want_sticky.borrow().iter().any(|s| s == &e.time()) {
-                            let real =
-                                realize_entry(
-                                    pc,
-                                    self.0.entry_resize_observer.borrow().as_ref().unwrap(),
-                                    feed_id,
-                                    e.clone(),
-                                );
+                            let real = self.0.realize_entry(pc, feed_id, e.clone());
                             self.0.early_sticky.ref_push(real.el().clone());
                             *self.0.reserve_sticky_entry.borrow_mut() = Some(real);
                         }
@@ -1380,13 +1380,7 @@ impl<E: 'static + Entry> Infinite<E> {
                                     if feed_state.late_reserve.len() < MAX_RESERVE {
                                         let entry_time = entry.time();
                                         if self.0.want_sticky.borrow().iter().any(|s| s == &entry_time) {
-                                            let real =
-                                                realize_entry(
-                                                    pc,
-                                                    self.0.entry_resize_observer.borrow().as_ref().unwrap(),
-                                                    feed_id,
-                                                    entry.clone(),
-                                                );
+                                            let real = self.0.realize_entry(pc, feed_id, entry.clone(),);
                                             *self.0.reserve_sticky_entry.borrow_mut() = Some(real);
                                         }
                                         feed_state.late_reserve.push_back(entry);
@@ -1434,20 +1428,14 @@ impl<E: 'static + Entry> Infinite<E> {
                                 // Insert at start of early reserve, because insertion is unbounded within
                                 // realized elements (shake will realize it if necessary) OR no real elements
                                 if self.0.want_sticky.borrow().iter().any(|s| s == &entry_time) {
-                                    let real =
-                                        realize_entry(
-                                            pc,
-                                            self.0.entry_resize_observer.borrow().as_ref().unwrap(),
-                                            feed_id,
-                                            entry.clone(),
-                                        );
+                                    let real = self.0.realize_entry(pc, feed_id, entry.clone(),);
                                     self.0.early_sticky.ref_push(real.el().clone());
                                     *self.0.reserve_sticky_entry.borrow_mut() = Some(real);
                                 }
                                 feed_state.early_reserve.push_front(entry);
                             } else {
                                 // Insert within real elements
-                                let real = realize_entry(pc, self.0.entry_resize_observer.borrow().as_ref().unwrap(), feed_id, entry);
+                                let real = self.0.realize_entry(pc, feed_id, entry);
                                 let anchor_i = self.0.anchor_i.get().unwrap();
                                 if insert_before_i <= anchor_i {
                                     self.0.anchor_i.set(Some(anchor_i + 1));
@@ -1461,13 +1449,7 @@ impl<E: 'static + Entry> Infinite<E> {
                             // No other feeds have reserve so these are the guaranteed next (of known
                             // elements) - go ahead and realize.
                             for entry in entries {
-                                let real =
-                                    realize_entry(
-                                        pc,
-                                        self.0.entry_resize_observer.borrow().as_ref().unwrap(),
-                                        feed_id,
-                                        entry,
-                                    );
+                                let real = self.0.realize_entry(pc, feed_id, entry,);
                                 let anchor_i = self.0.anchor_i.get().unwrap();
                                 if anchor_i == self.0.real.borrow().len() - 1 {
                                     self.0.anchor_i.set(Some(anchor_i + 1));

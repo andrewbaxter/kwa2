@@ -40,6 +40,7 @@ use {
     shared::interface::{
         shared::{
             MessageBody,
+            MessageId,
             MessageRel,
             QualifiedChannelId,
             QualifiedMessageId,
@@ -75,6 +76,7 @@ pub struct ChannelFeed_ {
     pulling_snap_before: RefCell<Option<oneshot::Receiver<()>>>,
     pulling_snap_after: RefCell<Option<oneshot::Receiver<()>>>,
     pulling_activity: RefCell<Option<oneshot::Receiver<()>>>,
+    follow_pending: RefCell<Vec<(MessageId, MessageId)>>,
 }
 
 #[derive(Clone)]
@@ -92,7 +94,49 @@ impl ChannelFeed {
             pulling_snap_before: RefCell::new(None),
             pulling_snap_after: RefCell::new(None),
             pulling_activity: RefCell::new(None),
+            follow_pending: RefCell::new(vec![]),
         }));
+    }
+
+    fn apply_follow(&self, eg: &EventGraph) {
+        let pending = self.0.follow_pending.take();
+        if pending.is_empty() {
+            return;
+        }
+        eg.event(|pc| {
+            for (reply, target) in pending {
+                let own_identity = {
+                    let mode = self.0.chat_state.mode.borrow();
+                    let ChatMode::ReplyMessage(mode) = &*mode else {
+                        continue;
+                    };
+                    let follow = match &mode.target {
+                        ChatModeReplyMessageTarget::Channel(t) => t.channel == self.0.id && t.message == target,
+                        ChatModeReplyMessageTarget::Outbox(t) => {
+                            t.channel == self.0.id &&
+                                self.0.chat_state.entry_channel_lookup.borrow().get(&QualifiedMessageId {
+                                    channel: self.0.id.clone(),
+                                    message: target,
+                                }).and_then(|e| e.upgrade()).map(|e| {
+                                    return e.message().client_key ==
+                                        Some((t.channel.clone(), mode.own_identity.clone(), t.message.clone()));
+                                }).unwrap_or(false)
+                        },
+                    };
+                    if !follow {
+                        continue;
+                    }
+                    mode.own_identity.clone()
+                };
+                self.0.chat_state.mode.set(pc, ChatMode::ReplyMessage(ChatModeReplyMessage {
+                    target: ChatModeReplyMessageTarget::Channel(QualifiedMessageId {
+                        channel: self.0.id.clone(),
+                        message: reply,
+                    }),
+                    own_identity: own_identity,
+                }));
+            }
+        }).unwrap();
     }
 
     pub fn notify(&self, eg: &EventGraph, offset: ActivityOffset) {
@@ -191,9 +235,12 @@ impl ChannelFeed {
                                     MessageRel::None | MessageRel::ReplyTo(_) => {
                                         if !entries.contains_key(&QualifiedMessageId {
                                             channel: self1.0.id.clone(),
-                                            message: entry1.id,
+                                            message: entry1.id.clone(),
                                         }) {
                                             saw_new = true;
+                                            if let MessageRel::ReplyTo(target) = entry1.rel {
+                                                self1.0.follow_pending.borrow_mut().push((entry1.id, target));
+                                            }
                                         }
                                     },
                                 }
@@ -206,10 +253,14 @@ impl ChannelFeed {
                     }
                     if saw_new {
                         let parent = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade());
-                        if let Some(parent) = parent {
-                            if let Some(pivot) = parent.want_after(ChatFeedId::Channel(self1.0.id.clone())) {
+                        let pivot = parent.and_then(|p| p.want_after(ChatFeedId::Channel(self1.0.id.clone())));
+                        match pivot {
+                            Some(pivot) => {
                                 self1.request_after(eg.clone(), pivot);
-                            }
+                            },
+                            None => {
+                                self1.apply_follow(&eg);
+                            },
                         }
                     }
                     return Ok(());
@@ -444,6 +495,7 @@ impl Feed<ChatEntry> for ChannelFeed {
                         stop,
                     );
                 }
+                self1.apply_follow(&eg);
                 if let Some(latest_activity) = resp.latest_activity {
                     self1.update_known_or_have_time(&eg, latest_activity);
                 }

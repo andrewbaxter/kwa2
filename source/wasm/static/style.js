@@ -2020,6 +2020,33 @@ svg.spinner4 path {
       };
     };
 
+  const glassBlurStyle = s("glass_blur", {
+    "": (s) => {
+      s.display = "block";
+      s.position = "absolute";
+      s.inset = "0";
+      s.zIndex = "-2";
+      s.backdropFilter = `blur(0.2cm)`;
+    },
+  });
+  const glassTintStyle = s("glass_tint", {
+    "": (s) => {
+      s.display = "block";
+      s.position = "absolute";
+      s.inset = "0";
+      s.zIndex = "-1";
+      s.opacity = "0.7";
+    },
+  });
+  const glassLayers = /** @type (tintStyle: string) => HTMLElement[] */ (
+    tintStyle,
+  ) => {
+    return [
+      e("div", {}, { styles_: [glassBlurStyle] }),
+      e("div", {}, { styles_: [glassTintStyle, tintStyle] }),
+    ];
+  };
+
   const floatingBar =
     /** @type (args: {extraStyles?: string[], children_: HTMLElement[]}) => HTMLElement */ (
       args,
@@ -2042,41 +2069,12 @@ svg.spinner4 path {
             ...(args.extraStyles || []),
           ],
           children_: [
-            e(
-              "div",
-              {},
-              {
-                styles_: [
-                  s("floating_bar_blur", {
-                    "": (s) => {
-                      s.display = "block";
-                      s.position = "absolute";
-                      s.inset = "0";
-                      s.zIndex = "-2";
-                      s.backdropFilter = `blur(0.2cm)`;
-                    },
-                  }),
-                ],
-              },
-            ),
-            e(
-              "div",
-              {},
-              {
-                styles_: [
-                  s("floating_bar_darken", {
-                    "": (s) => {
-                      s.content = JSON.stringify("");
-                      s.display = "block";
-                      s.position = "absolute";
-                      s.inset = "0";
-                      s.zIndex = "-1";
-                      s.background = varCBackgroundGlass;
-                      s.opacity = "0.7";
-                    },
-                  }),
-                ],
-              },
+            ...glassLayers(
+              s("floating_bar_tint", {
+                "": (s) => {
+                  s.background = varCBackgroundGlass;
+                },
+              }),
             ),
             ...args.children_,
           ],
@@ -2231,24 +2229,24 @@ svg.spinner4 path {
     };
 
   // Entry
-  const chatEntrySelectSpecificStyle = "chat_entry_selectable_specific";
   const chatEntryActionsSpecificStyle = "chat_entry_actions_specific";
+  const chatEntryGlassSpecificStyle = "chat_entry_glass_specific";
   const chatEntrySelectableStyle = s("chat_entry_selectable", {
     "": (s) => {
       s.pointerEvents = "initial";
       s.cursor = "pointer";
-    },
-    [` .${chatEntrySelectSpecificStyle}`]: (s) => {
-      s.border = `${varLThin} solid transparent`;
-    },
-    [`.${classStateSelected} .${chatEntrySelectSpecificStyle}`]: (s) => {
-      s.borderColor = varCNotifyBright;
     },
     [` .${chatEntryActionsSpecificStyle}`]: (s) => {
       s.display = "none";
     },
     [`.${classStateSelected} .${chatEntryActionsSpecificStyle}`]: (s) => {
       s.display = "flex";
+    },
+    [` .${chatEntryGlassSpecificStyle}`]: (s) => {
+      s.display = "none";
+    },
+    [`.${classStateSelected} .${chatEntryGlassSpecificStyle}`]: (s) => {
+      s.display = "block";
     },
   });
   presentation.contChatEntryModeMessage =
@@ -2257,7 +2255,7 @@ svg.spinner4 path {
         "div",
         {},
         {
-          styles_: [contVboxStyle, chatEntrySelectSpecificStyle, bubbleStyle],
+          styles_: [contVboxStyle, bubbleStyle],
         },
       );
       const actions = e(
@@ -2337,6 +2335,54 @@ svg.spinner4 path {
         },
       );
 
+      const glassPad = "0.5cm";
+      const glassBorderGap = "0.1cm";
+      const glassBorderRadius = "0.3cm";
+      const glass = e(
+        "div",
+        {},
+        {
+          styles_: [
+            chatEntryGlassSpecificStyle,
+            s("chat_entry_glass", {
+              "": (s) => {
+                s.position = "absolute";
+                s.inset = `calc(-1 * ${glassPad})`;
+                s.zIndex = "-1";
+                s.borderRadius = `calc(${glassBorderRadius} + ${glassPad} - ${glassBorderGap})`;
+                s.isolation = "isolate";
+                s.overflow = "hidden";
+              },
+            }),
+          ],
+          children_: [
+            ...glassLayers(
+              s("chat_entry_glass_tint", {
+                "": (s) => {
+                  s.background = varCBackground;
+                },
+              }),
+            ),
+            e(
+              "div",
+              {},
+              {
+                styles_: [
+                  s("chat_entry_glass_border", {
+                    "": (s) => {
+                      s.position = "absolute";
+                      s.inset = `calc(${glassPad} - ${glassBorderGap})`;
+                      s.borderRadius = glassBorderRadius;
+                      s.border = `${varLThin} solid ${varCNotifyBright}`;
+                    },
+                  }),
+                ],
+              },
+            ),
+          ],
+        },
+      );
+
       // The smallest box containing the actual content
       const outer2 = e(
         "div",
@@ -2349,10 +2395,13 @@ svg.spinner4 path {
                 s.width = varSChatEntry;
                 s.gap = varPSmall;
                 s.flexShrink = "1";
+                s.position = "relative";
+                s.isolation = "isolate";
               },
             }),
           ],
           children_: [
+            glass,
             portrait,
             outer3,
           ],

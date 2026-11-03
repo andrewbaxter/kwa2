@@ -78,7 +78,6 @@ fn configure_send(
     chat_state2: &Rc<ChatState2>,
     channel: QualifiedChannelId,
     own_identity: Identity,
-    reply_to: Option<OutboxMessageReplyTo>,
 ) {
     send.ref_on("click", {
         let text = text.clone();
@@ -96,6 +95,14 @@ fn configure_send(
                     return;
                 },
             };
+            let reply_to = match &*mode.borrow() {
+                ChatMode::ReplyMessage(c) => Some(match &c.target {
+                    ChatModeReplyMessageTarget::Channel(m) => OutboxMessageReplyTo::Channel(m.clone()),
+                    ChatModeReplyMessageTarget::Outbox(m) => OutboxMessageReplyTo::Outbox(m.message.clone()),
+                }),
+                _ => None,
+            };
+            text.ref_text("");
             let outbox_feed =
                 chat_state2
                     .channel_lookup
@@ -189,9 +196,18 @@ pub fn build_controls(
                 chat_state = chat_state,
                 chat_state2 = chat_state2,
                 inf_post = inf_post.weak(),
-                menu_link = RefCell::new(None)
+                menu_link = RefCell::new(None),
+                reply_controls = RefCell::new(None)
             ) {
                 let inf_post = inf_post.upgrade()?;
+                let new_reply_controls = match &*mode.borrow() {
+                    ChatMode::ReplyMessage(c) => Some((c.target.channel().clone(), c.own_identity.clone())),
+                    _ => None,
+                };
+                if new_reply_controls.is_some() && *reply_controls.borrow() == new_reply_controls {
+                    return None;
+                }
+                *reply_controls.borrow_mut() = new_reply_controls;
                 *menu_link.borrow_mut() = None;
                 inf_post.ref_clear();
                 let inf_post_replace;
@@ -262,7 +278,6 @@ pub fn build_controls(
                             &chat_state2,
                             c.channel.clone(),
                             c.own_identity.clone(),
-                            None,
                         );
                         inf_post_replace = vec![controls.root];
                     },
@@ -277,13 +292,15 @@ pub fn build_controls(
                         });
                         configure_message_text_send_on_enter(&controls.text, &controls.send);
                         focus = Some(controls.text.clone());
-                        configure_send(pc, &controls.send, &controls.text, &mode, &chat_state2, match &c.target {
-                            ChatModeReplyMessageTarget::Channel(m) => m.channel.clone(),
-                            ChatModeReplyMessageTarget::Outbox(m) => m.channel.clone(),
-                        }, c.own_identity.clone(), Some(match &c.target {
-                            ChatModeReplyMessageTarget::Channel(m) => OutboxMessageReplyTo::Channel(m.clone()),
-                            ChatModeReplyMessageTarget::Outbox(m) => OutboxMessageReplyTo::Outbox(m.message.clone()),
-                        }),);
+                        configure_send(
+                            pc,
+                            &controls.send,
+                            &controls.text,
+                            &mode,
+                            &chat_state2,
+                            c.target.channel().clone(),
+                            c.own_identity.clone(),
+                        );
                         inf_post_replace = vec![controls.root];
                     },
                     ChatMode::EditMessage(c) => {
