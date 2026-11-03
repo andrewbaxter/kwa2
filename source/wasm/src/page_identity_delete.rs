@@ -38,7 +38,7 @@ pub fn build(pc: &mut ProcessingContext, id: &Identity) -> El {
                         style_export::LeafFormTextArgs {
                             text: format!("Are you sure you want to delete identity [{}]", local.res.name),
                         },
-                    ).root
+                    ).root,
                 ],
                 async move |_idem| {
                     req_post_json(&state().env.base_url, c2s::IdentityDelete { id: local.res.id.clone() }).await?;

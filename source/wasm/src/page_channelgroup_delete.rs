@@ -38,7 +38,7 @@ pub fn build(pc: &mut ProcessingContext, id: &ChannelGroupId) -> El {
                         style_export::LeafFormTextArgs {
                             text: format!("Are you sure you want to delete group [{}]", &*local.name.borrow()),
                         },
-                    ).root
+                    ).root,
                 ],
                 async move |_idem| {
                     req_post_json(&state().env.base_url, c2s::ChannelGroupDelete { id: local.id.clone() }).await?;

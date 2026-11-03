@@ -19,6 +19,7 @@ use {
         outbox::{
             OPFS_FILENAME_MAIN,
             OutboxMessage,
+            OutboxMessageRel,
             opfs_channel_dir_entries,
             opfs_outbox_channel_dir,
         },
@@ -81,7 +82,12 @@ impl OutboxFeed {
             return;
         };
         let stamp = Timestamp::from_str(&client_id.0).unwrap();
-        parent.respond_entries_after(&self.feed_id(), &pivot, vec![self.create_entry(&stamp, client_id, body)], true);
+        parent.respond_entries_after(
+            &self.feed_id(),
+            &pivot,
+            vec![self.create_entry(&stamp, client_id, body)],
+            true,
+        );
     }
 
     fn create_entry(&self, k: &Timestamp, client_id: MessageClientId, body: String) -> Rc<ChatEntry> {
@@ -102,14 +108,25 @@ impl OutboxFeed {
         return opfs_channel_dir_entries(&opfs_outbox_channel_dir(&self.0.sender, &self.0.id).await).await;
     }
 
-    async fn create_entries<'a>(
+    async fn create_entries<
+        'a,
+    >(
         &self,
         sources: impl Iterator<Item = (&'a Timestamp, &'a FileSystemDirectoryHandle)>,
+        limit: usize,
     ) -> Vec<Rc<ChatEntry>> {
         let mut out = vec![];
         for (k, v) in sources {
+            if out.len() >= limit {
+                break;
+            }
             match opfs_read_json::<OutboxMessage>(v, OPFS_FILENAME_MAIN).await {
-                Ok(main) => out.push(self.create_entry(k, main.client_id, main.body)),
+                Ok(main) => {
+                    if let OutboxMessageRel::EditOf(_) = main.rel {
+                        continue;
+                    }
+                    out.push(self.create_entry(k, main.client_id, main.body));
+                },
                 Err(e) => {
                     state().log.log(&format!("Error processing outbox entry, skipping: {}", e));
                 },
@@ -136,14 +153,13 @@ impl Feed<ChatEntry> for OutboxFeed {
                 let mut early_entries =
                     self1
                         .create_entries(
-                            sources.range((Bound::Unbounded, Bound::Included(time.stamp))).rev().take(WANT_COUNT),
+                            sources.range((Bound::Unbounded, Bound::Included(time.stamp))).rev(),
+                            WANT_COUNT,
                         )
                         .await;
                 let late_entries =
                     self1
-                        .create_entries(
-                            sources.range((Bound::Excluded(time.stamp), Bound::Unbounded)).take(WANT_COUNT),
-                        )
+                        .create_entries(sources.range((Bound::Excluded(time.stamp), Bound::Unbounded)), WANT_COUNT)
                         .await;
                 let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                     return Ok(());
@@ -166,7 +182,8 @@ impl Feed<ChatEntry> for OutboxFeed {
                 let entries =
                     self1
                         .create_entries(
-                            sources.range((Bound::Unbounded, Bound::Excluded(time.stamp))).rev().take(WANT_COUNT),
+                            sources.range((Bound::Unbounded, Bound::Excluded(time.stamp))).rev(),
+                            WANT_COUNT,
                         )
                         .await;
                 let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
@@ -186,9 +203,7 @@ impl Feed<ChatEntry> for OutboxFeed {
                 let sources = self1.load_sources().await;
                 let entries =
                     self1
-                        .create_entries(
-                            sources.range((Bound::Excluded(time.stamp), Bound::Unbounded)).take(WANT_COUNT),
-                        )
+                        .create_entries(sources.range((Bound::Excluded(time.stamp), Bound::Unbounded)), WANT_COUNT)
                         .await;
                 let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                     return Ok(());

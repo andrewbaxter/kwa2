@@ -49,80 +49,74 @@ struct Form_ {
 }
 
 pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
-    return build_nol_form(
-        //. .
-        pc,
-        &Ministate::ChannelInvite(MinistateChannelInvite {
-            channel: channel.clone(),
-            invite: id.clone(),
-        }),
-        "Edit invite",
-        get_or_req_api_channelinvite(id, true).map({
-            let eg = pc.eg();
-            let channel = channel.clone();
-            move |local| {
-                let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
-                    name: local.res.name.clone(),
-                    description: local.res.description.clone(),
-                    shown_name: local.res.shown_name.clone(),
-                    shown_description: local.res.shown_description.clone(),
-                    single_use: local.res.single_use.clone(),
-                    expiry: local.res.expiry.clone(),
-                    can_post: local.res.can_post,
-                }));
-                let form_state = Rc::new(form_state);
-                return (form_els.error, form_els.elements, async move |_idem| {
-                    let Ok(new_values) = form_state.parse() else {
-                        return Ok(());
-                    };
-                    let res = req_post_json(&state().env.base_url, c2s::ChannelInviteModify {
-                        id: local.res.id.clone(),
-                        name: if new_values.name == local.res.name {
-                            None
-                        } else {
-                            Some(new_values.name)
-                        },
-                        description: if new_values.description == local.res.description {
-                            None
-                        } else {
-                            Some(new_values.description)
-                        },
-                        shown_name: if new_values.shown_name == local.res.shown_name {
-                            None
-                        } else {
-                            Some(ModifyOption { value: new_values.shown_name })
-                        },
-                        shown_description: if new_values.shown_description == local.res.shown_description {
-                            None
-                        } else {
-                            Some(ModifyOption { value: new_values.shown_description })
-                        },
-                        single_use: if new_values.single_use == local.res.single_use {
-                            None
-                        } else {
-                            Some(new_values.single_use)
-                        },
-                        expiry: if new_values.expiry == local.res.expiry {
-                            None
-                        } else {
-                            Some(ModifyOption { value: new_values.expiry })
-                        },
-                        can_post: if new_values.can_post == local.res.can_post {
-                            None
-                        } else {
-                            Some(new_values.can_post)
-                        },
-                    }).await?;
-                    localdata::ensure_channelinvite(res.clone()).await;
-                    eg.event(|pc| {
-                        goto_replace_ministate(pc, &state().log, &Ministate::ChannelInvite(MinistateChannelInvite {
-                            channel: channel.clone(),
-                            invite: res.id,
-                        }));
-                    }).unwrap();
+    return build_nol_form(pc, &Ministate::ChannelInvite(MinistateChannelInvite {
+        channel: channel.clone(),
+        invite: id.clone(),
+    }), "Edit invite", get_or_req_api_channelinvite(id, true).map({
+        let eg = pc.eg();
+        let channel = channel.clone();
+        move |local| {
+            let (form_els, form_state) = Form_::new_form("", Some(&Form_ {
+                name: local.res.name.clone(),
+                description: local.res.description.clone(),
+                shown_name: local.res.shown_name.clone(),
+                shown_description: local.res.shown_description.clone(),
+                single_use: local.res.single_use.clone(),
+                expiry: local.res.expiry.clone(),
+                can_post: local.res.can_post,
+            }));
+            let form_state = Rc::new(form_state);
+            return (form_els.error, form_els.elements, async move |_idem| {
+                let Ok(new_values) = form_state.parse() else {
                     return Ok(());
-                });
-            }
-        }),
-    );
+                };
+                let res = req_post_json(&state().env.base_url, c2s::ChannelInviteModify {
+                    id: local.res.id.clone(),
+                    name: if new_values.name == local.res.name {
+                        None
+                    } else {
+                        Some(new_values.name)
+                    },
+                    description: if new_values.description == local.res.description {
+                        None
+                    } else {
+                        Some(new_values.description)
+                    },
+                    shown_name: if new_values.shown_name == local.res.shown_name {
+                        None
+                    } else {
+                        Some(ModifyOption { value: new_values.shown_name })
+                    },
+                    shown_description: if new_values.shown_description == local.res.shown_description {
+                        None
+                    } else {
+                        Some(ModifyOption { value: new_values.shown_description })
+                    },
+                    single_use: if new_values.single_use == local.res.single_use {
+                        None
+                    } else {
+                        Some(new_values.single_use)
+                    },
+                    expiry: if new_values.expiry == local.res.expiry {
+                        None
+                    } else {
+                        Some(ModifyOption { value: new_values.expiry })
+                    },
+                    can_post: if new_values.can_post == local.res.can_post {
+                        None
+                    } else {
+                        Some(new_values.can_post)
+                    },
+                }).await?;
+                localdata::ensure_channelinvite(res.clone()).await;
+                eg.event(|pc| {
+                    goto_replace_ministate(pc, &state().log, &Ministate::ChannelInvite(MinistateChannelInvite {
+                        channel: channel.clone(),
+                        invite: res.id,
+                    }));
+                }).unwrap();
+                return Ok(());
+            });
+        }
+    }));
 }

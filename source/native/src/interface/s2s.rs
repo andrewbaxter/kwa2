@@ -217,6 +217,7 @@ pub mod s2sv1t {
     pub const GET_PREFIX_SNAP_PAGE: &str = "snap_page";
     pub const GET_PREFIX_SNAP_PAGE_CONTAINING_TIME: &str = "snap_page_containing_time";
     pub const GET_PREFIX_SNAP_LOOKUP: &str = "snap_lookup";
+    pub const GET_PREFIX_MESSAGE_HISTORY: &str = "message_history";
     pub const GET_PREFIX_JOIN_PREVIEW: &str = "join_preview";
     pub const GET_PREFIX_FILE: &str = "file";
     const FILE_AUTH_KIND_CALLER: &str = "t";
@@ -290,7 +291,7 @@ pub mod s2sv1t {
                 FileAuth::IdentityInvite { identity, code } => vec![
                     JOIN_PREVIEW_KIND_IDENTITY_INVITE.to_string(),
                     identity.to_string(),
-                    code.clone()
+                    code.clone(),
                 ],
                 FileAuth::ChannelInvite { channel, code } => {
                     [JOIN_PREVIEW_KIND_CHANNEL_INVITE.to_string()]
@@ -342,7 +343,7 @@ pub mod s2sv1t {
                 JoinPreviewTarget::IdentityInvite { identity, code } => vec![
                     JOIN_PREVIEW_KIND_IDENTITY_INVITE.to_string(),
                     identity.to_string(),
-                    code.clone()
+                    code.clone(),
                 ],
                 JoinPreviewTarget::ChannelInvite { channel, code } => {
                     [JOIN_PREVIEW_KIND_CHANNEL_INVITE.to_string()]
@@ -358,6 +359,7 @@ pub mod s2sv1t {
             return serialize_path([GET_PREFIX_JOIN_PREVIEW.to_string()].into_iter().chain(tail));
         }
     }
+
     const SNAP_LOOKUP_ID: &str = "id";
     const SNAP_LOOKUP_CLIENT_ID: &str = "client_id";
 
@@ -523,15 +525,51 @@ pub mod s2sv1t {
 
         fn serialize_path(&self) -> String {
             let tail = match &self.by {
-                SnapLookupBy::Id(id) => vec![SNAP_LOOKUP_ID.to_string(), id.identity.to_string(), id.unique.to_string()],
+                SnapLookupBy::Id(id) => vec![
+                    SNAP_LOOKUP_ID.to_string(),
+                    id.identity.to_string(),
+                    id.unique.to_string(),
+                ],
                 SnapLookupBy::ClientId(sender, client_id) => vec![
                     SNAP_LOOKUP_CLIENT_ID.to_string(),
                     sender.to_string(),
-                    client_id.0.clone()
+                    client_id.0.clone(),
                 ],
             };
             return serialize_path(
                 [GET_PREFIX_SNAP_LOOKUP.to_string()].into_iter().chain(channel_segments(&self.channel)).chain(tail),
+            );
+        }
+    }
+
+    pub struct GetMessageHistory {
+        pub channel: QualifiedChannelId,
+        pub id: MessageId,
+    }
+
+    impl PathReqTrait for GetMessageHistory {
+        type Resp = Option<PulledMessages>;
+
+        fn deserialize_path(path: &str) -> Result<Self, String> {
+            let mut parts = deserialize_path(path);
+            confirm_path_const(&mut parts, GET_PREFIX_MESSAGE_HISTORY)?;
+            let out = GetMessageHistory {
+                channel: channel_from_path(&mut parts)?,
+                id: MessageId {
+                    identity: confirm_path_element(&mut parts, "message sender")?,
+                    unique: confirm_path_element(&mut parts, "message unique")?,
+                },
+            };
+            confirm_path_empty(&mut parts)?;
+            return Ok(out);
+        }
+
+        fn serialize_path(&self) -> String {
+            return serialize_path(
+                [GET_PREFIX_MESSAGE_HISTORY.to_string()]
+                    .into_iter()
+                    .chain(channel_segments(&self.channel))
+                    .chain([self.id.identity.to_string(), self.id.unique.to_string()]),
             );
         }
     }

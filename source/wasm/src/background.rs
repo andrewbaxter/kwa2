@@ -12,6 +12,7 @@ use {
         outbox::{
             OPFS_FILENAME_MAIN,
             OutboxMessage,
+            OutboxMessageRel,
             OutboxMessageReplyTo,
             opfs_channel_dir_entries,
             opfs_outbox,
@@ -35,7 +36,6 @@ use {
         shared::{
             ChannelId,
             MessageClientId,
-            MessageId,
             MessageRel,
             QualifiedChannelId,
         },
@@ -53,20 +53,6 @@ use {
 };
 
 const PUSH_BACKOFF_INITIAL_MS: u32 = 1000;
-const PUSH_BACKOFF_MAX_MS: u32 = 5 * 60 * 1000;
-
-async fn resolve_outbox_reply_target(
-    channel: &QualifiedChannelId,
-    target: &MessageClientId,
-) -> Result<MessageId, String> {
-    let Some(found) = req_get(c2s::MessageIdByClientId {
-        channel: channel.clone(),
-        client_id: target.clone(),
-    }).await? else {
-        return Err(format!("Reply target outbox message [{:?}] not yet accepted in channel [{:?}]", target, channel));
-    };
-    return Ok(found);
-}
 
 pub fn handle_outbox_change(eg: &EventGraph, change: OutboxChange) {
     let state = state();
@@ -161,15 +147,36 @@ pub fn trigger_push() {
                                     ta_return!((), String);
                                     for (timestamp, message_dir) in opfs_channel_dir_entries(&channel_dir).await {
                                         let message =
-                                            opfs_read_json::<OutboxMessage>(&message_dir, OPFS_FILENAME_MAIN).await?;
+                                            opfs_read_json::<OutboxMessage>(
+                                                &message_dir,
+                                                OPFS_FILENAME_MAIN,
+                                            ).await?;
                                         let client_id = MessageClientId::from_timestamp(timestamp);
-                                        let rel = match &message.reply_to {
-                                            None => MessageRel::None,
-                                            Some(OutboxMessageReplyTo::Channel(target)) => MessageRel::ReplyTo(
+                                        let rel = match &message.rel {
+                                            OutboxMessageRel::None => MessageRel::None,
+                                            OutboxMessageRel::ReplyTo(
+                                                OutboxMessageReplyTo::Channel(target),
+                                            ) => MessageRel
+                                            ::ReplyTo(
                                                 target.message.clone(),
                                             ),
-                                            Some(OutboxMessageReplyTo::Outbox(target)) => MessageRel::ReplyTo(
-                                                resolve_outbox_reply_target(&channel, target).await?,
+                                            OutboxMessageRel::ReplyTo(OutboxMessageReplyTo::Outbox(target)) => {
+                                                let Some(found) = req_get(c2s::MessageIdByClientId {
+                                                    channel: channel.clone(),
+                                                    client_id: target.clone(),
+                                                }).await? else {
+                                                    return Err(
+                                                        format!(
+                                                            "Reply target outbox message [{:?}] not yet accepted in channel [{:?}]",
+                                                            target,
+                                                            channel
+                                                        ),
+                                                    );
+                                                };
+                                                MessageRel::ReplyTo(found)
+                                            },
+                                            OutboxMessageRel::EditOf(target) => MessageRel::EditOf(
+                                                target.message.clone(),
                                             ),
                                         };
                                         req_post_json(&state().env.base_url, c2s::MessagePush {
@@ -219,7 +226,7 @@ pub fn trigger_push() {
                     }
                 } else {
                     TimeoutFuture::new(backoff).await;
-                    backoff = (backoff * 2).min(PUSH_BACKOFF_MAX_MS);
+                    backoff = (backoff * 2).min(5 * 60 * 1000);
                 }
             }
             *state().bg_pushing.borrow_mut() = None;

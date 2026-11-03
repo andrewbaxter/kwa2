@@ -36,7 +36,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                         style_export::LeafFormTextArgs {
                             text: format!("Are you sure you want to delete channel [{}]", &*local.name.borrow()),
                         },
-                    ).root
+                    ).root,
                 ],
                 async move |_idem| {
                     req_post_json(&state().env.base_url, c2s::ChannelDelete { id: local.id.clone() }).await?;

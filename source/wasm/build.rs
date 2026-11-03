@@ -32,7 +32,7 @@ struct Type {
 
 impl PartialEq<Type> for Type {
     fn eq(&self, other: &Type) -> bool {
-        self.mod_ == other.mod_ && self.ts_type == other.ts_type
+        return self.mod_ == other.mod_ && self.ts_type == other.ts_type;
     }
 }
 
@@ -41,22 +41,6 @@ impl Eq for Type { }
 fn type_opt(t: &Type) -> Type {
     return Type {
         mod_: TypeMod::Opt,
-        rust_type: t.rust_type.clone(),
-        ts_type: t.ts_type.clone(),
-    };
-}
-
-fn type_arr(t: &Type) -> Type {
-    return Type {
-        mod_: TypeMod::Arr,
-        rust_type: t.rust_type.clone(),
-        ts_type: t.ts_type.clone(),
-    };
-}
-
-fn type_arr2(t: &Type) -> Type {
-    return Type {
-        mod_: TypeMod::Arr2,
         rust_type: t.rust_type.clone(),
         ts_type: t.ts_type.clone(),
     };
@@ -89,8 +73,16 @@ fn main() {
         ts_type: "HTMLElement".to_string(),
     };
     let optel_ = type_opt(&el_);
-    let arrel_ = type_arr(&el_);
-    let arrarrel_ = type_arr2(&el_);
+    let arrel_ = Type {
+        mod_: TypeMod::Arr,
+        rust_type: el_.rust_type.clone(),
+        ts_type: el_.ts_type.clone(),
+    };
+    let arrarrel_ = Type {
+        mod_: TypeMod::Arr2,
+        rust_type: el_.rust_type.clone(),
+        ts_type: el_.ts_type.clone(),
+    };
 
     //. .
     let mut ts = vec![];
@@ -154,7 +146,12 @@ fn main() {
         },
         Func {
             name: "leafMenuLink",
-            args: vec![("text", &string_), ("link", &string_), ("image", &optstring_), ("generatedImage", &optstring_)],
+            args: vec![
+                ("text", &string_),
+                ("link", &string_),
+                ("image", &optstring_),
+                ("generatedImage", &optstring_),
+            ],
             returns: vec![("root", &el_), ("image", &optel_), ("text", &el_), ("unread", &el_)],
         },
         Func {
@@ -164,7 +161,13 @@ fn main() {
         },
         Func {
             name: "leafMenuGroup",
-            args: vec![("text", &string_), ("link", &string_), ("image", &optstring_), ("generatedImage", &optstring_), ("children", &arrel_)],
+            args: vec![
+                ("text", &string_),
+                ("link", &string_),
+                ("image", &optstring_),
+                ("generatedImage", &optstring_),
+                ("children", &arrel_),
+            ],
             returns: vec![("root", &el_), ("group", &el_), ("link", &el_), ("text", &el_), ("unread", &el_)],
         },
         Func {
@@ -177,6 +180,11 @@ fn main() {
             args: vec![("svg", &string_)],
             returns: vec![("root", &el_)],
         },
+        Func {
+            name: "leafMenuQrScanner",
+            args: vec![],
+            returns: vec![("root", &el_), ("video", &el_), ("status", &el_)],
+        },
         // /////////////////////////////////////////////////////////////////////////////
         // xx Components, styles: top
         Func {
@@ -185,7 +193,7 @@ fn main() {
                 ("body", &arrel_),
                 ("identitiesLink", &string_),
                 ("addLink", &string_),
-                ("settingsLink", &string_)
+                ("settingsLink", &string_),
             ],
             returns: vec![("root", &el_), ("identitiesLink", &el_), ("addLink", &el_), ("settingsLink", &el_)],
         },
@@ -288,7 +296,17 @@ fn main() {
         Func {
             name: "contChatEntryModeMessage",
             args: vec![("left", &bool_), ("date", &string_)],
-            returns: vec![("root", &el_), ("portrait", &el_), ("body", &el_)],
+            returns: vec![("root", &el_), ("portrait", &el_), ("body", &el_), ("actions", &el_)],
+        },
+        Func {
+            name: "leafChatEntryMessageButtonEdit",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEntryMessageButtonHistory",
+            args: vec![("link", &string_)],
+            returns: vec![("root", &el_)],
         },
         Func {
             name: "leafChatEntryPortrait",
@@ -316,6 +334,51 @@ fn main() {
             name: "leafChatControlsBarModeMessage",
             args: vec![],
             returns: vec![("root", &el_), ("send", &el_), ("text", &el_), ("close", &el_)],
+        },
+        Func {
+            name: "leafChatControlsBarModeEdit",
+            args: vec![],
+            returns: vec![("root", &el_), ("send", &el_), ("text", &el_), ("close", &el_)],
+        },
+        Func {
+            name: "contPageMessageHistory",
+            args: vec![("headBar", &el_), ("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contMessageHistoryRevisionOriginal",
+            args: vec![("date", &string_), ("text", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contMessageHistoryRevisionEdit",
+            args: vec![("date", &string_), ("cells", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contMessageHistoryDiffLineContext",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contMessageHistoryDiffLineRemoved",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contMessageHistoryDiffLineAdded",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafMessageHistoryDiffLineEmpty",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafMessageHistoryDiffText",
+            args: vec![("text", &string_), ("changed", &bool_)],
+            returns: vec![("root", &el_)],
         },
     ] {
         let method_ts_name = method.name;
@@ -471,13 +534,13 @@ fn main() {
                 postbuild_root_own = quote!();
             }
             call1 = quote!{
-                let _ret = #call 
+                let _ret = #call
                 //. .
                 let _ret2 = #ident {
                     #(#build,) *
                 };
                 //. .
-                #postbuild_root_own 
+                #postbuild_root_own
                 //. .
                 return _ret2;
             };
@@ -489,14 +552,14 @@ fn main() {
             };
         }
         rust.push(quote!{
-            #rust_args_struct_declare 
+            #rust_args_struct_declare
             //. .
-            #rust_ret_struct_declare 
+            #rust_ret_struct_declare
             //. .
             pub fn #rust_name(#rust_args_declare) -> #rust_ret {
                 let a = js_sys::Object::new();
                 //. .
-                #rust_args_build 
+                #rust_args_build
                 //. .
                 #call1
             }

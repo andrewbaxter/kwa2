@@ -10,7 +10,10 @@ use {
             ChatState,
             ChatState2,
         },
-        chat_entry::ChatEntryControls,
+        chat_entry::{
+            ChatEntryControls,
+            ChatEntryMessageInternal,
+        },
         js::{
             ElExt,
             style_export,
@@ -20,6 +23,7 @@ use {
             new_message_client_id,
             OPFS_FILENAME_MAIN,
             OutboxMessage,
+            OutboxMessageRel,
             OutboxMessageReplyTo,
             opfs_outbox_channel_dir,
             opfs_outbox_message_dir,
@@ -105,7 +109,10 @@ fn configure_send(
                 let channel = channel.clone();
                 let own_identity = own_identity.clone();
                 let message = OutboxMessage {
-                    reply_to: reply_to.clone(),
+                    rel: match &reply_to {
+                        None => OutboxMessageRel::None,
+                        Some(r) => OutboxMessageRel::ReplyTo(r.clone()),
+                    },
                     client_id: client_id.clone(),
                     body: body,
                 };
@@ -135,29 +142,34 @@ fn configure_send(
 pub fn build_chat_entry_controls(pc: &mut ProcessingContext, m: &ChatEntryControls) -> El {
     let out = style_export::cont_chat_entry_mode_controls().root;
     out.ref_own(
-        |out| link!((pc = pc), (channels = m.state.channels_meta.clone()), (), (out = out.weak(), mode = m.mode.clone()) {
-            let out = out.upgrade()?;
-            out.ref_clear();
-            if channels.borrow().is_empty() {
-                return None;
+        |out| link!(
+            (pc = pc),
+            (channels = m.state.channels_meta.clone()),
+            (),
+            (out = out.weak(), mode = m.mode.clone()) {
+                let out = out.upgrade()?;
+                out.ref_clear();
+                if channels.borrow().is_empty() {
+                    return None;
+                }
+                out.ref_push(style_export::leaf_chat_entry_mode_controls_button_new_message().root.on("click", {
+                    let eg = pc.eg();
+                    let channels = channels.clone();
+                    let mode = mode.clone();
+                    move |_| eg.event(|pc| {
+                        let channels = channels.borrow();
+                        if channels.len() > 1 {
+                            mode.set(pc, ChatMode::MessageChannelSelect);
+                        } else if let Some(channel) = channels.get(0) {
+                            mode.set(pc, ChatMode::TopMessage(ChatModeTopMessage {
+                                channel: channel.2.clone(),
+                                own_identity: channel.1.clone(),
+                            }));
+                        }
+                    }).unwrap()
+                }));
             }
-            out.ref_push(style_export::leaf_chat_entry_mode_controls_button_new_message().root.on("click", {
-                let eg = pc.eg();
-                let channels = channels.clone();
-                let mode = mode.clone();
-                move |_| eg.event(|pc| {
-                    let channels = channels.borrow();
-                    if channels.len() > 1 {
-                        mode.set(pc, ChatMode::MessageChannelSelect);
-                    } else if let Some(channel) = channels.get(0) {
-                        mode.set(pc, ChatMode::TopMessage(ChatModeTopMessage {
-                            channel: channel.2.clone(),
-                            own_identity: channel.1.clone(),
-                        }));
-                    }
-                }).unwrap()
-            }));
-        }),
+        ),
     );
     return out;
 }
@@ -220,7 +232,9 @@ pub fn build_controls(
                                             }
                                             inf_post.ref_push(
                                                 style_export::cont_chat_controls_bar_mode_menu(
-                                                    style_export::ContChatControlsBarModeMenuArgs { children: children },
+                                                    style_export::ContChatControlsBarModeMenuArgs {
+                                                        children: children
+                                                    },
                                                 ).root,
                                             );
                                         }
@@ -263,28 +277,108 @@ pub fn build_controls(
                         });
                         configure_message_text_send_on_enter(&controls.text, &controls.send);
                         focus = Some(controls.text.clone());
-                        configure_send(
-                            pc,
-                            &controls.send,
-                            &controls.text,
-                            &mode,
-                            &chat_state2,
-                            match &c.target {
-                                ChatModeReplyMessageTarget::Channel(m) => m.channel.clone(),
-                                ChatModeReplyMessageTarget::Outbox(m) => m.channel.clone(),
-                            },
-                            c.own_identity.clone(),
-                            Some(match &c.target {
-                                ChatModeReplyMessageTarget::Channel(m) => OutboxMessageReplyTo::Channel(m.clone()),
-                                ChatModeReplyMessageTarget::Outbox(m) => OutboxMessageReplyTo::Outbox(m.message.clone()),
-                            }),
-                        );
+                        configure_send(pc, &controls.send, &controls.text, &mode, &chat_state2, match &c.target {
+                            ChatModeReplyMessageTarget::Channel(m) => m.channel.clone(),
+                            ChatModeReplyMessageTarget::Outbox(m) => m.channel.clone(),
+                        }, c.own_identity.clone(), Some(match &c.target {
+                            ChatModeReplyMessageTarget::Channel(m) => OutboxMessageReplyTo::Channel(m.clone()),
+                            ChatModeReplyMessageTarget::Outbox(m) => OutboxMessageReplyTo::Outbox(m.message.clone()),
+                        }),);
+                        inf_post_replace = vec![controls.root];
+                    },
+                    ChatMode::EditMessage(c) => {
+                        let controls = style_export::leaf_chat_controls_bar_mode_edit();
+                        controls.close.ref_on("click", {
+                            let mode = mode.clone();
+                            let eg = pc.eg();
+                            let reply_mode = ChatMode::ReplyMessage(ChatModeReplyMessage {
+                                target: ChatModeReplyMessageTarget::Channel(c.target.clone()),
+                                own_identity: c.own_identity.clone(),
+                            });
+                            move |_| eg.event(|pc| {
+                                mode.set(pc, reply_mode.clone());
+                            }).unwrap()
+                        });
+                        controls.text.ref_text(&c.body);
+                        configure_message_text_send_on_enter(&controls.text, &controls.send);
+                        focus = Some(controls.text.clone());
+                        controls.send.ref_on("click", {
+                            let text = controls.text.clone();
+                            let edit = c.clone();
+                            let eg = pc.eg();
+                            let chat_state = Rc::downgrade(chat_state);
+                            move |_| {
+                                let Some(chat_state) = chat_state.upgrade() else {
+                                    return;
+                                };
+                                let Some(body) = text.raw().text_content().filter(|t| !t.is_empty()) else {
+                                    return;
+                                };
+                                let reply_mode = ChatMode::ReplyMessage(ChatModeReplyMessage {
+                                    target: ChatModeReplyMessageTarget::Channel(edit.target.clone()),
+                                    own_identity: edit.own_identity.clone(),
+                                });
+                                if body == edit.body {
+                                    eg.event(|pc| {
+                                        chat_state.mode.set(pc, reply_mode);
+                                    }).unwrap();
+                                    return;
+                                }
+                                let client_id = match new_message_client_id() {
+                                    Ok(c) => c,
+                                    Err(e) => {
+                                        state().log.log(&e);
+                                        return;
+                                    },
+                                };
+                                spawn_log("Saving message edit to outbox", {
+                                    let channel = edit.target.channel.clone();
+                                    let own_identity = edit.own_identity.clone();
+                                    let message = OutboxMessage {
+                                        rel: OutboxMessageRel::EditOf(edit.target.clone()),
+                                        client_id: client_id,
+                                        body: body.clone(),
+                                    };
+                                    async move {
+                                        let opfs_channel_dir = opfs_outbox_channel_dir(&own_identity, &channel).await;
+                                        let opfs_message_dir =
+                                            opfs_outbox_message_dir(&opfs_channel_dir, &message.client_id).await;
+                                        opfs_write_json(&opfs_message_dir, OPFS_FILENAME_MAIN, message)
+                                            .await
+                                            .map_err(|e| format!("Error writing message edit to opfs: [{}]", e))?;
+                                        trigger_push();
+                                        return Ok(());
+                                    }
+                                });
+                                let entry =
+                                    chat_state
+                                        .entry_channel_lookup
+                                        .borrow()
+                                        .get(&edit.target)
+                                        .and_then(|e| e.upgrade());
+                                eg.event(|pc| {
+                                    if let Some(entry) = entry {
+                                        if let ChatEntryMessageInternal::Message(m) =
+                                            &*entry.message().internal.borrow() {
+                                            m.body.set(pc, body.clone());
+                                        }
+                                    }
+                                    chat_state.mode.set(pc, reply_mode);
+                                }).unwrap();
+                            }
+                        });
                         inf_post_replace = vec![controls.root];
                     },
                 }
                 inf_post.ref_extend(inf_post_replace);
                 if let Some(focus) = focus {
                     focus.html().focus().unwrap();
+                    let range = web_sys::window().unwrap().document().unwrap().create_range().unwrap();
+                    range.select_node_contents(&focus.raw()).unwrap();
+                    range.collapse_with_to_start(false);
+                    let selection = web_sys::window().unwrap().get_selection().unwrap().unwrap();
+                    selection.remove_all_ranges().unwrap();
+                    selection.add_range(&range).unwrap();
                 }
             }
         ),

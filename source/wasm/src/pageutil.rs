@@ -77,7 +77,9 @@ impl From<FileValue> for FormPortrait {
 
 pub async fn req_form_portrait(file: &Option<FileRef>) -> Result<FormPortrait, String> {
     match file {
-        Some(f) => return Ok(FormPortrait(FileValue::Keep(Some(req_file_blob(&file_url(f), &f.mime_type).await?)))),
+        Some(f) => return Ok(
+            FormPortrait(FileValue::Keep(Some(req_file_blob(&file_url(f), &f.mime_type).await?))),
+        ),
         None => return Ok(FormPortrait(FileValue::Keep(None))),
     }
 }
@@ -333,7 +335,12 @@ pub fn build_form(
 
 pub fn build_nol_form<
     SEND: 'static + Clone + AsyncFn(f64) -> Result<(), String>,
->(pc: &mut ProcessingContext, back_link: &Ministate, title: &str, v: NowOrLater<(Option<El>, Vec<El>, SEND)>) -> El {
+>(
+    pc: &mut ProcessingContext,
+    back_link: &Ministate,
+    title: &str,
+    v: NowOrLater<(Option<El>, Vec<El>, SEND)>,
+) -> El {
     let head_bar = style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
         back_link: ministate_octothorpe(&back_link),
         center: style_export::leaf_nonchat_head_bar_center(style_export::LeafNonchatHeadBarCenterArgs {
@@ -538,6 +545,6 @@ pub fn build_url_menu_items(url: &KwaUrl) -> Vec<El> {
                     .build(),
             },
         ).root,
-        code.root
+        code.root,
     ];
 }

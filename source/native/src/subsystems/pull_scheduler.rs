@@ -57,7 +57,7 @@ impl PartialEq for Entry {
     }
 }
 
-impl Eq for Entry {}
+impl Eq for Entry { }
 
 impl PartialOrd for Entry {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
@@ -156,34 +156,6 @@ impl PullScheduler {
             .retain(|k, _| !(k.account_id == account_id && k.owner == owner && &k.channel == channel));
     }
 
-    async fn finish(&self, key: PullKey, outcome: PullOutcome) {
-        {
-            let mut inner = self.inner.lock().await;
-            let Some(s) = inner.state.get_mut(&key) else {
-                return;
-            };
-            s.running = false;
-            let backoff = s.backoff;
-            let rerun = s.rerun;
-            s.rerun = false;
-            let next_backoff = match outcome {
-                PullOutcome::Gone => {
-                    inner.state.remove(&key);
-                    return;
-                },
-                PullOutcome::New => PULL_MIN_BACKOFF,
-                PullOutcome::NoNew => backoff.saturating_mul(2).min(PULL_MAX_BACKOFF),
-            };
-            let at = if rerun {
-                Instant::now()
-            } else {
-                Instant::now() + jitter(next_backoff)
-            };
-            inner.schedule(key, at, next_backoff);
-        }
-        self.wake.notify_one();
-    }
-
     pub async fn run(self: Arc<Self>, state: Arc<State>) -> Result<(), loga::Error> {
         loop {
             let next_at = {
@@ -212,8 +184,41 @@ impl PullScheduler {
                     let scheduler = self.clone();
                     let state = state.clone();
                     tokio::spawn(async move {
-                        let outcome = execute_pull(&state, &entry.key).await;
-                        scheduler.finish(entry.key, outcome).await;
+                        let outcome = match crate::subsystems::messages::pull_and_store(&state, &entry.key).await {
+                            Ok(outcome) => outcome,
+                            Err(e) => {
+                                state.log.log_err(loga::WARN, e.context("Error executing scheduled pull"));
+                                PullOutcome::NoNew
+                            },
+                        };
+                        let key = entry.key;
+                        {
+                            let mut inner = scheduler.inner.lock().await;
+                            let Some(s) = inner.state.get_mut(&key) else {
+                                return;
+                            };
+                            s.running = false;
+                            let backoff = s.backoff;
+                            let rerun = s.rerun;
+                            s.rerun = false;
+                            let next_backoff = match outcome {
+                                PullOutcome::Gone => {
+                                    inner.state.remove(&key);
+                                    return;
+                                },
+                                PullOutcome::New => PULL_MIN_BACKOFF,
+                                PullOutcome::NoNew => backoff.saturating_mul(2).min(PULL_MAX_BACKOFF),
+                            };
+                            let at = if rerun {
+                                Instant::now()
+                            } else {
+                                let frac: f64 = rand::rng().random_range(-PULL_JITTER_FRAC .. PULL_JITTER_FRAC);
+                                let secs = next_backoff.as_secs_f64() * (1.0 + frac);
+                                Instant::now() + Duration::from_secs_f64(secs.max(1.0))
+                            };
+                            inner.schedule(key, at, next_backoff);
+                        }
+                        scheduler.wake.notify_one();
                     });
                 }
                 next_at
@@ -224,8 +229,10 @@ impl PullScheduler {
                 },
                 Some(at) => {
                     tokio::select!{
-                        _ = tokio::time::sleep_until(at) => {},
-                        _ = self.wake.notified() => {},
+                        _ = tokio:: time:: sleep_until(at) => {
+                        },
+                        _ = self.wake.notified() => {
+                        },
                     };
                 },
             }
@@ -233,30 +240,13 @@ impl PullScheduler {
     }
 }
 
-fn jitter(d: Duration) -> Duration {
-    let frac: f64 = rand::rng().random_range(-PULL_JITTER_FRAC .. PULL_JITTER_FRAC);
-    let secs = d.as_secs_f64() * (1.0 + frac);
-    return Duration::from_secs_f64(secs.max(1.0));
-}
-
-async fn execute_pull(state: &Arc<State>, key: &PullKey) -> PullOutcome {
-    match crate::subsystems::messages::pull_and_store(state, key).await {
-        Ok(outcome) => return outcome,
-        Err(e) => {
-            state.log.log_err(loga::WARN, e.context("Error executing scheduled pull"));
-            return PullOutcome::NoNew;
-        },
-    }
-}
-
 pub async fn enumerate_and_seed(state: &Arc<State>) -> Result<(), loga::Error> {
     let keys = tx(&state.db, move |db_tx| {
-        let channels =
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select account_id, identity, id, local_identity from channel where deleted is null"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
+        let channels = good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select account_id, identity, id, local_identity from channel where deleted is null"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
         let mut keys = vec![];
         for c in channels {
             if c.local_identity.0 == c.identity.0 {

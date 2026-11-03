@@ -14,17 +14,9 @@ use {
 const SIZE: f64 = 100.;
 const CORNER: f64 = 20.;
 const STROKE_CM: f64 = 0.072;
-const CHANNEL_LINES_MAX: usize = 5;
-const CHANNEL_LINE_MIN_SEPARATION: f64 = 40.;
-const IDENTITY_CIRCLES_MAX: usize = 3;
-const IDENTITY_CIRCLE_MIN_RADIUS: f64 = 18.;
-const IDENTITY_CIRCLE_GAP: f64 = 13.5;
-const IDENTITY_CIRCLE_MAX_RADIUS_FRAC: f64 = 0.7;
 const HUE_COUNT: usize = 10;
-const HUE_OFFSET_DEG: f64 = 30.;
 const CHROMA: f64 = 0.07;
 const LIGHTNESS_LIGHT_THEME: [f64; 2] = [0.45, 0.62];
-const LIGHTNESS_DARK_THEME: [f64; 2] = [0.72, 0.86];
 
 struct Rng(u64);
 
@@ -82,10 +74,10 @@ fn oklch_hex(l: f64, c: f64, hue_deg: f64) -> String {
 }
 
 fn svg_data_url(rng: &mut Rng, outline: &str, body: &str) -> String {
-    let hue = HUE_OFFSET_DEG + rng.index(HUE_COUNT) as f64 * 360. / HUE_COUNT as f64;
+    let hue = 30. + rng.index(HUE_COUNT) as f64 * 360. / HUE_COUNT as f64;
     let band = rng.index(LIGHTNESS_LIGHT_THEME.len());
     let light = oklch_hex(LIGHTNESS_LIGHT_THEME[band], CHROMA, hue);
-    let dark = oklch_hex(LIGHTNESS_DARK_THEME[band], CHROMA, hue);
+    let dark = oklch_hex([0.72, 0.86][band], CHROMA, hue);
     let svg =
         format!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {SIZE} {SIZE}"><style>g{{fill:none;stroke:{dark};stroke-width:{STROKE_CM}cm;stroke-linecap:round}}.o{{stroke-width:{outline_width}cm}}g>*{{vector-effect:non-scaling-stroke}}@media (prefers-color-scheme: light){{g{{stroke:{light}}}}}</style><clipPath id="c">{outline}</clipPath><g clip-path="url(#c)"><g class="o">{outline}</g>{body}</g></svg>"#,
@@ -115,13 +107,13 @@ pub fn channel_icon(id: &QualifiedChannelId) -> String {
     let mut rng = Rng::new("kwa-channel-icon", &data);
     let outline = box_outline();
     let mut body = String::new();
-    for _ in 0 .. 1 + rng.index(CHANNEL_LINES_MAX) {
+    for _ in 0 .. 1 + rng.index(5) {
         let (start, end) = loop {
             let side_a = rng.index(4);
             let side_b = (side_a + 1 + rng.index(3)) % 4;
             let a = edge_point(&mut rng, side_a);
             let b = edge_point(&mut rng, side_b);
-            if (a.0 - b.0).hypot(a.1 - b.1) >= CHANNEL_LINE_MIN_SEPARATION {
+            if (a.0 - b.0).hypot(a.1 - b.1) >= 40. {
                 break (a, b);
             }
         };
@@ -146,12 +138,12 @@ pub fn identity_icon(id: &Identity) -> String {
         write!(body, r#"<circle cx="{x:.2}" cy="{y:.2}" r="{r:.2}"/>"#).unwrap();
     };
     circle(&mut body, center, center, outer_radius);
-    for i in 0 .. 1 + rng.index(IDENTITY_CIRCLES_MAX) {
-        let radius = rng.range(IDENTITY_CIRCLE_MIN_RADIUS, outer_radius * IDENTITY_CIRCLE_MAX_RADIUS_FRAC);
+    for i in 0 .. 1 + rng.index(3) {
+        let radius = rng.range(18., outer_radius * 0.7);
         let dist = if i == 0 {
             outer_radius - radius
         } else {
-            (outer_radius - radius - IDENTITY_CIRCLE_GAP) * rng.unit().sqrt()
+            (outer_radius - radius - 13.5) * rng.unit().sqrt()
         };
         let angle = rng.range(0., 2. * PI);
         circle(&mut body, center + dist * angle.cos(), center + dist * angle.sin(), radius);

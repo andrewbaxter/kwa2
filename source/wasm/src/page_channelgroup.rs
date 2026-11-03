@@ -229,7 +229,8 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
         inf = current_chat.inf;
     } 'no {
         let mode = HistPrim::new(pc, ChatMode::None);
-        let chat_state = Rc::new(ChatState::new(pc.eg(), vec![], mode.clone()));
+        let chat_state =
+            Rc::new(ChatState::new(pc.eg(), CurrentChatSource::Group(m.id.clone()), vec![], mode.clone()));
         let chat_state2 = Rc::new(ChatState2 { channel_lookup: Default::default() });
         inf = Infinite::new(&pc.eg(), InfiniteEls {
             center_spinner: style_export::leaf_chat_spinner_center().root,
@@ -337,20 +338,12 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                     ) {
                         let new_reset_id;
                         let set_sticky;
-                        match &*mode.borrow() {
-                            ChatMode::None => {
+                        match mode.borrow().focus() {
+                            None => {
                                 new_reset_id = None;
                                 set_sticky = false;
                             },
-                            ChatMode::MessageChannelSelect => {
-                                new_reset_id = None;
-                                set_sticky = false;
-                            },
-                            ChatMode::TopMessage(_) => {
-                                new_reset_id = None;
-                                set_sticky = false;
-                            },
-                            ChatMode::ReplyMessage(mode) => match &mode.target {
+                            Some(mode) => match &mode.target {
                                 ChatModeReplyMessageTarget::Channel(target) => {
                                     new_reset_id = Some(MinistateChannelGroupResetId {
                                         own_identity: mode.own_identity.clone(),
@@ -396,7 +389,11 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                                     new_reset_id = None;
                                     let found_time =
                                         chat_state.find_time_by_client_id(
-                                            &(target.channel.clone(), mode.own_identity.clone(), target.message.clone()),
+                                            &(
+                                                target.channel.clone(),
+                                                mode.own_identity.clone(),
+                                                target.message.clone()
+                                            ),
                                         );
                                     if let Some(time) = found_time {
                                         if let Some(inf) = inf.upgrade() {
@@ -469,13 +466,11 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                     text: local_channelgroup.name.get(),
                     link: Some(ministate_octothorpe(&Ministate::ChannelGroupMenu(id.clone()))),
                 }).root;
-                center.ref_own(
-                    |e| link!((_pc = pc), (name = local_channelgroup.name.clone()), (), (e = e.weak()) {
-                        let e = e.upgrade()?;
-                        e.ref_text(&*name.borrow());
-                    }),
-                );
-                center
+                center.ref_own(|e| link!((_pc = pc), (name = local_channelgroup.name.clone()), (), (e = e.weak()) {
+                    let e = e.upgrade()?;
+                    e.ref_text(&*name.borrow());
+                }),);
+                return center;
             }
         });
         own.push(nol_channelgroup.then(pc, {

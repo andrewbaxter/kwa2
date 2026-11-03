@@ -15,7 +15,7 @@ pub async fn tx<
         match cb(&mut db_tx) {
             Ok(res) => {
                 db_tx.0.commit().context("Failed to commit transaction")?;
-                Ok(res)
+                return Ok(res);
             },
             Err(e) => {
                 let e = e.context("Error during transaction");
@@ -39,7 +39,10 @@ pub enum Txr<T> {
 
 pub async fn abortable_tx<
     O: 'static + Send + Sync,
-    F: 'static + Send + for<'b, 't> FnOnce(&'b mut crate::db::Db<Transaction<'t>>) -> Result<Txr<O>, loga::Error>,
+    F:
+        'static +
+        Send +
+        for<'b, 't> FnOnce(&'b mut crate::db::Db<Transaction<'t>>) -> Result<Txr<O>, loga::Error>,
 >(pool: &Pool, cb: F) -> Result<Option<O>, loga::Error> {
     let conn = pool.get().await?;
     return Ok(conn.interact(|conn| {
@@ -48,7 +51,7 @@ pub async fn abortable_tx<
         match cb(&mut db_tx) {
             Ok(Txr::Ok(res)) => {
                 db_tx.0.commit().context("Failed to commit transaction")?;
-                Ok(Some(res))
+                return Ok(Some(res));
             },
             Ok(Txr::Abort) => {
                 match db_tx.0.rollback().context("Error rolling back transaction due to abort") {

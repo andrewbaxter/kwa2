@@ -22,7 +22,10 @@ use {
     futures::channel::oneshot,
     lunk::EventGraph,
     shared::interface::{
-        shared::QualifiedChannelId,
+        shared::{
+            MessageRel,
+            QualifiedChannelId,
+        },
         wire::c2s::{
             self,
             OutboxEntry,
@@ -83,6 +86,9 @@ impl ServerOutboxFeed {
             if e.sender != self.0.sender {
                 continue;
             }
+            if let MessageRel::EditOf(_) = e.rel {
+                continue;
+            }
             out.insert(ChatTime {
                 stamp: e.created,
                 id: ChatTimeId::ServerOutbox(e.id.unique),
@@ -91,10 +97,9 @@ impl ServerOutboxFeed {
         return Ok(out);
     }
 
-    async fn create_entries<'a>(
-        &self,
-        sources: impl Iterator<Item = (&'a ChatTime, &'a OutboxEntry)>,
-    ) -> Vec<Rc<ChatEntry>> {
+    async fn create_entries<
+        'a,
+    >(&self, sources: impl Iterator<Item = (&'a ChatTime, &'a OutboxEntry)>) -> Vec<Rc<ChatEntry>> {
         let mut out = vec![];
         let mut client_ids = vec![];
         for (time, e) in sources {

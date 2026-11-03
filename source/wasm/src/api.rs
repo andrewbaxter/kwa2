@@ -50,12 +50,7 @@ pub fn redirect_login() -> ! {
         ).log(&state().log, &"Error storing post-redirect ministate");
     }
     let base_url = &state().env.base_url;
-    window()
-        .location()
-        .set_href(
-            &Url::new_with_base("oidc", base_url).unwrap().href(),
-        )
-        .unwrap();
+    window().location().set_href(&Url::new_with_base("oidc", base_url).unwrap().href()).unwrap();
     unreachable!();
 }
 
@@ -67,12 +62,7 @@ pub fn redirect_logout() -> ! {
         ).log(&state().log, &"Error storing post-redirect ministate");
     }
     let base_url = &state().env.base_url;
-    window()
-        .location()
-        .set_href(
-            &Url::new_with_base("logout", base_url).unwrap().href(),
-        )
-        .unwrap();
+    window().location().set_href(&Url::new_with_base("logout", base_url).unwrap().href()).unwrap();
     unreachable!();
 }
 
@@ -93,22 +83,18 @@ async fn read_resp(resp: Response) -> Result<Vec<u8>, String> {
     return Ok(body);
 }
 
-async fn post(req: Request) -> Result<Vec<u8>, String> {
+pub async fn req_post_json<T: c2s::proto::ReqTrait>(base_url: &str, req: T) -> Result<T::Resp, String> {
+    let req =
+        Request::post(&format!("{}api", base_url))
+            .header("Content-type", "application/json")
+            .body(serde_json::to_string(&req.to_enum()).unwrap_throw());
     let resp = match req.send().await {
         Ok(r) => r,
         Err(e) => {
             return Err(format!("Failed to send request: {}", e));
         },
     };
-    return read_resp(resp).await;
-}
-
-pub async fn req_post_json<T: c2s::proto::ReqTrait>(base_url: &str, req: T) -> Result<T::Resp, String> {
-    let req =
-        Request::post(&format!("{}api", base_url))
-            .header("Content-type", "application/json")
-            .body(serde_json::to_string(&req.to_enum()).unwrap_throw());
-    let body = post(req).await?;
+    let body = read_resp(resp).await?;
     return Ok(
         serde_json::from_slice::<T::Resp>(
             &body,
@@ -179,18 +165,15 @@ pub async fn req_get<T: c2s::PathReqTrait>(req: T) -> Result<T::Resp, String> {
     }
 }
 
-const GET_RETRY_INITIAL_MS: u32 = 1000;
-const GET_RETRY_MAX_MS: u32 = 60 * 1000;
-
 pub async fn req_get_retry<T: c2s::PathReqTrait>(req: T) -> Result<T::Resp, String> {
-    let mut backoff = GET_RETRY_INITIAL_MS;
+    let mut backoff = 1000;
     loop {
         match get_once(&req).await {
             Ok(v) => return Ok(v),
             Err(GetFailure::Permanent(e)) => return Err(e),
             Err(GetFailure::Transient(_)) => {
                 TimeoutFuture::new(backoff).await;
-                backoff = (backoff * 2).min(GET_RETRY_MAX_MS);
+                backoff = (backoff * 2).min(60 * 1000);
             },
         }
     }

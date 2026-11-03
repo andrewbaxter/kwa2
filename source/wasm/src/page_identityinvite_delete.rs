@@ -45,7 +45,7 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity, id: &IdentityInvit
                         style_export::LeafFormTextArgs {
                             text: format!("Are you sure you want to delete invite [{}]", local.res.name),
                         },
-                    ).root
+                    ).root,
                 ],
                 async move |_idem| {
                     req_post_json(

@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["wasm", "shared"]
-exclude = ["rooting-forms"]
 
 [profile.release]
 strip = true

@@ -152,22 +152,16 @@ async fn set_values(
         certs.push(pending.pub_pem.clone());
     }
     let mut set = HashMap::new();
-    set.insert(
-        vec![SPAGH_RECORD_KEY.to_string()],
-        record::RecordValue::latest(record::latest::RecordValue {
-            ttl: record::latest::Minutes::from(RECORD_TTL),
-            data: Some(publish.record.clone()),
-        }),
-    );
-    set.insert(
-        vec![tls_record::KEY_SUFFIX_TLS.to_string()],
-        record::RecordValue::latest(record::latest::RecordValue {
-            ttl: record::latest::Minutes::from(RECORD_TTL),
-            data: Some(
-                serde_json::to_value(&tls_record::TlsCerts::latest(tls_record::latest::TlsCerts(certs))).unwrap(),
-            ),
-        }),
-    );
+    set.insert(vec![SPAGH_RECORD_KEY.to_string()], record::RecordValue::latest(record::latest::RecordValue {
+        ttl: record::latest::Minutes::from(RECORD_TTL),
+        data: Some(publish.record.clone()),
+    }));
+    set.insert(vec![tls_record::KEY_SUFFIX_TLS.to_string()], record::RecordValue::latest(record::latest::RecordValue {
+        ttl: record::latest::Minutes::from(RECORD_TTL),
+        data: Some(
+            serde_json::to_value(&tls_record::TlsCerts::latest(tls_record::latest::TlsCerts(certs))).unwrap(),
+        ),
+    }));
     publish.publisher.modify_values(&identity, PublishArgs {
         clear_all: true,
         set: set,
@@ -179,15 +173,11 @@ async fn set_values(
 pub async fn publish_identity(state: &State, identity: Identity) -> Result<(), loga::Error> {
     let db_identity = DbIdentity(identity);
     let row = tx(&state.db, move |db_tx| {
-        return Ok(
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select secret, tls_state from identity where id = ${identity_id_t = &db_identity} and soft_deleted_at is null"#;
-                db_tx
-            )
-                .map_err(|e| loga::err(e.0))?
-                .context_with("Identity to publish not found", ea!(identity = identity))?,
-        );
+        return Ok(good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select secret, tls_state from identity where id = ${identity_id_t = &db_identity} and soft_deleted_at is null"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?.context_with("Identity to publish not found", ea!(identity = identity))?);
     }).await?;
     let signer = Arc::new(Mutex::new(local_signer(row.secret.0)?)) as Arc<Mutex<dyn IdentitySigner>>;
     let tls_state = match row.tls_state {
@@ -202,14 +192,10 @@ pub async fn publish_identity(state: &State, identity: Identity) -> Result<(), l
         },
     };
     set_values(state, identity, &tls_state).await?;
-    let announcement =
-        generate_publish_announce(
-            &signer,
-            vec![InfoResponse {
-                advertise_addr: state.spagh_publish.publisher_info.advertise_addr,
-                cert_pub_hash: state.spagh_publish.publisher_info.cert_pub_hash.clone(),
-            }],
-        ).map_err(|e| loga::err_with("Error generating announcement", ea!(identity = identity, err = e)))?;
+    let announcement = generate_publish_announce(&signer, vec![InfoResponse {
+        advertise_addr: state.spagh_publish.publisher_info.advertise_addr,
+        cert_pub_hash: state.spagh_publish.publisher_info.cert_pub_hash.clone(),
+    }]).map_err(|e| loga::err_with("Error generating announcement", ea!(identity = identity, err = e)))?;
     state
         .spagh_publish
         .publisher
@@ -232,13 +218,11 @@ pub async fn unpublish_identity(state: &State, identity: Identity) -> Result<(),
 
 pub async fn publish_all(state: &State) -> Result<(), loga::Error> {
     let identities = tx(&state.db, move |db_tx| {
-        return Ok(
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select id from identity where soft_deleted_at is null"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?,
-        );
+        return Ok(good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select id from identity where soft_deleted_at is null"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?);
     }).await?;
     for identity in identities {
         publish_identity(state, identity.0).await?;
@@ -248,13 +232,11 @@ pub async fn publish_all(state: &State) -> Result<(), loga::Error> {
 
 pub async fn refresh_certs(state: &State) -> Result<(), loga::Error> {
     let rows = tx(&state.db, move |db_tx| {
-        return Ok(
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select id, secret, tls_state from identity where soft_deleted_at is null and tls_state is not null"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?,
-        );
+        return Ok(good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select id, secret, tls_state from identity where soft_deleted_at is null and tls_state is not null"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?);
     }).await?;
     for row in rows {
         let identity = row.id.0;
@@ -273,7 +255,8 @@ pub async fn refresh_certs(state: &State) -> Result<(), loga::Error> {
             },
             None => {
                 if now >= expiry - CERT_SWAP_BUFFER - RECORD_TTL * 2 {
-                    let signer = Arc::new(Mutex::new(local_signer(row.secret.0)?)) as Arc<Mutex<dyn IdentitySigner>>;
+                    let signer =
+                        Arc::new(Mutex::new(local_signer(row.secret.0)?)) as Arc<Mutex<dyn IdentitySigner>>;
                     tls_state.pending = Some(request_cert(&state.log, signer, cert_options()).await?);
                     true
                 } else {

@@ -85,67 +85,65 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
             async move |local| {
                 let portrait = req_form_portrait(&local.portrait.get()).await?;
                 let is_owner = local.id.identity == local.own_identity;
-                let (err_el, elements, parse): (Option<El>, Vec<El>, Rc<dyn Fn() -> Result<Values, ()>>) = if is_owner {
-                    let (form_els, form_state) = OwnerForm_::new_form("", Some(&OwnerForm_ {
-                        name: local.name.get(),
-                        description: local.description.get(),
-                        shown_name: local.shown_name.get(),
-                        shown_description: local.shown_description.get(),
-                        portrait: portrait.clone(),
-                        group: FormOptChannelGroup(local.group.get()),
-                        retention_days: local.retention_days.get(),
-                        public_read: local.public_read.get(),
-                    }));
-                    (form_els.error, form_els.elements, Rc::new(move || {
-                        let v = form_state.parse()?;
-                        return Ok(Values {
-                            name: v.name,
-                            description: v.description,
-                            shown: Some((v.shown_name, v.shown_description)),
-                            portrait: v.portrait,
-                            group: v.group.0,
-                            retention_days: v.retention_days,
-                            public_read: Some(v.public_read),
-                        });
-                    }))
-                } else {
-                    let (form_els, form_state) = MemberForm_::new_form("", Some(&MemberForm_ {
-                        name: local.name.get(),
-                        description: local.description.get(),
-                        portrait: portrait.clone(),
-                        group: FormOptChannelGroup(local.group.get()),
-                        retention_days: local.retention_days.get(),
-                    }));
-                    (form_els.error, form_els.elements, Rc::new(move || {
-                        let v = form_state.parse()?;
-                        return Ok(Values {
-                            name: v.name,
-                            description: v.description,
-                            shown: None,
-                            portrait: v.portrait,
-                            group: v.group.0,
-                            retention_days: v.retention_days,
-                            public_read: None,
-                        });
-                    }))
-                };
-                Ok((err_el, elements, async move |_idem| {
+                let (err_el, elements, parse): (Option<El>, Vec<El>, Rc<dyn Fn() -> Result<Values, ()>>) =
+                    if is_owner {
+                        let (form_els, form_state) = OwnerForm_::new_form("", Some(&OwnerForm_ {
+                            name: local.name.get(),
+                            description: local.description.get(),
+                            shown_name: local.shown_name.get(),
+                            shown_description: local.shown_description.get(),
+                            portrait: portrait.clone(),
+                            group: FormOptChannelGroup(local.group.get()),
+                            retention_days: local.retention_days.get(),
+                            public_read: local.public_read.get(),
+                        }));
+                        (form_els.error, form_els.elements, Rc::new(move || {
+                            let v = form_state.parse()?;
+                            return Ok(Values {
+                                name: v.name,
+                                description: v.description,
+                                shown: Some((v.shown_name, v.shown_description)),
+                                portrait: v.portrait,
+                                group: v.group.0,
+                                retention_days: v.retention_days,
+                                public_read: Some(v.public_read),
+                            });
+                        }))
+                    } else {
+                        let (form_els, form_state) = MemberForm_::new_form("", Some(&MemberForm_ {
+                            name: local.name.get(),
+                            description: local.description.get(),
+                            portrait: portrait.clone(),
+                            group: FormOptChannelGroup(local.group.get()),
+                            retention_days: local.retention_days.get(),
+                        }));
+                        (form_els.error, form_els.elements, Rc::new(move || {
+                            let v = form_state.parse()?;
+                            return Ok(Values {
+                                name: v.name,
+                                description: v.description,
+                                shown: None,
+                                portrait: v.portrait,
+                                group: v.group.0,
+                                retention_days: v.retention_days,
+                                public_read: None,
+                            });
+                        }))
+                    };
+                return Ok((err_el, elements, async move |_idem| {
                     let Ok(new_values) = parse() else {
                         return Ok(());
                     };
                     let (shown_name, shown_description) = match new_values.shown {
-                        Some((shown_name, shown_description)) => (
-                            if shown_name == *local.shown_name.borrow() {
-                                None
-                            } else {
-                                Some(c2s::ModifyOption { value: shown_name })
-                            },
-                            if shown_description == *local.shown_description.borrow() {
-                                None
-                            } else {
-                                Some(c2s::ModifyOption { value: shown_description })
-                            },
-                        ),
+                        Some((shown_name, shown_description)) => (if shown_name == *local.shown_name.borrow() {
+                            None
+                        } else {
+                            Some(c2s::ModifyOption { value: shown_name })
+                        }, if shown_description == *local.shown_description.borrow() {
+                            None
+                        } else {
+                            Some(c2s::ModifyOption { value: shown_description })
+                        }),
                         None => (None, None),
                     };
                     let res = req_post_json(&state().env.base_url, c2s::ChannelModify {
@@ -189,7 +187,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                         }));
                     }).unwrap();
                     return Ok(());
-                }))
+                }));
             }
         }),
     );

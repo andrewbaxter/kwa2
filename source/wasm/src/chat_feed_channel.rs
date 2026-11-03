@@ -95,7 +95,28 @@ impl ChannelFeed {
         }));
     }
 
-    fn maybe_trigger_pull(&self, eg: &EventGraph) {
+    pub fn notify(&self, eg: &EventGraph, offset: ActivityOffset) {
+        self.update_known_time(eg, offset);
+    }
+
+    fn update_known_or_have_time(&self, eg: &EventGraph, new_data_time: ActivityPageOffsetPos) {
+        if self
+            .0
+            .have_data_time
+            .get()
+            .map(|data_time| new_data_time.offset_pos < data_time.offset_pos)
+            .unwrap_or(true) {
+            // If empty or resp time older, update
+            self.0.have_data_time.set(Some(new_data_time));
+        }
+        self.update_known_time(eg, new_data_time.offset_pos.offset);
+    }
+
+    fn update_known_time(&self, eg: &EventGraph, new_offset: ActivityOffset) {
+        if self.0.known_latest_server_time.get().map(|known_time| new_offset > known_time).unwrap_or(true) {
+            // If empty or resp time newer, update
+            self.0.known_latest_server_time.set(Some(new_offset));
+        }
         if self.0.known_latest_server_time.get() != self.0.have_data_time.get().map(|x| x.offset_pos.offset) {
             *self.0.pulling_activity.borrow_mut() = Some(spawn_rooted_log("pulling new channel events", {
                 let self1 = self.clone();
@@ -196,31 +217,6 @@ impl ChannelFeed {
             }));
         }
     }
-
-    pub fn notify(&self, eg: &EventGraph, offset: ActivityOffset) {
-        self.update_known_time(eg, offset);
-    }
-
-    fn update_known_or_have_time(&self, eg: &EventGraph, new_data_time: ActivityPageOffsetPos) {
-        if self
-            .0
-            .have_data_time
-            .get()
-            .map(|data_time| new_data_time.offset_pos < data_time.offset_pos)
-            .unwrap_or(true) {
-            // If empty or resp time older, update
-            self.0.have_data_time.set(Some(new_data_time));
-        }
-        self.update_known_time(eg, new_data_time.offset_pos.offset);
-    }
-
-    fn update_known_time(&self, eg: &EventGraph, new_offset: ActivityOffset) {
-        if self.0.known_latest_server_time.get().map(|known_time| new_offset > known_time).unwrap_or(true) {
-            // If empty or resp time newer, update
-            self.0.known_latest_server_time.set(Some(new_offset));
-        }
-        self.maybe_trigger_pull(eg);
-    }
 }
 
 async fn create_entries(
@@ -254,25 +250,26 @@ async fn create_entries(
                 arrived.push((client_id, e.original_id));
             },
             None => {
-                let entry = ChatEntry::new_message(
-                    chat_state.clone(),
-                    e.original_id.message.identity.clone(),
-                    Some(e.original_id.clone()),
-                    time,
-                    Prim::new(e.message.body),
-                    false,
-                    None,
-                    scope_any(defer({
-                        let chat_state = Rc::downgrade(chat_state);
-                        let id = e.original_id.clone();
-                        move || {
-                            let Some(chat_state) = chat_state.upgrade() else {
-                                return;
-                            };
-                            remove_dead_entry(&chat_state.entry_channel_lookup, &id);
-                        }
-                    })),
-                );
+                let entry =
+                    ChatEntry::new_message(
+                        chat_state.clone(),
+                        e.original_id.message.identity.clone(),
+                        Some(e.original_id.clone()),
+                        time,
+                        Prim::new(e.message.body),
+                        false,
+                        None,
+                        scope_any(defer({
+                            let chat_state = Rc::downgrade(chat_state);
+                            let id = e.original_id.clone();
+                            move || {
+                                let Some(chat_state) = chat_state.upgrade() else {
+                                    return;
+                                };
+                                remove_dead_entry(&chat_state.entry_channel_lookup, &id);
+                            }
+                        })),
+                    );
                 chat_state.entry_channel_lookup.borrow_mut().insert(e.original_id, Rc::downgrade(&entry));
                 out.push(entry);
             },

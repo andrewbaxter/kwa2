@@ -672,6 +672,53 @@ impl PathReqTrait for SnapById {
     }
 }
 
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MessageRevision {
+    pub receive_time: Timestamp,
+    pub body: String,
+}
+
+pub struct MessageHistory {
+    pub id: QualifiedMessageId,
+}
+
+const PATH_PREFIX_MESSAGE_HISTORY: &str = "message_history";
+
+impl PathReqTrait for MessageHistory {
+    type Resp = Option<Vec<MessageRevision>>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_MESSAGE_HISTORY)?;
+        let out = Self { id: QualifiedMessageId {
+            channel: QualifiedChannelId {
+                identity: confirm_path_element(&mut parts, "channel identity")?,
+                channel: ChannelId(confirm_path_element(&mut parts, "channel")?),
+            },
+            message: MessageId {
+                identity: confirm_path_element(&mut parts, "message identity")?,
+                unique: confirm_path_element(&mut parts, "message unique")?,
+            },
+        } };
+        confirm_path_empty(&mut parts)?;
+        return Ok(out);
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path(
+            [
+                PATH_PREFIX_MESSAGE_HISTORY.to_string(),
+                self.id.channel.identity.to_string(),
+                self.id.channel.channel.0.to_string(),
+                self.id.message.identity.to_string(),
+                self.id.message.unique.to_string(),
+            ],
+        );
+    }
+}
+
 pub struct SnapByClientId {
     pub channel: QualifiedChannelId,
     pub client_id: MessageClientId,

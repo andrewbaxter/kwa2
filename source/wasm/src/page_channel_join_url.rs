@@ -3,7 +3,9 @@ use {
         js::style_export,
         pageutil::build_form,
         state::{
+            ChannelJoinSource,
             Ministate,
+            MinistateChannelJoinConfirm,
             goto_replace_ministate,
             state,
         },
@@ -25,18 +27,18 @@ use {
     },
 };
 
-enum FormKwaUrlInvite {
+pub enum FormKwaUrlInvite {
     Identity(KwaUrlIdentityInvite),
     Channel(KwaUrlChannelInvite),
     PublicChannel(QualifiedChannelId),
 }
 
 impl FormKwaUrlInvite {
-    fn into_url(self) -> KwaUrl {
+    pub fn into_url(self) -> KwaUrl {
         match self {
-            FormKwaUrlInvite::Identity(u) => KwaUrl::IdentityInvite(u),
-            FormKwaUrlInvite::Channel(u) => KwaUrl::ChannelInvite(u),
-            FormKwaUrlInvite::PublicChannel(u) => KwaUrl::Channel(u),
+            FormKwaUrlInvite::Identity(u) => return KwaUrl::IdentityInvite(u),
+            FormKwaUrlInvite::Channel(u) => return KwaUrl::ChannelInvite(u),
+            FormKwaUrlInvite::PublicChannel(u) => return KwaUrl::Channel(u),
         }
     }
 }
@@ -66,9 +68,9 @@ impl FromStr for FormKwaUrlInvite {
 impl ToString for FormKwaUrlInvite {
     fn to_string(&self) -> String {
         match self {
-            FormKwaUrlInvite::Identity(u) => KwaUrl::IdentityInvite(u.clone()).to_string(),
-            FormKwaUrlInvite::Channel(u) => KwaUrl::ChannelInvite(u.clone()).to_string(),
-            FormKwaUrlInvite::PublicChannel(u) => KwaUrl::Channel(u.clone()).to_string(),
+            FormKwaUrlInvite::Identity(u) => return KwaUrl::IdentityInvite(u.clone()).to_string(),
+            FormKwaUrlInvite::Channel(u) => return KwaUrl::ChannelInvite(u.clone()).to_string(),
+            FormKwaUrlInvite::PublicChannel(u) => return KwaUrl::Channel(u.clone()).to_string(),
         }
     }
 }
@@ -80,10 +82,11 @@ impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormKwaUrlInvite {
         from: Option<&Self>,
         _depth: usize,
     ) -> (rooting_forms::FormElements, Box<dyn rooting_forms::FormState<Self>>) {
-        let (els, state) = rooting_forms::impl_str::FromStrFormState::new::<String, FormKwaUrlInvite>(
-            field,
-            &from.map(|x| x.to_string()).unwrap_or_default(),
-        );
+        let (els, state) =
+            rooting_forms::impl_str::FromStrFormState::new::<String, FormKwaUrlInvite>(
+                field,
+                &from.map(|x| x.to_string()).unwrap_or_default(),
+            );
         els.elements[0].ref_classes(&[&style_export::class_code().value]);
         return (els, state);
     }
@@ -111,7 +114,10 @@ pub fn build(pc: &mut ProcessingContext) -> El {
                 return Ok(());
             };
             eg.event(|pc| {
-                goto_replace_ministate(pc, &state().log, &Ministate::ChannelJoinUrlConfirm(new_values.url.into_url()));
+                goto_replace_ministate(pc, &state().log, &Ministate::ChannelJoinConfirm(MinistateChannelJoinConfirm {
+                    url: new_values.url.into_url(),
+                    source: ChannelJoinSource::Url,
+                }));
             }).unwrap();
             return Ok(());
         },

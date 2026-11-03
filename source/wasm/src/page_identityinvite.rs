@@ -41,27 +41,23 @@ pub fn build(pc: &mut ProcessingContext, identity: &Identity, id: &IdentityInvit
                 body: build_url_menu_items(&KwaUrl::IdentityInvite(KwaUrlIdentityInvite {
                     identity: local.res.token.identity.clone(),
                     code: local.res.token.token.0.clone(),
-                })).into_iter().chain([
-                    //. .
-                    style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                        text: format!("Edit"),
-                        link: ministate_octothorpe(&Ministate::IdentityInviteEdit(MinistateIdentityInvite {
-                            identity: identity.clone(),
-                            invite: local.res.id.clone(),
-                        })),
-                        image: None,
-                        generated_image: None,
-                    }).root,
-                    style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
-                        text: format!("Delete"),
-                        link: ministate_octothorpe(&Ministate::IdentityInviteDelete(MinistateIdentityInvite {
-                            identity: identity.clone(),
-                            invite: local.res.id.clone(),
-                        })),
-                        image: None,
-                        generated_image: None,
-                    }).root,
-                ]).collect(),
+                })).into_iter().chain([style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                    text: format!("Edit"),
+                    link: ministate_octothorpe(&Ministate::IdentityInviteEdit(MinistateIdentityInvite {
+                        identity: identity.clone(),
+                        invite: local.res.id.clone(),
+                    })),
+                    image: None,
+                    generated_image: None,
+                }).root, style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                    text: format!("Delete"),
+                    link: ministate_octothorpe(&Ministate::IdentityInviteDelete(MinistateIdentityInvite {
+                        identity: identity.clone(),
+                        invite: local.res.id.clone(),
+                    })),
+                    image: None,
+                    generated_image: None,
+                }).root]).collect(),
             }
         },
     );

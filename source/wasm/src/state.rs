@@ -27,8 +27,9 @@ use {
         page_channel,
         page_channel_delete,
         page_channel_edit,
+        page_channel_join_qr,
         page_channel_join_url,
-        page_channel_join_url_confirm,
+        page_channel_join_confirm,
         page_channel_menu,
         page_channel_new,
         page_channelgroup,
@@ -55,6 +56,7 @@ use {
         page_identityinvite_edit,
         page_identityinvite_new,
         page_identityinvites,
+        page_message_history,
         page_settings,
         page_top_add,
     },
@@ -189,6 +191,27 @@ pub struct MinistateChannelGroup {
     pub reset_id: Option<MinistateChannelGroupResetId>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChannelJoinSource {
+    Url,
+    Qr,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateChannelJoinConfirm {
+    pub url: KwaUrl,
+    pub source: ChannelJoinSource,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateMessageHistory {
+    pub id: QualifiedMessageId,
+    pub back: Box<Ministate>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Ministate {
@@ -196,7 +219,8 @@ pub enum Ministate {
     Settings,
     TopAdd,
     ChannelJoinUrl,
-    ChannelJoinUrlConfirm(KwaUrl),
+    ChannelJoinQr,
+    ChannelJoinConfirm(MinistateChannelJoinConfirm),
     ChannelNew,
     ChannelGroupNew,
     Identities,
@@ -226,6 +250,7 @@ pub enum Ministate {
     ChannelGroupMenu(ChannelGroupId),
     ChannelGroupEdit(ChannelGroupId),
     ChannelGroupDelete(ChannelGroupId),
+    MessageHistory(MinistateMessageHistory),
 }
 
 pub fn ministate_octothorpe(s: &Ministate) -> String {
@@ -409,8 +434,11 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
         Ministate::ChannelJoinUrl => {
             body = page_channel_join_url::build(pc);
         },
-        Ministate::ChannelJoinUrlConfirm(s) => {
-            body = page_channel_join_url_confirm::build(pc, s);
+        Ministate::ChannelJoinConfirm(s) => {
+            body = page_channel_join_confirm::build(pc, s);
+        },
+        Ministate::ChannelJoinQr => {
+            body = page_channel_join_qr::build(pc);
         },
         Ministate::Channel(s) => {
             body = page_channel::build(pc, s);
@@ -465,6 +493,9 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
         },
         Ministate::ChannelGroupDelete(s) => {
             body = page_channelgroup_delete::build(pc, s);
+        },
+        Ministate::MessageHistory(s) => {
+            body = page_message_history::build(pc, s);
         },
     }
     set_page(body);

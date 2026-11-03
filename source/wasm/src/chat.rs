@@ -8,6 +8,7 @@ use {
         chat_feed_channel::ChannelFeed,
         chat_feed_outbox::OutboxFeed,
         chat_feed_server_outbox::ServerOutboxFeed,
+        state::CurrentChatSource,
     },
     defer::defer,
     lunk::{
@@ -59,11 +60,32 @@ pub struct ChatModeReplyMessage {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+pub struct ChatModeEditMessage {
+    pub target: QualifiedMessageId,
+    pub own_identity: Identity,
+    pub body: String,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum ChatMode {
     None,
     MessageChannelSelect,
     TopMessage(ChatModeTopMessage),
     ReplyMessage(ChatModeReplyMessage),
+    EditMessage(ChatModeEditMessage),
+}
+
+impl ChatMode {
+    pub fn focus(&self) -> Option<ChatModeReplyMessage> {
+        match self {
+            ChatMode::None | ChatMode::MessageChannelSelect | ChatMode::TopMessage(_) => return None,
+            ChatMode::ReplyMessage(m) => return Some(m.clone()),
+            ChatMode::EditMessage(m) => return Some(ChatModeReplyMessage {
+                target: ChatModeReplyMessageTarget::Channel(m.target.clone()),
+                own_identity: m.own_identity.clone(),
+            }),
+        }
+    }
 }
 
 pub struct ChannelFeeds {
@@ -83,6 +105,7 @@ pub enum CopyStage {
 
 pub struct ChatState {
     pub eg: EventGraph,
+    pub source: CurrentChatSource,
     pub channels_meta: Prim<Vec<(String, Identity, QualifiedChannelId)>>,
     pub entry_channel_lookup: RefCell<HashMap<QualifiedMessageId, Weak<ChatEntry>>>,
     pub entry_channel_lookup_by_client_id: RefCell<HashMap<ClientIdKey, Weak<ChatEntry>>>,
@@ -94,11 +117,13 @@ pub struct ChatState {
 impl ChatState {
     pub fn new(
         eg: EventGraph,
+        source: CurrentChatSource,
         channels_meta: Vec<(String, Identity, QualifiedChannelId)>,
         mode: HistPrim<ChatMode>,
     ) -> ChatState {
         return ChatState {
             eg: eg,
+            source: source,
             channels_meta: Prim::new(channels_meta),
             entry_channel_lookup: Default::default(),
             entry_channel_lookup_by_client_id: Default::default(),
@@ -127,11 +152,7 @@ impl ChatState {
     }
 
     pub fn find_time_by_client_id(&self, key: &ClientIdKey) -> Option<ChatTime> {
-        return self
-            .live_copies(key)
-            .into_iter()
-            .find(|e| !*e.message().hidden.borrow())
-            .map(|e| e.time.clone());
+        return self.live_copies(key).into_iter().find(|e| !*e.message().hidden.borrow()).map(|e| e.time.clone());
     }
 
     pub fn find_time_by_message_id(&self, id: &QualifiedMessageId) -> Option<ChatTime> {
@@ -141,23 +162,6 @@ impl ChatState {
         }
         return self.find_time_by_client_id(e.message().client_key.as_ref().unwrap());
     }
-}
-
-fn reveal_if_none_visible(chat_state: Weak<ChatState>, key: ClientIdKey) {
-    spawn_local(async move {
-        let Some(chat_state) = chat_state.upgrade() else {
-            return;
-        };
-        chat_state.eg.event(|pc| {
-            let copies = chat_state.live_copies(&key);
-            if copies.iter().any(|e| !*e.message().hidden.borrow()) {
-                return;
-            }
-            if let Some(e) = copies.first() {
-                e.message().hidden.set(pc, false);
-            }
-        }).unwrap();
-    });
 }
 
 pub fn new_message_copy(
@@ -189,21 +193,44 @@ pub fn new_message_copy(
         },
         None => (Prim::new(body), false),
     };
-    let entry = ChatEntry::new_message(chat_state.clone(), key.1.clone(), message_id.clone(), time, body, hidden, Some(key.clone()), scope_any(defer({
-        let chat_state = Rc::downgrade(chat_state);
-        let key = key.clone();
-        let message_id = message_id.clone();
-        move || {
-            let Some(chat_state1) = chat_state.upgrade() else {
-                return;
-            };
-            remove_dead_entry(chat_state1.stage_lookup(stage), &key);
-            if let Some(message_id) = &message_id {
-                remove_dead_entry(&chat_state1.entry_channel_lookup, message_id);
-            }
-            reveal_if_none_visible(chat_state, key);
-        }
-    })));
+    let entry =
+        ChatEntry::new_message(
+            chat_state.clone(),
+            key.1.clone(),
+            message_id.clone(),
+            time,
+            body,
+            hidden,
+            Some(key.clone()),
+            scope_any(defer({
+                let chat_state = Rc::downgrade(chat_state);
+                let key = key.clone();
+                let message_id = message_id.clone();
+                move || {
+                    let Some(chat_state1) = chat_state.upgrade() else {
+                        return;
+                    };
+                    remove_dead_entry(chat_state1.stage_lookup(stage), &key);
+                    if let Some(message_id) = &message_id {
+                        remove_dead_entry(&chat_state1.entry_channel_lookup, message_id);
+                    }
+                    spawn_local(async move {
+                        let Some(chat_state) = chat_state.upgrade() else {
+                            return;
+                        };
+                        chat_state.eg.event(|pc| {
+                            let copies = chat_state.live_copies(&key);
+                            if copies.iter().any(|e| !*e.message().hidden.borrow()) {
+                                return;
+                            }
+                            if let Some(e) = copies.first() {
+                                e.message().hidden.set(pc, false);
+                            }
+                        }).unwrap();
+                    });
+                }
+            })),
+        );
     chat_state.stage_lookup(stage).borrow_mut().insert(key, Rc::downgrade(&entry));
     if let Some(message_id) = message_id {
         chat_state.entry_channel_lookup.borrow_mut().insert(message_id, Rc::downgrade(&entry));

@@ -31,8 +31,6 @@ use {
     },
 };
 
-const SUBSCRIBER_CHANNEL_CAPACITY: usize = 256;
-
 pub struct WsBus {
     subscribers: RwLock<HashMap<AccountId, HashMap<u64, mpsc::Sender<WsEvent>>>>,
     next_id: AtomicU64,
@@ -54,7 +52,7 @@ impl WsBus {
 
     pub async fn subscribe(&self, account_id: AccountId) -> Subscription {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = mpsc::channel(SUBSCRIBER_CHANNEL_CAPACITY);
+        let (tx, rx) = mpsc::channel(256);
         self.subscribers.write().await.entry(account_id).or_insert_with(HashMap::new).insert(id, tx);
         return Subscription {
             account_id: account_id,
@@ -84,11 +82,7 @@ impl WsBus {
     }
 }
 
-pub async fn run_ws_connection(
-    state: &Arc<State>,
-    account_id: AccountId,
-    ws: WebSocketStream<TokioIo<Upgraded>>,
-) {
+pub async fn run_ws_connection(state: &Arc<State>, account_id: AccountId, ws: WebSocketStream<TokioIo<Upgraded>>) {
     let mut sub = state.ws_bus.subscribe(account_id).await;
     let (mut sink, mut stream) = ws.split();
     let receiver = &mut sub.receiver;
@@ -115,13 +109,15 @@ pub async fn run_ws_connection(
         while let Some(m) = stream.next().await {
             match m {
                 Ok(WsMessage::Close(_)) | Err(_) => break,
-                _ => {},
+                _ => { },
             }
         }
     };
-    tokio::select! {
-        _ = write_task => {},
-        _ = read_task => {},
+    tokio::select!{
+        _ = write_task => {
+        },
+        _ = read_task => {
+        },
     }
     state.ws_bus.unsubscribe(&sub).await;
 }

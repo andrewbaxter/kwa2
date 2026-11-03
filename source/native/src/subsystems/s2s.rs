@@ -30,8 +30,6 @@ use {
 
 pub const CHALLENGE_TTL: Duration = Duration::from_secs(30);
 pub const TOKEN_TTL: Duration = Duration::from_secs(300);
-const CHALLENGE_CAPACITY: u64 = 65536;
-const TOKEN_CAPACITY: u64 = 65536;
 
 pub struct S2sState {
     resolver: Resolver,
@@ -43,8 +41,8 @@ impl S2sState {
     pub fn new(resolver: Resolver) -> Self {
         return Self {
             resolver: resolver,
-            challenges: Cache::builder().time_to_live(CHALLENGE_TTL).max_capacity(CHALLENGE_CAPACITY).build(),
-            tokens: Cache::builder().time_to_live(TOKEN_TTL).max_capacity(TOKEN_CAPACITY).build(),
+            challenges: Cache::builder().time_to_live(CHALLENGE_TTL).max_capacity(65536).build(),
+            tokens: Cache::builder().time_to_live(TOKEN_TTL).max_capacity(65536).build(),
         };
     }
 
@@ -68,13 +66,11 @@ impl S2sState {
         }
         let db_audience = DbIdentity(unverified.audience);
         let audience_hosted = s2s_tx(db, "checking identify audience", move |db_tx| {
-            return Ok(
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select 1 as x from identity where id = ${identity_id_t = &db_audience} and soft_deleted_at is null"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?,
-            );
+            return Ok(good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select 1 as x from identity where id = ${identity_id_t = &db_audience} and soft_deleted_at is null"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?);
         }).await?;
         if audience_hosted.is_none() {
             return Err(S2sError::NotFound("Identify audience is not hosted on this server".to_string()));

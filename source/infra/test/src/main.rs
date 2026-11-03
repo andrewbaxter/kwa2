@@ -76,12 +76,8 @@ use {
 const SERVER_COUNT: usize = 2;
 const REGISTRY_ID: &str = "kwa-test";
 const USER: &str = "test";
-const CADDY_IMAGE: &str =
-    "docker.io/library/caddy:2.11.7@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e";
-const PERSISTENT_UUID: &str = "3d02cfd4-968a-4fe4-a2a0-fe84614485f6";
 const PERSISTENT_DIR: &str = "/mnt/persistent";
 const CONFIG_DIR: &str = "/etc/kwa-test";
-const SECRETS_DIR: &str = "/etc/kwa-test-secrets";
 const FDAP_ADDR: &str = "[::1]:64116";
 const FDAP_LOGIN_ADDR: &str = "[::1]:8001";
 const KWA_ADDR: &str = "127.0.0.1:8080";
@@ -264,7 +260,6 @@ fn main() {
                     "kwa3/source/native/**",
                     "kwa3/source/native-bindgen/**",
                     "kwa3/source/nixbuild/**",
-                    "kwa3/source/rooting-forms/**",
                     "kwa3/source/shared/**",
                     "kwa3/source/spaghettinuum/source/native/**",
                     "kwa3/source/spaghettinuum/source/shared/**",
@@ -415,7 +410,7 @@ fn main() {
         ign.journal_to_serial_console();
         let mut token_sha256 = |t: &PrimExpr<String>| {
             let e: PrimExpr<String> = stack.func("sha256").a(stack.expr::<String>(t.raw())).into();
-            ign.interp(&e)
+            return ign.interp(&e);
         };
         let root_token_sha256 = token_sha256(&root_token);
         let login_token_sha256 = token_sha256(&login_token);
@@ -429,7 +424,7 @@ fn main() {
         let image_kwa = format!("{}/kwa@{}", registry_path, ign.interp(&image_kwa.hash()));
         let image_openfdap = format!("{}/openfdap@{}", registry_path, ign.interp(&image_openfdap.hash()));
         let image_fdap_login = format!("{}/fdap-login@{}", registry_path, ign.interp(&image_fdap_login.hash()));
-        let mount = ign.persistent_disk("persistent", PERSISTENT_UUID, PERSISTENT_DIR);
+        let mount = ign.persistent_disk("persistent", "3d02cfd4-968a-4fe4-a2a0-fe84614485f6", PERSISTENT_DIR);
         let dirs =
             ign.oneshot(
                 "kwa-test-dirs",
@@ -451,7 +446,7 @@ fn main() {
         let config_path = |n: &str| format!("{}/{}", CONFIG_DIR, n);
         let persistent_mount = format!("{}:{}", PERSISTENT_DIR, PERSISTENT_DIR);
         let config_mount = format!("{}:{}:ro", CONFIG_DIR, CONFIG_DIR);
-        let secrets_path = |n: &str| format!("{}/{}", SECRETS_DIR, n);
+        let secrets_path = |n: &str| format!("/etc/kwa-test-secrets/{}", n);
         let seed_env = secrets_path("kwa-test-seed.env");
         let fdap_login_env = secrets_path("fdap-login.env");
         let kwa_env = secrets_path("kwa.env");
@@ -620,7 +615,7 @@ fn main() {
         });
         let caddy = ign.container(Container {
             name: "caddy",
-            image: CADDY_IMAGE,
+            image: "docker.io/library/caddy:2.11.7@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e",
             requires: &[&dirs],
             after: &[],
             env_files: &[],

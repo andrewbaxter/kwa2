@@ -15,6 +15,7 @@ use {
                 GetChannelInfo,
                 GetFile,
                 GetJoinPreview,
+                GetMessageHistory,
                 GetSnapLookup,
                 JoinPreviewRes,
                 JoinPreviewTarget,
@@ -169,12 +170,11 @@ pub fn local_channel_get(
     owner: DbIdentity,
     channel: &DbChannelId,
 ) -> Result<Option<LocalChannel>, loga::Error> {
-    let row =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select local_identity, page_size, authenticated, public_read, public_post, retention_secs, latest_seq, latest_snap_offset, floor_snap_offset, backfill_done from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let row = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select local_identity, page_size, authenticated, public_read, public_post, retention_secs, latest_seq, latest_snap_offset, floor_snap_offset, backfill_done from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     return Ok(row.map(|r| LocalChannel {
         local_identity: r.local_identity.0,
         page_size: r.page_size.max(1) as usize,
@@ -193,13 +193,11 @@ pub fn hosted_identity_account(
     db_tx: &mut db::Db<Transaction<'_>>,
     identity: DbIdentity,
 ) -> Result<Option<DbAccountId>, loga::Error> {
-    return Ok(
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select account_id from identity where id = ${identity_id_t = &identity} and soft_deleted_at is null"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?,
-    );
+    return Ok(good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select account_id from identity where id = ${identity_id_t = &identity} and soft_deleted_at is null"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?);
 }
 
 pub fn owner_channel_get(
@@ -226,15 +224,11 @@ pub fn is_channel_member(
     channel: &DbChannelId,
     member: DbIdentity,
 ) -> Result<bool, loga::Error> {
-    return Ok(
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select 1 as x from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and member = ${identity_id_t = &member}"#;
-            db_tx
-        )
-            .map_err(|e| loga::err(e.0))?
-            .is_some(),
-    );
+    return Ok(good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select 1 as x from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and member = ${identity_id_t = &member}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?.is_some());
 }
 
 pub fn member_can_post(
@@ -244,15 +238,11 @@ pub fn member_can_post(
     channel: &DbChannelId,
     member: DbIdentity,
 ) -> Result<bool, loga::Error> {
-    return Ok(
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select can_post from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and member = ${identity_id_t = &member}"#;
-            db_tx
-        )
-            .map_err(|e| loga::err(e.0))?
-            .unwrap_or(false),
-    );
+    return Ok(good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select can_post from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and member = ${identity_id_t = &member}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?.unwrap_or(false));
 }
 
 pub fn channel_members(
@@ -261,17 +251,11 @@ pub fn channel_members(
     owner: DbIdentity,
     channel: &DbChannelId,
 ) -> Result<Vec<Identity>, loga::Error> {
-    return Ok(
-        good_ormning::sqlite::good_query_many!(
-            db,
-            r#"select member from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel}"#;
-            db_tx
-        )
-            .map_err(|e| loga::err(e.0))?
-            .into_iter()
-            .map(|r| r.0)
-            .collect(),
-    );
+    return Ok(good_ormning::sqlite::good_query_many!(
+        db,
+        r#"select member from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| r.0).collect());
 }
 
 pub fn posting_members(
@@ -280,17 +264,11 @@ pub fn posting_members(
     owner: DbIdentity,
     channel: &DbChannelId,
 ) -> Result<Vec<Identity>, loga::Error> {
-    return Ok(
-        good_ormning::sqlite::good_query_many!(
-            db,
-            r#"select member from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and can_post = ${bool = true}"#;
-            db_tx
-        )
-            .map_err(|e| loga::err(e.0))?
-            .into_iter()
-            .map(|r| r.0)
-            .collect(),
-    );
+    return Ok(good_ormning::sqlite::good_query_many!(
+        db,
+        r#"select member from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and can_post = ${bool = true}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| r.0).collect());
 }
 
 pub fn check_read_access(
@@ -365,21 +343,19 @@ pub fn snap_page_rows(
 ) -> Result<(Vec<MsgRow>, Vec<MsgRow>), loga::Error> {
     let start = u64_to_i64(page * page_size as u64);
     let end = start + page_size as i64;
-    let originals =
-        good_ormning::sqlite::good_query_many!(
-            db,
-            r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and snap_offset >= ${i64 = start} and snap_offset < ${i64 = end} order by snap_offset"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let originals = good_ormning::sqlite::good_query_many!(
+        db,
+        r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and snap_offset >= ${i64 = start} and snap_offset < ${i64 = end} order by snap_offset"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     let mut out_originals = Vec::with_capacity(originals.len());
     let mut out_edits = vec![];
     for r in originals {
-        let edit =
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and rel_type = ${string = REL_EDIT_OF} and rel_target_sender = ${identity_id_t = &r.sender} and rel_target_unique = ${i64 = r.sender_unique} order by seq desc limit ${i64 = 1}"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
+        let edit = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and rel_type = ${string = REL_EDIT_OF} and rel_target_sender = ${identity_id_t = &r.sender} and rel_target_unique = ${i64 = r.sender_unique} order by seq desc limit ${i64 = 1}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
         if let Some(e) = edit {
             out_edits.push(MsgRow {
                 sender: e.sender.0,
@@ -412,6 +388,59 @@ pub fn snap_page_rows(
     return Ok((out_originals, out_edits));
 }
 
+pub fn message_history_rows(
+    db_tx: &mut db::Db<Transaction<'_>>,
+    account: DbAccountId,
+    owner: DbIdentity,
+    channel: &DbChannelId,
+    id: &MessageId,
+) -> Result<Option<Vec<MsgRow>>, loga::Error> {
+    let db_sender = DbIdentity(id.identity);
+    let sender_unique = u64_to_i64(id.unique);
+    let Some(original) = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &db_sender} and sender_unique = ${i64 = sender_unique} and snap_offset is not null"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))? else {
+        return Ok(None);
+    };
+    let edits = good_ormning::sqlite::good_query_many!(
+        db,
+        r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and rel_type = ${string = REL_EDIT_OF} and rel_target_sender = ${identity_id_t = &db_sender} and rel_target_unique = ${i64 = sender_unique} order by seq"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
+    let mut out = Vec::with_capacity(edits.len() + 1);
+    out.push(MsgRow {
+        sender: original.sender.0,
+        sender_unique: original.sender_unique,
+        seq: original.seq,
+        snap_offset: original.snap_offset,
+        receive_time: original.receive_time.0,
+        client_id: original.client_id,
+        raw: original.raw,
+        body_text: original.body_text,
+        rel_type: original.rel_type,
+        rel_target_sender: original.rel_target_sender.map(|s| s.0),
+        rel_target_unique: original.rel_target_unique,
+    });
+    for e in edits {
+        out.push(MsgRow {
+            sender: e.sender.0,
+            sender_unique: e.sender_unique,
+            seq: e.seq,
+            snap_offset: e.snap_offset,
+            receive_time: e.receive_time.0,
+            client_id: e.client_id,
+            raw: e.raw,
+            body_text: e.body_text,
+            rel_type: e.rel_type,
+            rel_target_sender: e.rel_target_sender.map(|s| s.0),
+            rel_target_unique: e.rel_target_unique,
+        });
+    }
+    return Ok(Some(out));
+}
+
 pub fn activity_rows(
     db_tx: &mut db::Db<Transaction<'_>>,
     account: DbAccountId,
@@ -420,17 +449,11 @@ pub fn activity_rows(
     start: i64,
     end: i64,
 ) -> Result<Vec<(i64, String)>, loga::Error> {
-    return Ok(
-        good_ormning::sqlite::good_query_many!(
-            db,
-            r#"select seq, raw from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and seq >= ${i64 = start} and seq < ${i64 = end} order by seq"#;
-            db_tx
-        )
-            .map_err(|e| loga::err(e.0))?
-            .into_iter()
-            .map(|r| (r.seq, r.raw))
-            .collect(),
-    );
+    return Ok(good_ormning::sqlite::good_query_many!(
+        db,
+        r#"select seq, raw from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and seq >= ${i64 = start} and seq < ${i64 = end} order by seq"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| (r.seq, r.raw)).collect());
 }
 
 pub struct SnapPosition {
@@ -448,14 +471,13 @@ pub fn snap_position_by_id(
 ) -> Result<Option<SnapPosition>, loga::Error> {
     let db_sender = DbIdentity(id.identity);
     let sender_unique = u64_to_i64(id.unique);
-    let Some(row) =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &db_sender} and sender_unique = ${i64 = sender_unique}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))? else {
-            return Ok(None);
-        };
+    let Some(row) = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &db_sender} and sender_unique = ${i64 = sender_unique}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))? else {
+        return Ok(None);
+    };
     let (origin_sender, origin_unique) = match row.rel_type.as_deref() {
         Some(REL_EDIT_OF) => (
             row.rel_target_sender.context("edit_of row missing rel_target_sender")?,
@@ -463,14 +485,13 @@ pub fn snap_position_by_id(
         ),
         _ => (db_sender, sender_unique),
     };
-    let Some(origin) =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select receive_time, snap_offset from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &origin_sender} and sender_unique = ${i64 = origin_unique}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))? else {
-            return Ok(None);
-        };
+    let Some(origin) = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select receive_time, snap_offset from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &origin_sender} and sender_unique = ${i64 = origin_unique}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))? else {
+        return Ok(None);
+    };
     return Ok(Some(SnapPosition {
         original_id: MessageId {
             identity: origin_sender.0,
@@ -490,14 +511,13 @@ pub fn snap_position_by_client_id(
     client_id: &str,
 ) -> Result<Option<SnapPosition>, loga::Error> {
     let db_sender = DbIdentity(sender);
-    let Some(row) =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select sender_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &db_sender} and client_id = ${string = client_id}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))? else {
-            return Ok(None);
-        };
+    let Some(row) = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select sender_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &db_sender} and client_id = ${string = client_id}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))? else {
+        return Ok(None);
+    };
     return snap_position_by_id(db_tx, account, owner, channel, &MessageId {
         identity: sender,
         unique: i64_to_u64(row),
@@ -511,21 +531,19 @@ pub fn snap_offset_containing_time(
     channel: &DbChannelId,
     time: Timestamp,
 ) -> Result<Option<i64>, loga::Error> {
-    let row =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select snap_offset from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and snap_offset is not null and receive_time <= ${time_ms_t = &crate::interface::db::DbTimeMs(time)} order by snap_offset desc limit ${i64 = 1}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let row = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select snap_offset from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and snap_offset is not null and receive_time <= ${time_ms_t = &crate::interface::db::DbTimeMs(time)} order by snap_offset desc limit ${i64 = 1}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     if let Some(Some(offset)) = row {
         return Ok(Some(offset));
     }
-    let row =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select snap_offset from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and snap_offset is not null and receive_time > ${time_ms_t = &crate::interface::db::DbTimeMs(time)} order by snap_offset asc limit ${i64 = 1}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let row = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select snap_offset from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and snap_offset is not null and receive_time > ${time_ms_t = &crate::interface::db::DbTimeMs(time)} order by snap_offset asc limit ${i64 = 1}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     let Some(Some(offset)) = row else {
         return Ok(None);
     };
@@ -538,12 +556,11 @@ pub fn earliest_snap_offset(
     owner: DbIdentity,
     channel: &DbChannelId,
 ) -> Result<Option<i64>, loga::Error> {
-    let row =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select snap_offset from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and snap_offset is not null order by snap_offset asc limit ${i64 = 1}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let row = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select snap_offset from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and snap_offset is not null order by snap_offset asc limit ${i64 = 1}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     let Some(Some(offset)) = row else {
         return Ok(None);
     };
@@ -631,14 +648,11 @@ pub fn load_signer_tx(
     account: DbAccountId,
     identity: DbIdentity,
 ) -> Result<LocalIdentitySigner, loga::Error> {
-    let secret =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select secret from identity where account_id = ${account_id_t = &account} and id = ${identity_id_t = &identity} and soft_deleted_at is null"#;
-            db_tx
-        )
-            .map_err(|e| loga::err(e.0))?
-            .context_with("Identity secret not found", ea!(identity = identity.0))?;
+    let secret = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select secret from identity where account_id = ${account_id_t = &account} and id = ${identity_id_t = &identity} and soft_deleted_at is null"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?.context_with("Identity secret not found", ea!(identity = identity.0))?;
     return local_signer(secret.0);
 }
 
@@ -752,7 +766,10 @@ pub async fn verify_pulled(
             Err(e) => {
                 state
                     .log
-                    .log_err(loga::WARN, loga::err(e.to_string()).context("Skipping pulled message: invalid body JSON"));
+                    .log_err(
+                        loga::WARN,
+                        loga::err(e.to_string()).context("Skipping pulled message: invalid body JSON"),
+                    );
                 continue;
             },
         };
@@ -780,7 +797,11 @@ pub async fn verify_pulled(
                 None => {
                     state
                         .log
-                        .log_with(loga::WARN, "Skipping pulled message: sender has no announcement", ea!(sender = sender));
+                        .log_with(
+                            loga::WARN,
+                            "Skipping pulled message: sender has no announcement",
+                            ea!(sender = sender),
+                        );
                     continue;
                 },
             };
@@ -796,14 +817,22 @@ pub async fn verify_pulled(
         if body.channel != *channel {
             state
                 .log
-                .log_with(loga::WARN, "Skipping pulled message: signed for a different channel", ea!(sender = sender));
+                .log_with(
+                    loga::WARN,
+                    "Skipping pulled message: signed for a different channel",
+                    ea!(sender = sender),
+                );
             continue;
         }
         if let MessageRel::EditOf(target) = &body.rel {
             if target.identity != sender {
                 state
                     .log
-                    .log_with(loga::WARN, "Skipping pulled edit: target has a different sender", ea!(sender = sender));
+                    .log_with(
+                        loga::WARN,
+                        "Skipping pulled edit: target has a different sender",
+                        ea!(sender = sender),
+                    );
                 continue;
             }
         }
@@ -847,13 +876,11 @@ pub async fn handle_notify(state: &Arc<State>, req: Notify) -> Result<(), S2sErr
         let db_owner = DbIdentity(owner);
         let db_channel_id = DbChannelId(channel_id.clone());
         move |db_tx| {
-            return Ok(
-                good_ormning::sqlite::good_query_many!(
-                    db,
-                    r#"select account_id, local_identity, public_post from channel where identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id} and deleted is null"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?,
-            );
+            return Ok(good_ormning::sqlite::good_query_many!(
+                db,
+                r#"select account_id, local_identity, public_post from channel where identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id} and deleted is null"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?);
         }
     }).await?;
     if local_rows.is_empty() {
@@ -970,12 +997,11 @@ pub async fn handle_get_activity(
         let (account, local) =
             not_found(owner_channel_get(db_tx, db_owner, &db_channel_id)?, "Channel not found on this server")?;
         check_read_access(db_tx, account, db_owner, &db_channel_id, &local, caller)?;
-        let rows =
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select seq, snap_offset, receive_time, raw from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and seq >= ${i64 = start} order by seq limit ${i64 = limit as i64}"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
+        let rows = good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select seq, snap_offset, receive_time, raw from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and seq >= ${i64 = start} order by seq limit ${i64 = limit as i64}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
         let mut messages = Vec::with_capacity(rows.len());
         for r in rows {
             messages.push(PulledMessage {
@@ -993,7 +1019,11 @@ pub async fn handle_get_activity(
     }).await;
 }
 
-pub async fn handle_pull_outbox(state: &Arc<State>, token: &str, req: PullOutbox) -> Result<PulledMessages, S2sError> {
+pub async fn handle_pull_outbox(
+    state: &Arc<State>,
+    token: &str,
+    req: PullOutbox,
+) -> Result<PulledMessages, S2sError> {
     let caller = require_caller(state, token).await?;
     let owner = req.channel.identity;
     let host = req.host;
@@ -1015,15 +1045,16 @@ pub async fn handle_pull_outbox(state: &Arc<State>, token: &str, req: PullOutbox
             )?;
         if local.local_identity != host {
             return Err(
-                S2sError::BadRequest("Pull host doesn't participate in the channel as the requested identity".to_string()),
+                S2sError::BadRequest(
+                    "Pull host doesn't participate in the channel as the requested identity".to_string(),
+                ),
             );
         }
-        let rows =
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select sender_unique, created, raw from outbox where account_id = ${account_id_t = &host_account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_host} and sender_unique > ${i64 = after} order by sender_unique limit ${i64 = limit}"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
+        let rows = good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select sender_unique, created, raw from outbox where account_id = ${account_id_t = &host_account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_host} and sender_unique > ${i64 = after} order by sender_unique limit ${i64 = limit}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
         let mut messages = Vec::with_capacity(rows.len());
         for r in rows {
             messages.push(PulledMessage {
@@ -1121,6 +1152,30 @@ pub async fn handle_snap_lookup(
     }).await;
 }
 
+pub async fn handle_get_message_history(
+    state: &Arc<State>,
+    token: &str,
+    req: GetMessageHistory,
+) -> Result<Cached<Option<PulledMessages>>, S2sError> {
+    let caller = resolve_caller(state, token).await?;
+    let db_owner = DbIdentity(req.channel.identity);
+    let db_channel_id = DbChannelId(req.channel.channel);
+    let id = req.id;
+    return s2s_tx(&state.db, "reading message history", move |db_tx| {
+        let (account, local) =
+            not_found(owner_channel_get(db_tx, db_owner, &db_channel_id)?, "Channel not found on this server")?;
+        check_read_access(db_tx, account, db_owner, &db_channel_id, &local, caller)?;
+        let Some(rows) = message_history_rows(db_tx, account, db_owner, &db_channel_id, &id)? else {
+            return Ok(Cached::no_store(None));
+        };
+        let mut messages = Vec::with_capacity(rows.len());
+        for r in &rows {
+            messages.push(r.to_pulled()?);
+        }
+        return Ok(Cached::no_store(Some(PulledMessages { messages: messages })));
+    }).await;
+}
+
 pub enum PullOutcome {
     New,
     NoNew,
@@ -1159,12 +1214,11 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
                 if !member_can_post(db_tx, account, db_owner, &db_channel_id, db_source)? && !local.public_post {
                     return Ok(None);
                 }
-                let cursor =
-                    good_ormning::sqlite::good_query_opt!(
-                        db,
-                        r#"select cursor_seq from channel_pull_cursor where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and source = ${identity_id_t = &db_source}"#;
-                        db_tx
-                    ).map_err(|e| loga::err(e.0))?;
+                let cursor = good_ormning::sqlite::good_query_opt!(
+                    db,
+                    r#"select cursor_seq from channel_pull_cursor where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and source = ${identity_id_t = &db_source}"#;
+                    db_tx
+                ).map_err(|e| loga::err(e.0))?;
                 return Ok(Some(PullContext {
                     cursor: cursor.map(i64_to_u64),
                     local: local,
@@ -1229,7 +1283,8 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
                 let mut ingested: Vec<(u64, String)> = vec![];
                 if is_owner_mode {
                     for v in &verified {
-                        if let Some(seq) = ingest_message(db_tx, account, db_owner, &db_channel_id, &v.raw, &v.body)? {
+                        if let Some(seq) =
+                            ingest_message(db_tx, account, db_owner, &db_channel_id, &v.raw, &v.body)? {
                             ingested.push((seq, v.body.body.clone()));
                         }
                     }
@@ -1368,6 +1423,25 @@ pub async fn member_fetch_snap_lookup(
     }).await.context("Error looking up snap position from channel owner");
 }
 
+pub async fn member_fetch_message_history(
+    state: &Arc<State>,
+    account_id: AccountId,
+    channel: &QualifiedChannelId,
+    local: &LocalChannel,
+    id: &MessageId,
+) -> Result<Option<Vec<Verified>>, loga::Error> {
+    let signer = channel_signer(state, account_id, local).await?;
+    let Some(res) = state.s2s_client.get_message_history(channel.identity, signer.as_ref(), GetMessageHistory {
+        channel: channel.clone(),
+        id: id.clone(),
+    }).await.context("Error fetching message history from channel owner")? else {
+        return Ok(None);
+    };
+    let verified = verify_pulled(state, channel, res.messages, None).await?;
+    store_fetched(state, account_id, channel, local, &verified).await?;
+    return Ok(Some(verified));
+}
+
 pub fn store_channel_info(
     db_tx: &mut db::Db<Transaction<'_>>,
     account: DbAccountId,
@@ -1404,9 +1478,12 @@ pub async fn member_refresh_info(
     local: &LocalChannel,
 ) -> Result<ChannelInfoRes, loga::Error> {
     let signer = channel_signer(state, account_id, local).await?;
-    let info = state.s2s_client.get_channel_info(channel.identity, signer.as_ref(), GetChannelInfo {
-        channel: channel.clone(),
-    }).await.context("Error fetching channel info from channel owner")?;
+    let info =
+        state
+            .s2s_client
+            .get_channel_info(channel.identity, signer.as_ref(), GetChannelInfo { channel: channel.clone() })
+            .await
+            .context("Error fetching channel info from channel owner")?;
     let account = DbAccountId(account_id);
     let db_owner = DbIdentity(channel.identity);
     let db_channel_id = DbChannelId(channel.channel.clone());
@@ -1455,15 +1532,11 @@ fn lookup_channel_invite(
     channel: &DbChannelId,
     token: &str,
 ) -> Result<ChannelInviteLookup, S2sError> {
-    let invite_row =
-        not_found(
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select account_id, identity, single_use, expiry, used_count, can_post, shown_name, shown_description from channel_invite where channel = ${channel_id_t = channel} and token = ${string = token}"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?,
-            "Invitation not recognized",
-        )?;
+    let invite_row = not_found(good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select account_id, identity, single_use, expiry, used_count, can_post, shown_name, shown_description from channel_invite where channel = ${channel_id_t = channel} and token = ${string = token}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?, "Invitation not recognized")?;
     if let Some(exp) = invite_row.expiry {
         if exp.0 <= Timestamp::now() {
             return Err(S2sError::Forbidden("Invitation has expired".to_string()));
@@ -1496,15 +1569,11 @@ fn lookup_identity_invite(
     identity: DbIdentity,
     token: &str,
 ) -> Result<IdentityInviteLookup, S2sError> {
-    let invite_row =
-        not_found(
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select account_id, single_use, expiry, used_count, name, description, shown_name, shown_description from identity_invite where identity = ${identity_id_t = &identity} and token = ${string = token}"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?,
-            "Invitation not recognized",
-        )?;
+    let invite_row = not_found(good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select account_id, single_use, expiry, used_count, name, description, shown_name, shown_description from identity_invite where identity = ${identity_id_t = &identity} and token = ${string = token}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?, "Invitation not recognized")?;
     if let Some(exp) = invite_row.expiry {
         if exp.0 <= Timestamp::now() {
             return Err(S2sError::Forbidden("Invitation has expired".to_string()));
@@ -1513,12 +1582,11 @@ fn lookup_identity_invite(
     if invite_row.single_use && invite_row.used_count > 0 {
         return Err(S2sError::Forbidden("Single-use invitation already redeemed".to_string()));
     }
-    let owned =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select 1 as x from identity where account_id = ${account_id_t = &invite_row.account_id} and id = ${identity_id_t = &identity} and soft_deleted_at is null"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let owned = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select 1 as x from identity where account_id = ${account_id_t = &invite_row.account_id} and id = ${identity_id_t = &identity} and soft_deleted_at is null"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     if owned.is_none() {
         return Err(S2sError::NotFound("Invited identity no longer exists".to_string()));
     }
@@ -1546,15 +1614,11 @@ fn owner_channel_meta(
     owner: DbIdentity,
     channel: &DbChannelId,
 ) -> Result<OwnerChannelMeta, S2sError> {
-    let row =
-        not_found(
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select name, description, shown_name, shown_description, portrait from channel where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?,
-            "Channel no longer exists",
-        )?;
+    let row = not_found(good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select name, description, shown_name, shown_description, portrait from channel where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?, "Channel no longer exists")?;
     return Ok(OwnerChannelMeta {
         name: row.name,
         description: row.description,
@@ -1577,15 +1641,11 @@ fn owner_identity_meta(
     account_id: DbAccountId,
     identity: DbIdentity,
 ) -> Result<OwnerIdentityMeta, S2sError> {
-    let row =
-        not_found(
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select name, description, shown_name, shown_description, portrait from identity where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &identity} and soft_deleted_at is null"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?,
-            "Invited identity no longer exists",
-        )?;
+    let row = not_found(good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select name, description, shown_name, shown_description, portrait from identity where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &identity} and soft_deleted_at is null"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?, "Invited identity no longer exists")?;
     return Ok(OwnerIdentityMeta {
         name: row.name,
         description: row.description,
@@ -1593,30 +1653,6 @@ fn owner_identity_meta(
         shown_description: row.shown_description,
         portrait: row.portrait,
     });
-}
-
-fn shares_channel(
-    db_tx: &mut db::Db<Transaction<'_>>,
-    account_id: DbAccountId,
-    identity: DbIdentity,
-    caller: DbIdentity,
-) -> Result<bool, loga::Error> {
-    let identity_owns =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select 1 as x from channel_member where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &identity} and member = ${identity_id_t = &caller}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
-    if identity_owns.is_some() {
-        return Ok(true);
-    }
-    let caller_owns =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select 1 as x from channel where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &caller} and local_identity = ${identity_id_t = &identity} and deleted is null"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
-    return Ok(caller_owns.is_some());
 }
 
 pub async fn handle_get_file(
@@ -1655,25 +1691,37 @@ pub async fn handle_get_file(
         FileAuth::Caller => {
             let caller = resolve_caller(state, token).await?;
             s2s_tx(&state.db, "checking file access", move |db_tx| {
-                let identities =
-                    good_ormning::sqlite::good_query_many!(
-                        db,
-                        r#"select account_id, id from identity where portrait = ${string = hash.0.as_str()} and soft_deleted_at is null"#;
-                        db_tx
-                    ).map_err(|e| loga::err(e.0))?;
+                let identities = good_ormning::sqlite::good_query_many!(
+                    db,
+                    r#"select account_id, id from identity where portrait = ${string = hash.0.as_str()} and soft_deleted_at is null"#;
+                    db_tx
+                ).map_err(|e| loga::err(e.0))?;
                 if let Some(caller) = caller {
+                    let db_caller = DbIdentity(caller);
                     for i in identities {
-                        if shares_channel(db_tx, i.account_id, i.id, DbIdentity(caller))? {
+                        let identity_owns = good_ormning::sqlite::good_query_opt!(
+                            db,
+                            r#"select 1 as x from channel_member where account_id = ${account_id_t = &i.account_id} and identity = ${identity_id_t = &i.id} and member = ${identity_id_t = &db_caller}"#;
+                            db_tx
+                        ).map_err(|e| loga::err(e.0))?;
+                        if identity_owns.is_some() {
+                            return Ok(i.account_id);
+                        }
+                        let caller_owns = good_ormning::sqlite::good_query_opt!(
+                            db,
+                            r#"select 1 as x from channel where account_id = ${account_id_t = &i.account_id} and identity = ${identity_id_t = &db_caller} and local_identity = ${identity_id_t = &i.id} and deleted is null"#;
+                            db_tx
+                        ).map_err(|e| loga::err(e.0))?;
+                        if caller_owns.is_some() {
                             return Ok(i.account_id);
                         }
                     }
                 }
-                let channels =
-                    good_ormning::sqlite::good_query_many!(
-                        db,
-                        r#"select account_id, identity, id, local_identity from channel where portrait = ${string = hash.0.as_str()} and deleted is null"#;
-                        db_tx
-                    ).map_err(|e| loga::err(e.0))?;
+                let channels = good_ormning::sqlite::good_query_many!(
+                    db,
+                    r#"select account_id, identity, id, local_identity from channel where portrait = ${string = hash.0.as_str()} and deleted is null"#;
+                    db_tx
+                ).map_err(|e| loga::err(e.0))?;
                 for c in channels {
                     if c.identity.0 != c.local_identity.0 {
                         continue;
@@ -1693,9 +1741,7 @@ pub async fn handle_get_file(
             }).await?
         },
     };
-    return Ok(
-        not_found(crate::subsystems::files::read_file(state, account, &req.hash).await?, "File not found")?,
-    );
+    return Ok(not_found(crate::subsystems::files::read_file(state, account, &req.hash).await?, "File not found")?);
 }
 
 pub async fn handle_join_preview(
@@ -1776,7 +1822,9 @@ pub async fn handle_join(
                         "Invited channel no longer exists",
                     )?;
                 if !local.is_owner(owner.0) {
-                    return Err(S2sError::NotFound("Invited channel isn't owned by the inviting identity".to_string()));
+                    return Err(
+                        S2sError::NotFound("Invited channel isn't owned by the inviting identity".to_string()),
+                    );
                 }
                 if caller == owner.0 {
                     return Err(S2sError::BadRequest("Channel owner can't join their own channel".to_string()));
@@ -1896,103 +1944,22 @@ async fn mark_backfill_done(state: &Arc<State>, c: &BackfillCandidate) -> Result
     return Ok(());
 }
 
-async fn backfill_step(state: &Arc<State>, c: &BackfillCandidate) -> Result<(), loga::Error> {
-    let account = DbAccountId(c.account_id);
-    let db_owner = DbIdentity(c.channel.identity);
-    let db_channel_id = DbChannelId(c.channel.channel.clone());
-    let now = Timestamp::now();
-    let Some((local, lowest)) = tx(&state.db, {
-        let db_channel_id = db_channel_id.clone();
-        move |db_tx| {
-            let Some(local) = local_channel_get(db_tx, account, db_owner, &db_channel_id)? else {
-                return Ok(None);
-            };
-            let lowest =
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select snap_offset, receive_time from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and snap_offset is not null order by snap_offset asc limit ${i64 = 1}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
-            return Ok(Some((local, lowest)));
-        }
-    }).await.context("Error reading backfill state")? else {
-        return Ok(());
-    };
-    let cutoff = retention_cutoff(now, local.retention_secs)?;
-    let page_size = local.page_size as u64;
-    let target_page = match lowest {
-        Some(row) => {
-            let offset = i64_to_u64(row.snap_offset.context("Lowest snap row has no snap offset")?);
-            if let Some(cutoff) = cutoff {
-                if row.receive_time.0 < cutoff {
-                    mark_backfill_done(state, c).await?;
-                    return Ok(());
-                }
-            }
-            if let Some(floor) = local.floor_snap_offset {
-                if offset <= i64_to_u64(floor) {
-                    mark_backfill_done(state, c).await?;
-                    return Ok(());
-                }
-            }
-            let page = offset / page_size;
-            if offset % page_size == 0 {
-                if page == 0 {
-                    mark_backfill_done(state, c).await?;
-                    return Ok(());
-                }
-                page - 1
-            } else {
-                page
-            }
-        },
-        None => {
-            let info = member_refresh_info(state, c.account_id, &c.channel, &local).await?;
-            let Some(latest) = info.latest_snap_offset else {
-                return Ok(());
-            };
-            latest / page_size
-        },
-    };
-    let Some(fetched) = member_fetch_snap_page(state, c.account_id, &c.channel, &local, target_page).await? else {
-        mark_backfill_done(state, c).await?;
-        return Ok(());
-    };
-    let originals: Vec<&Verified> = fetched.iter().filter(|v| v.snap_offset.is_some()).collect();
-    if target_page == 0 || originals.is_empty() {
-        mark_backfill_done(state, c).await?;
-        return Ok(());
-    }
-    if let Some(cutoff) = cutoff {
-        if originals.iter().any(|v| v.receive_time < cutoff) {
-            mark_backfill_done(state, c).await?;
-        }
-    }
-    return Ok(());
-}
-
 pub async fn run_backfill(state: Arc<State>) -> Result<(), loga::Error> {
     let mut tick: usize = 0;
     loop {
         tokio::time::sleep(BACKFILL_INTERVAL).await;
         let candidates = match tx(&state.db, move |db_tx| {
-            return Ok(
-                good_ormning::sqlite::good_query_many!(
-                    db,
-                    r#"select account_id, identity, id from channel where deleted is null and backfill_done = ${bool = false}"#;
-                    db_tx
-                )
-                    .map_err(|e| loga::err(e.0))?
-                    .into_iter()
-                    .map(|r| BackfillCandidate {
-                        account_id: r.account_id.0,
-                        channel: QualifiedChannelId {
-                            identity: r.identity.0,
-                            channel: r.id.0,
-                        },
-                    })
-                    .collect::<Vec<_>>(),
-            );
+            return Ok(good_ormning::sqlite::good_query_many!(
+                db,
+                r#"select account_id, identity, id from channel where deleted is null and backfill_done = ${bool = false}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| BackfillCandidate {
+                account_id: r.account_id.0,
+                channel: QualifiedChannelId {
+                    identity: r.identity.0,
+                    channel: r.id.0,
+                },
+            }).collect::<Vec<_>>());
         }).await {
             Ok(c) => c,
             Err(e) => {
@@ -2005,7 +1972,82 @@ pub async fn run_backfill(state: Arc<State>) -> Result<(), loga::Error> {
         }
         let c = &candidates[tick % candidates.len()];
         tick = tick.wrapping_add(1);
-        if let Err(e) = backfill_step(&state, c).await {
+        if let Err(e) = async {
+            flowcontrol::ta_return!((), loga::Error);
+            let state = &state;
+            let account = DbAccountId(c.account_id);
+            let db_owner = DbIdentity(c.channel.identity);
+            let db_channel_id = DbChannelId(c.channel.channel.clone());
+            let now = Timestamp::now();
+            let Some((local, lowest)) = tx(&state.db, {
+                let db_channel_id = db_channel_id.clone();
+                move |db_tx| {
+                    let Some(local) = local_channel_get(db_tx, account, db_owner, &db_channel_id)? else {
+                        return Ok(None);
+                    };
+                    let lowest = good_ormning::sqlite::good_query_opt!(
+                        db,
+                        r#"select snap_offset, receive_time from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and snap_offset is not null order by snap_offset asc limit ${i64 = 1}"#;
+                        db_tx
+                    ).map_err(|e| loga::err(e.0))?;
+                    return Ok(Some((local, lowest)));
+                }
+            }).await.context("Error reading backfill state")? else {
+                return Ok(());
+            };
+            let cutoff = retention_cutoff(now, local.retention_secs)?;
+            let page_size = local.page_size as u64;
+            let target_page = match lowest {
+                Some(row) => {
+                    let offset = i64_to_u64(row.snap_offset.context("Lowest snap row has no snap offset")?);
+                    if let Some(cutoff) = cutoff {
+                        if row.receive_time.0 < cutoff {
+                            mark_backfill_done(state, c).await?;
+                            return Ok(());
+                        }
+                    }
+                    if let Some(floor) = local.floor_snap_offset {
+                        if offset <= i64_to_u64(floor) {
+                            mark_backfill_done(state, c).await?;
+                            return Ok(());
+                        }
+                    }
+                    let page = offset / page_size;
+                    if offset % page_size == 0 {
+                        if page == 0 {
+                            mark_backfill_done(state, c).await?;
+                            return Ok(());
+                        }
+                        page - 1
+                    } else {
+                        page
+                    }
+                },
+                None => {
+                    let info = member_refresh_info(state, c.account_id, &c.channel, &local).await?;
+                    let Some(latest) = info.latest_snap_offset else {
+                        return Ok(());
+                    };
+                    latest / page_size
+                },
+            };
+            let Some(fetched) =
+                member_fetch_snap_page(state, c.account_id, &c.channel, &local, target_page).await? else {
+                    mark_backfill_done(state, c).await?;
+                    return Ok(());
+                };
+            let originals: Vec<&Verified> = fetched.iter().filter(|v| v.snap_offset.is_some()).collect();
+            if target_page == 0 || originals.is_empty() {
+                mark_backfill_done(state, c).await?;
+                return Ok(());
+            }
+            if let Some(cutoff) = cutoff {
+                if originals.iter().any(|v| v.receive_time < cutoff) {
+                    mark_backfill_done(state, c).await?;
+                }
+            }
+            return Ok(());
+        }.await {
             state
                 .log
                 .log_err(
@@ -2023,12 +2065,11 @@ pub async fn run_retention_cleanup(state: Arc<State>) -> Result<(), loga::Error>
     loop {
         let now = Timestamp::now();
         if let Err(e) = tx(&state.db, move |db_tx| {
-            let channels =
-                good_ormning::sqlite::good_query_many!(
-                    db,
-                    r#"select account_id, identity, id, retention_secs from channel where deleted is null and retention_secs is not null"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
+            let channels = good_ormning::sqlite::good_query_many!(
+                db,
+                r#"select account_id, identity, id, retention_secs from channel where deleted is null and retention_secs is not null"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
             for c in channels {
                 let Some(cutoff) = retention_cutoff(now, c.retention_secs)? else {
                     continue;
@@ -2051,12 +2092,11 @@ pub fn latest_activity_map(
     db_tx: &mut db::Db<Transaction<'_>>,
     account: DbAccountId,
 ) -> Result<HashMap<QualifiedChannelId, u64>, loga::Error> {
-    let rows =
-        good_ormning::sqlite::good_query_many!(
-            db,
-            r#"select identity, id, latest_seq from channel where account_id = ${account_id_t = &account} and deleted is null and latest_seq is not null"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let rows = good_ormning::sqlite::good_query_many!(
+        db,
+        r#"select identity, id, latest_seq from channel where account_id = ${account_id_t = &account} and deleted is null and latest_seq is not null"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     let mut out = HashMap::new();
     for r in rows {
         let Some(seq) = r.latest_seq else {

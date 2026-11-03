@@ -40,7 +40,7 @@ impl std::str::FromStr for FileHash {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() != 64 || !s.bytes().all(|b| matches!(b, b'0' ..= b'9' | b'a' ..= b'f')) {
+        if s.len() != 64 || !s.bytes().all(|b| matches!(b, b'0'..= b'9' | b'a'..= b'f')) {
             return Err(format!("File hash must be 64 lowercase hex characters"));
         }
         return Ok(FileHash(s.to_string()));

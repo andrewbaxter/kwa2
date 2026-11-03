@@ -149,12 +149,11 @@ fn require_owned_identity(
     account: DbAccountId,
     identity: DbIdentity,
 ) -> Result<(), loga::Error> {
-    let found =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select 1 as x from identity where account_id = ${account_id_t = &account} and id = ${identity_id_t = &identity} and soft_deleted_at is null"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let found = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select 1 as x from identity where account_id = ${account_id_t = &account} and id = ${identity_id_t = &identity} and soft_deleted_at is null"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     if found.is_none() {
         return Err(loga::err_with("Identity doesn't belong to this account", ea!(identity = identity.0)));
     }
@@ -168,30 +167,28 @@ fn require_owned_channel(
     channel: &DbChannelId,
 ) -> Result<(), loga::Error> {
     let local =
-        crate::subsystems::messages::local_channel_get(
-            db_tx,
-            account,
-            owner,
-            channel,
-        )?.context("No such channel")?;
+        crate::subsystems::messages::local_channel_get(db_tx, account, owner, channel)?.context("No such channel")?;
     if local.local_identity != owner.0 {
         return Err(loga::err("Channel isn't owned by this account"));
     }
     return Ok(());
 }
 
-pub async fn identity_create(state: &State, account: AccountId, req: IdentityCreate) -> Result<IdentityRes, loga::Error> {
+pub async fn identity_create(
+    state: &State,
+    account: AccountId,
+    req: IdentityCreate,
+) -> Result<IdentityRes, loga::Error> {
     let account_id = DbAccountId(account);
     let secret = new_local_identity_secret();
     let identity = secret.identity().context("Generated identity secret produced no public key")?;
     let idem = req.idem.clone().unwrap_or_else(|| identity.to_string());
     let row = tx(&state.db, move |db_tx| {
-        let existing =
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select id, idem, name, description, shown_name, shown_description, portrait from identity where account_id = ${account_id_t = &account_id} and idem = ${string = idem.as_str()} and soft_deleted_at is null"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
+        let existing = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select id, idem, name, description, shown_name, shown_description, portrait from identity where account_id = ${account_id_t = &account_id} and idem = ${string = idem.as_str()} and soft_deleted_at is null"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
         if let Some(existing) = existing {
             return Ok(IdentityRes {
                 id: existing.id.0,
@@ -227,12 +224,11 @@ pub async fn identity_create(state: &State, account: AccountId, req: IdentityCre
 pub async fn identity_list(state: &State, account: AccountId) -> Result<Vec<IdentityRes>, loga::Error> {
     let account_id = DbAccountId(account);
     return Ok(tx(&state.db, move |db_tx| {
-        let rows =
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select id, idem, name, description, shown_name, shown_description, portrait from identity where account_id = ${account_id_t = &account_id} and soft_deleted_at is null order by id"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
+        let rows = good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select id, idem, name, description, shown_name, shown_description, portrait from identity where account_id = ${account_id_t = &account_id} and soft_deleted_at is null order by id"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
         let mut out = vec![];
         for r in rows {
             out.push(IdentityRes {
@@ -249,7 +245,11 @@ pub async fn identity_list(state: &State, account: AccountId) -> Result<Vec<Iden
     }).await.context("Error listing identities")?);
 }
 
-pub async fn identity_modify(state: &State, account: AccountId, req: IdentityModify) -> Result<IdentityRes, loga::Error> {
+pub async fn identity_modify(
+    state: &State,
+    account: AccountId,
+    req: IdentityModify,
+) -> Result<IdentityRes, loga::Error> {
     let account_id = DbAccountId(account);
     let db_identity = DbIdentity(req.id);
     let portrait = resolve_modify_portrait(state, account_id, &req.portrait).await?;
@@ -284,12 +284,11 @@ pub async fn identity_modify(state: &State, account: AccountId, req: IdentityMod
             ).map_err(|e| loga::err(e.0))?;
         }
         if !matches!(portrait, PortraitChange::Keep) {
-            let current =
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select portrait from identity where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_identity}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?.flatten();
+            let current = good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select portrait from identity where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_identity}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?.flatten();
             let next = portrait.apply(current);
             good_ormning::sqlite::good_query!(
                 db,
@@ -297,14 +296,11 @@ pub async fn identity_modify(state: &State, account: AccountId, req: IdentityMod
                 db_tx
             ).map_err(|e| loga::err(e.0))?;
         }
-        let row =
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select id, idem, name, description, shown_name, shown_description, portrait from identity where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_identity} and soft_deleted_at is null"#;
-                db_tx
-            )
-                .map_err(|e| loga::err(e.0))?
-                .context("No such identity")?;
+        let row = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select id, idem, name, description, shown_name, shown_description, portrait from identity where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_identity} and soft_deleted_at is null"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?.context("No such identity")?;
         return Ok(IdentityRes {
             id: row.id.0,
             idem: opt_idem(row.idem),
@@ -334,9 +330,9 @@ pub enum PortraitChange {
 impl PortraitChange {
     fn apply(&self, current: Option<String>) -> Option<String> {
         match self {
-            PortraitChange::Keep => current,
-            PortraitChange::Clear => None,
-            PortraitChange::Set(h) => Some(h.0.clone()),
+            PortraitChange::Keep => return current,
+            PortraitChange::Clear => return None,
+            PortraitChange::Set(h) => return Some(h.0.clone()),
         }
     }
 }
@@ -354,7 +350,9 @@ async fn resolve_modify_portrait(
     match m {
         None => return Ok(PortraitChange::Keep),
         Some(ModifyOption { value: None }) => return Ok(PortraitChange::Clear),
-        Some(ModifyOption { value: Some(p) }) => return Ok(PortraitChange::Set(portrait_store(state, account, p).await?)),
+        Some(ModifyOption { value: Some(p) }) => return Ok(
+            PortraitChange::Set(portrait_store(state, account, p).await?),
+        ),
     }
 }
 
@@ -455,12 +453,11 @@ pub async fn channel_group_create(
     let idem = req.idem.clone().unwrap_or_default();
     let row = tx(&state.db, move |db_tx| {
         if !idem.is_empty() {
-            let existing =
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select rowid, idem, name, description from channelgroup where account_id = ${account_id_t = &account_id} and idem = ${string = idem.as_str()}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
+            let existing = good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select rowid, idem, name, description from channelgroup where account_id = ${account_id_t = &account_id} and idem = ${string = idem.as_str()}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
             if let Some(existing) = existing {
                 return Ok((existing.rowid, existing.idem, existing.name, existing.description));
             }
@@ -483,13 +480,11 @@ pub async fn channel_group_create(
 pub async fn channel_group_list(state: &State, account: AccountId) -> Result<Vec<ChannelGroupRes>, loga::Error> {
     let account_id = DbAccountId(account);
     let rows = tx(&state.db, move |db_tx| {
-        return Ok(
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select rowid, idem, name, description from channelgroup where account_id = ${account_id_t = &account_id} order by rowid"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?,
-        );
+        return Ok(good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select rowid, idem, name, description from channelgroup where account_id = ${account_id_t = &account_id} order by rowid"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?);
     }).await.context("Error listing channel groups")?;
     return Ok(rows.into_iter().map(|r| ChannelGroupRes {
         id: ChannelGroupId(i64_to_u64(r.rowid)),
@@ -521,15 +516,11 @@ pub async fn channel_group_modify(
                 db_tx
             ).map_err(|e| loga::err(e.0))?;
         }
-        return Ok(
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select rowid, idem, name, description from channelgroup where account_id = ${account_id_t = &account_id} and rowid = ${channelgroup_id_t = &gid}"#;
-                db_tx
-            )
-                .map_err(|e| loga::err(e.0))?
-                .context("No such channel group")?,
-        );
+        return Ok(good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select rowid, idem, name, description from channelgroup where account_id = ${account_id_t = &account_id} and rowid = ${channelgroup_id_t = &gid}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?.context("No such channel group")?);
     }).await.context("Error modifying channel group")?;
     return Ok(ChannelGroupRes {
         id: ChannelGroupId(i64_to_u64(row.rowid)),
@@ -539,7 +530,11 @@ pub async fn channel_group_modify(
     });
 }
 
-pub async fn channel_group_delete(state: &State, account: AccountId, req: ChannelGroupDelete) -> Result<(), loga::Error> {
+pub async fn channel_group_delete(
+    state: &State,
+    account: AccountId,
+    req: ChannelGroupDelete,
+) -> Result<(), loga::Error> {
     let account_id = DbAccountId(account);
     let gid = DbChannelGroupId(req.id);
     tx(&state.db, move |db_tx| {
@@ -571,12 +566,11 @@ pub async fn identity_invite_create(
     return Ok(tx(&state.db, move |db_tx| {
         require_owned_identity(db_tx, account_id, db_identity)?;
         if !idem.is_empty() {
-            let existing =
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select rowid, token, name, description, shown_name, shown_description, single_use, expiry from identity_invite where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_identity} and idem = ${string = idem.as_str()}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
+            let existing = good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select rowid, token, name, description, shown_name, shown_description, single_use, expiry from identity_invite where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_identity} and idem = ${string = idem.as_str()}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
             if let Some(e) = existing {
                 return Ok(IdentityInviteRes {
                     id: IdentityInviteId(i64_to_u64(e.rowid)),
@@ -617,13 +611,11 @@ pub async fn identity_invite_create(
 pub async fn identity_invite_list(state: &State, account: AccountId) -> Result<Vec<IdentityInviteRes>, loga::Error> {
     let account_id = DbAccountId(account);
     let rows = tx(&state.db, move |db_tx| {
-        return Ok(
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select rowid, identity, token, name, description, shown_name, shown_description, single_use, expiry from identity_invite where account_id = ${account_id_t = &account_id} order by rowid"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?,
-        );
+        return Ok(good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select rowid, identity, token, name, description, shown_name, shown_description, single_use, expiry from identity_invite where account_id = ${account_id_t = &account_id} order by rowid"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?);
     }).await.context("Error listing identity invites")?;
     return Ok(rows.into_iter().map(|r| IdentityInviteRes {
         id: IdentityInviteId(i64_to_u64(r.rowid)),
@@ -691,15 +683,11 @@ pub async fn identity_invite_modify(
                 db_tx
             ).map_err(|e| loga::err(e.0))?;
         }
-        return Ok(
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select rowid, identity, token, name, description, shown_name, shown_description, single_use, expiry from identity_invite where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                db_tx
-            )
-                .map_err(|e| loga::err(e.0))?
-                .context("No such identity invite")?,
-        );
+        return Ok(good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select rowid, identity, token, name, description, shown_name, shown_description, single_use, expiry from identity_invite where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?.context("No such identity invite")?);
     }).await.context("Error modifying identity invite")?;
     return Ok(IdentityInviteRes {
         id: IdentityInviteId(i64_to_u64(row.rowid)),
@@ -812,12 +800,11 @@ fn channel_row_get(
     owner: DbIdentity,
     channel: &DbChannelId,
 ) -> Result<Option<ChannelRow>, loga::Error> {
-    let row =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select identity, id, local_identity, idem, channel_group, name, description, shown_name, shown_description, portrait, retention_secs, public_read, public_post from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let row = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select identity, id, local_identity, idem, channel_group, name, description, shown_name, shown_description, portrait, retention_secs, public_read, public_post from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     let Some(r) = row else {
         return Ok(None);
     };
@@ -838,7 +825,11 @@ fn channel_row_get(
     }));
 }
 
-pub async fn channel_create(state: &State, account: AccountId, req: ChannelCreate) -> Result<ChannelRes, loga::Error> {
+pub async fn channel_create(
+    state: &State,
+    account: AccountId,
+    req: ChannelCreate,
+) -> Result<ChannelRes, loga::Error> {
     let account_id = DbAccountId(account);
     let db_identity = DbIdentity(req.identity);
     let db_channel_id = DbChannelId(random_channel_id());
@@ -848,15 +839,19 @@ pub async fn channel_create(state: &State, account: AccountId, req: ChannelCreat
     let row = tx(&state.db, move |db_tx| {
         require_owned_identity(db_tx, account_id, db_identity)?;
         if !idem.is_empty() {
-            let existing =
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select id from channel where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_identity} and idem = ${string = idem.as_str()} and deleted is null"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
+            let existing = good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select id from channel where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_identity} and idem = ${string = idem.as_str()} and deleted is null"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
             if let Some(existing) = existing {
                 return Ok(
-                    channel_row_get(db_tx, account_id, db_identity, &existing)?.context("Channel vanished during lookup")?,
+                    channel_row_get(
+                        db_tx,
+                        account_id,
+                        db_identity,
+                        &existing,
+                    )?.context("Channel vanished during lookup")?,
                 );
             }
         }
@@ -876,20 +871,30 @@ pub async fn channel_create(state: &State, account: AccountId, req: ChannelCreat
             page_size,
             true,
         )?;
-        return Ok(channel_row_get(db_tx, account_id, db_identity, &db_channel_id)?.context("Channel vanished after insert")?);
+        return Ok(
+            channel_row_get(
+                db_tx,
+                account_id,
+                db_identity,
+                &db_channel_id,
+            )?.context("Channel vanished after insert")?,
+        );
     }).await.context("Error inserting channel")?;
     return Ok(row.into_res());
 }
 
-pub async fn channel_list(state: &State, account: AccountId, _req: ChannelList) -> Result<Vec<ChannelRes>, loga::Error> {
+pub async fn channel_list(
+    state: &State,
+    account: AccountId,
+    _req: ChannelList,
+) -> Result<Vec<ChannelRes>, loga::Error> {
     let account_id = DbAccountId(account);
     let rows = tx(&state.db, move |db_tx| {
-        let rows =
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select identity, id, local_identity, idem, channel_group, name, description, shown_name, shown_description, portrait, retention_secs, public_read, public_post from channel where account_id = ${account_id_t = &account_id} and deleted is null order by identity, id"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
+        let rows = good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select identity, id, local_identity, idem, channel_group, name, description, shown_name, shown_description, portrait, retention_secs, public_read, public_post from channel where account_id = ${account_id_t = &account_id} and deleted is null order by identity, id"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
         let mut out = vec![];
         for r in rows {
             out.push(ChannelRow {
@@ -913,19 +918,22 @@ pub async fn channel_list(state: &State, account: AccountId, _req: ChannelList) 
     return Ok(rows.into_iter().map(|r| r.into_res()).collect());
 }
 
-pub async fn channel_modify(state: &State, account: AccountId, req: ChannelModify) -> Result<ChannelRes, loga::Error> {
+pub async fn channel_modify(
+    state: &State,
+    account: AccountId,
+    req: ChannelModify,
+) -> Result<ChannelRes, loga::Error> {
     let account_id = DbAccountId(account);
     let db_owner = DbIdentity(req.id.identity);
     let db_channel_id = DbChannelId(req.id.channel.clone());
     let portrait = resolve_modify_portrait(state, account_id, &req.portrait).await?;
     let row = tx(&state.db, move |db_tx| {
         if !matches!(portrait, PortraitChange::Keep) {
-            let current =
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select portrait from channel where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?.flatten();
+            let current = good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select portrait from channel where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?.flatten();
             let next = portrait.apply(current);
             good_ormning::sqlite::good_query!(
                 db,
@@ -1039,20 +1047,14 @@ pub async fn channel_member_list(
     let db_owner = DbIdentity(req.channel.identity);
     let db_channel_id = DbChannelId(req.channel.channel);
     let mut members = tx(&state.db, move |db_tx| {
-        return Ok(
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select member, can_post from channel_member where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id}"#;
-                db_tx
-            )
-                .map_err(|e| loga::err(e.0))?
-                .into_iter()
-                .map(|r| ChannelMemberRes {
-                    identity: r.member.0,
-                    can_post: r.can_post,
-                })
-                .collect::<Vec<_>>(),
-        );
+        return Ok(good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select member, can_post from channel_member where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| ChannelMemberRes {
+            identity: r.member.0,
+            can_post: r.can_post,
+        }).collect::<Vec<_>>());
     }).await.context("Error listing channel members")?;
     members.sort_by(|a, b| a.identity.cmp(&b.identity));
     return Ok(members);
@@ -1139,12 +1141,11 @@ pub async fn channel_invite_create(
     return Ok(tx(&state.db, move |db_tx| {
         require_owned_channel(db_tx, account_id, db_owner, &db_channel_id)?;
         if !idem.is_empty() {
-            let existing =
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select rowid, token, name, description, shown_name, shown_description, single_use, expiry, can_post from channel_invite where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and idem = ${string = idem.as_str()}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
+            let existing = good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select rowid, token, name, description, shown_name, shown_description, single_use, expiry, can_post from channel_invite where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and idem = ${string = idem.as_str()}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
             if let Some(e) = existing {
                 return Ok(ChannelInviteRes {
                     id: ChannelInviteId(i64_to_u64(e.rowid)),
@@ -1191,13 +1192,11 @@ pub async fn channel_invite_list(
 ) -> Result<Vec<ChannelInviteRes>, loga::Error> {
     let account_id = DbAccountId(account);
     let rows = tx(&state.db, move |db_tx| {
-        return Ok(
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select rowid, identity, channel, token, name, description, shown_name, shown_description, single_use, expiry, can_post from channel_invite where account_id = ${account_id_t = &account_id} order by rowid"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?,
-        );
+        return Ok(good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select rowid, identity, channel, token, name, description, shown_name, shown_description, single_use, expiry, can_post from channel_invite where account_id = ${account_id_t = &account_id} order by rowid"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?);
     }).await.context("Error listing channel invites")?;
     return Ok(rows.into_iter().map(|r| ChannelInviteRes {
         id: ChannelInviteId(i64_to_u64(r.rowid)),
@@ -1276,15 +1275,11 @@ pub async fn channel_invite_modify(
                 db_tx
             ).map_err(|e| loga::err(e.0))?;
         }
-        return Ok(
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select rowid, identity, channel, token, name, description, shown_name, shown_description, single_use, expiry, can_post from channel_invite where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                db_tx
-            )
-                .map_err(|e| loga::err(e.0))?
-                .context("No such channel invite")?,
-        );
+        return Ok(good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select rowid, identity, channel, token, name, description, shown_name, shown_description, single_use, expiry, can_post from channel_invite where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?.context("No such channel invite")?);
     }).await.context("Error modifying channel invite")?;
     return Ok(ChannelInviteRes {
         id: ChannelInviteId(i64_to_u64(row.rowid)),
@@ -1323,15 +1318,18 @@ pub async fn channel_invite_delete(
     return Ok(());
 }
 
-pub async fn contact_list(state: &State, account: AccountId, _req: ContactList) -> Result<Vec<ContactRes>, loga::Error> {
+pub async fn contact_list(
+    state: &State,
+    account: AccountId,
+    _req: ContactList,
+) -> Result<Vec<ContactRes>, loga::Error> {
     let account_id = DbAccountId(account);
     return Ok(tx(&state.db, move |db_tx| {
-        let rows =
-            good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select id, name, description, portrait from contact where account_id = ${account_id_t = &account_id} order by id"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
+        let rows = good_ormning::sqlite::good_query_many!(
+            db,
+            r#"select id, name, description, portrait from contact where account_id = ${account_id_t = &account_id} order by id"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
         let mut out = vec![];
         for r in rows {
             out.push(ContactRes {
@@ -1345,7 +1343,11 @@ pub async fn contact_list(state: &State, account: AccountId, _req: ContactList) 
     }).await.context("Error listing contacts")?);
 }
 
-pub async fn contact_modify(state: &State, account: AccountId, req: ContactModify) -> Result<ContactRes, loga::Error> {
+pub async fn contact_modify(
+    state: &State,
+    account: AccountId,
+    req: ContactModify,
+) -> Result<ContactRes, loga::Error> {
     let account_id = DbAccountId(account);
     let db_id = DbIdentity(req.id);
     let portrait = resolve_modify_portrait(state, account_id, &req.portrait).await?;
@@ -1370,12 +1372,11 @@ pub async fn contact_modify(state: &State, account: AccountId, req: ContactModif
             ).map_err(|e| loga::err(e.0))?;
         }
         if !matches!(portrait, PortraitChange::Keep) {
-            let current =
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select portrait from contact where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_id}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?.flatten();
+            let current = good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select portrait from contact where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_id}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?.flatten();
             let next = portrait.apply(current);
             good_ormning::sqlite::good_query!(
                 db,
@@ -1383,14 +1384,11 @@ pub async fn contact_modify(state: &State, account: AccountId, req: ContactModif
                 db_tx
             ).map_err(|e| loga::err(e.0))?;
         }
-        let row =
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select id, name, description, portrait from contact where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_id}"#;
-                db_tx
-            )
-                .map_err(|e| loga::err(e.0))?
-                .context("Contact insertion failed")?;
+        let row = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select id, name, description, portrait from contact where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_id}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?.context("Contact insertion failed")?;
         return Ok(ContactRes {
             id: row.id.0,
             name: row.name,
@@ -1446,32 +1444,27 @@ pub async fn message_push(state: &Arc<State>, account: AccountId, req: MessagePu
         let db_sender = DbIdentity(sender);
         let db_owner = DbIdentity(owner);
         let db_channel_id = DbChannelId(req.channel.channel.clone());
-        let channel_row =
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select local_identity, next_sender_unique from channel where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id} and deleted is null"#;
-                db_tx
-            )
-                .map_err(|e| loga::err(e.0))?
-                .context("No such channel")?;
+        let channel_row = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select local_identity, next_sender_unique from channel where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id} and deleted is null"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?.context("No such channel")?;
         if channel_row.local_identity.0 != sender {
             return Err(loga::err("Sender isn't this account's identity in the channel"));
         }
-        let existing =
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select seq from message where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_sender} and client_id = ${string = req.client_id.0.as_str()}"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
+        let existing = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select seq from message where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_sender} and client_id = ${string = req.client_id.0.as_str()}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
         if existing.is_some() {
             return Ok(None);
         }
-        let existing_outbox =
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select sender_unique from outbox where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_sender} and client_id = ${string = req.client_id.0.as_str()}"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
+        let existing_outbox = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select sender_unique from outbox where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_sender} and client_id = ${string = req.client_id.0.as_str()}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
         if existing_outbox.is_some() {
             return Ok(None);
         }
@@ -1494,7 +1487,8 @@ pub async fn message_push(state: &Arc<State>, account: AccountId, req: MessagePu
             body: req.body.clone(),
         };
         let body_json = serde_json::to_string(&body).unwrap();
-        let (_root, _chain, sig) = signer.sign(MessageBody::DOMAIN, body_json.as_bytes()).context("Signing MessageBody failed")?;
+        let (_root, _chain, sig) =
+            signer.sign(MessageBody::DOMAIN, body_json.as_bytes()).context("Signing MessageBody failed")?;
         let raw = serde_json::to_string(&Message(JsonSignature {
             _p: Default::default(),
             message: body_json,
@@ -1537,10 +1531,13 @@ pub async fn message_push(state: &Arc<State>, account: AccountId, req: MessagePu
         None => {
             state
                 .ws_bus
-                .publish(account, shared::interface::wire::s2c::WsEvent::Outbox(shared::interface::wire::s2c::OutboxChange {
-                    channel: channel.clone(),
-                    sender: sender,
-                }))
+                .publish(
+                    account,
+                    shared::interface::wire::s2c::WsEvent::Outbox(shared::interface::wire::s2c::OutboxChange {
+                        channel: channel.clone(),
+                        sender: sender,
+                    }),
+                )
                 .await;
         },
     }
@@ -1561,12 +1558,11 @@ fn insert_joined_channel(
     page_size: i64,
     authenticated: bool,
 ) -> Result<(), loga::Error> {
-    let existing =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select local_identity, authenticated from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let existing = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select local_identity, authenticated from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     if let Some(existing) = existing {
         if existing.local_identity.0 != local_identity.0 {
             return Err(
@@ -1624,7 +1620,11 @@ pub async fn channel_join_preview(
     });
 }
 
-pub async fn channel_add(state: &Arc<State>, account: AccountId, req: ChannelAdd) -> Result<ChannelRes, loga::Error> {
+pub async fn channel_add(
+    state: &Arc<State>,
+    account: AccountId,
+    req: ChannelAdd,
+) -> Result<ChannelRes, loga::Error> {
     use crate::interface::s2s::GetChannelInfo;
 
     let account_id = DbAccountId(account);
@@ -1640,7 +1640,12 @@ pub async fn channel_add(state: &Arc<State>, account: AccountId, req: ChannelAdd
     }).await?;
     let portrait =
         resolve_join_portrait(state, account_id, &KwaUrl::Channel(req.channel.clone()), req.portrait).await?;
-    let info = state.s2s_client.get_channel_info(owner, None, GetChannelInfo { channel: req.channel.clone() }).await.context("s2s channel info failed")?;
+    let info =
+        state
+            .s2s_client
+            .get_channel_info(owner, None, GetChannelInfo { channel: req.channel.clone() })
+            .await
+            .context("s2s channel info failed")?;
     let page_size = info.page_size as i64;
     let row = tx(&state.db, {
         let channel_id = channel_id.clone();
@@ -1661,8 +1666,17 @@ pub async fn channel_add(state: &Arc<State>, account: AccountId, req: ChannelAdd
                 page_size,
                 false,
             )?;
-            crate::subsystems::messages::store_channel_info(db_tx, account_id, db_owner, &db_channel_id, &info, true)?;
-            return Ok(channel_row_get(db_tx, account_id, db_owner, &db_channel_id)?.context("Added channel vanished")?);
+            crate::subsystems::messages::store_channel_info(
+                db_tx,
+                account_id,
+                db_owner,
+                &db_channel_id,
+                &info,
+                true,
+            )?;
+            return Ok(
+                channel_row_get(db_tx, account_id, db_owner, &db_channel_id)?.context("Added channel vanished")?,
+            );
         }
     }).await.context("Error inserting added channel row")?;
     state.pull_scheduler.trigger_immediate(PullKey {
@@ -1689,11 +1703,10 @@ pub async fn channel_join_channel(
     let sender = req.sender;
     let owner = req.channel.identity;
     validate_join_name(&req.name)?;
-    let portrait =
-        resolve_join_portrait(state, account_id, &KwaUrl::ChannelInvite(KwaUrlChannelInvite {
-            channel: req.channel.clone(),
-            code: req.code.clone(),
-        }), req.portrait).await?;
+    let portrait = resolve_join_portrait(state, account_id, &KwaUrl::ChannelInvite(KwaUrlChannelInvite {
+        channel: req.channel.clone(),
+        code: req.code.clone(),
+    }), req.portrait).await?;
     let signer = crate::subsystems::messages::load_signer(state, account, sender).await?;
     let returned = state.s2s_client.join(owner, &signer, Join {
         target: ChannelOrIdentity::Channel(req.channel.channel.clone()),
@@ -1726,8 +1739,17 @@ pub async fn channel_join_channel(
                 r#"insert into contact (account_id, id, name, description, portrait) values (${account_id_t = &account_id}, ${identity_id_t = &db_owner}, ${string = req.name.as_str()}, ${string = req.description.as_str()}, ${opt string = portrait.as_ref().map(|h| h.0.as_str())}) on conflict (account_id, id) do nothing"#;
                 db_tx
             ).map_err(|e| loga::err(e.0))?;
-            crate::subsystems::messages::store_channel_info(db_tx, account_id, db_owner, &db_channel_id, &info, true)?;
-            return Ok(channel_row_get(db_tx, account_id, db_owner, &db_channel_id)?.context("Joined channel vanished")?);
+            crate::subsystems::messages::store_channel_info(
+                db_tx,
+                account_id,
+                db_owner,
+                &db_channel_id,
+                &info,
+                true,
+            )?;
+            return Ok(
+                channel_row_get(db_tx, account_id, db_owner, &db_channel_id)?.context("Joined channel vanished")?,
+            );
         }
     }).await.context("Error inserting joined channel row")?;
     state.pull_scheduler.trigger_immediate(PullKey {
@@ -1754,11 +1776,10 @@ pub async fn channel_join_identity(
     let sender = req.sender;
     let target = req.identity;
     validate_join_name(&req.name)?;
-    let portrait =
-        resolve_join_portrait(state, account_id, &KwaUrl::IdentityInvite(KwaUrlIdentityInvite {
-            identity: target,
-            code: req.code.clone(),
-        }), req.portrait).await?;
+    let portrait = resolve_join_portrait(state, account_id, &KwaUrl::IdentityInvite(KwaUrlIdentityInvite {
+        identity: target,
+        code: req.code.clone(),
+    }), req.portrait).await?;
     let signer = crate::subsystems::messages::load_signer(state, account, sender).await?;
     let returned = state.s2s_client.join(target, &signer, Join {
         target: ChannelOrIdentity::Identity(target),
@@ -1791,8 +1812,17 @@ pub async fn channel_join_identity(
                 page_size,
                 true,
             )?;
-            crate::subsystems::messages::store_channel_info(db_tx, account_id, db_target, &db_channel_id, &info, true)?;
-            return Ok(channel_row_get(db_tx, account_id, db_target, &db_channel_id)?.context("Joined channel vanished")?);
+            crate::subsystems::messages::store_channel_info(
+                db_tx,
+                account_id,
+                db_target,
+                &db_channel_id,
+                &info,
+                true,
+            )?;
+            return Ok(
+                channel_row_get(db_tx, account_id, db_target, &db_channel_id)?.context("Joined channel vanished")?,
+            );
         }
     }).await.context("Error inserting DM channel after identity join")?;
     state.pull_scheduler.trigger_immediate(PullKey {
@@ -1803,4 +1833,3 @@ pub async fn channel_join_identity(
     }).await;
     return Ok(row.into_res());
 }
-

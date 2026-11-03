@@ -1355,6 +1355,50 @@ svg.spinner4 path {
       };
     };
 
+  presentation.leafMenuQrScanner =
+    /** @type { Presentation["leafMenuQrScanner"] } */ (args) => {
+      const video = e(
+        "video",
+        { muted: true, playsInline: true, autoplay: true },
+        {
+          styles_: [
+            s("leaf_menu_qr_scanner_video", {
+              "": (s) => {
+                s.width = "min(10cm, 100%)";
+                s.aspectRatio = "1";
+                s.objectFit = "cover";
+                s.borderRadius = varRBubble;
+                s.backgroundColor = varCQr;
+              },
+            }),
+          ],
+        },
+      );
+      const status = e("div", {}, { styles_: [errorStyle] });
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              s("leaf_menu_qr_scanner", {
+                "": (s) => {
+                  s.gridColumn = "1 / 3";
+                  s.display = "grid";
+                  s.justifyItems = "center";
+                  s.rowGap = varPSmall;
+                  s.padding = "0.1cm 0";
+                },
+              }),
+            ],
+            children_: [video, status],
+          },
+        ),
+        video: video,
+        status: status,
+      };
+    };
+
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: top
 
@@ -1610,6 +1654,11 @@ svg.spinner4 path {
   const svgIconUp = `<path d="M 2.38412,6.64751 4.97757,3.30594 7.52115,6.69738" /> `;
   const svgIconCopy = `<rect x="3.5" y="1.5" width="5" height="5.5" rx="0.8" />
       <path d="M 3.5,3 H 2.3 Q 1.5,3 1.5,3.8 V 7.7 Q 1.5,8.5 2.3,8.5 H 5.7 Q 6.5,8.5 6.5,7.7 V 7" /> `;
+  const svgIconEdit = `<path d="M 2,8 2.4,6.2 6.8,1.8 8.2,3.2 3.8,7.6 Z" />
+      <path d="M 5.9,2.7 7.3,4.1" /> `;
+  const svgIconHistory = `<circle cx="5" cy="5" r="3.6" />
+      <path d="M 5,2.9 V 5 L 6.5,6" /> `;
+  const svgIconCheck = `<path d="M 1.8,5.2 4,7.4 8.4,2.6" /> `;
   const svgIconClosed = `<path d="M 3.31381,2.55686 6.54797,4.97396 3.31381,7.42511" /> `;
   const svgIconMessage = `<path        d="M 1.0451019,9.0882899 C 1.881773,6.8346388 0.9807132,6.4106016 1.0025419,4.7517916 1.0270541,2.8890523 2.5540914,1.2417577 5.1503393,1.2344073 7.7465873,1.2270557 9.178426,2.801595 9.1403442,4.7019845 9.1022618,6.6023739 7.7306769,8.016585 5.0856639,8.0388243 3.4647788,8.0524527 2.7929907,7.4356862 1.0451019,9.0882899 Z"
 />`;
@@ -2183,6 +2232,7 @@ svg.spinner4 path {
 
   // Entry
   const chatEntrySelectSpecificStyle = "chat_entry_selectable_specific";
+  const chatEntryActionsSpecificStyle = "chat_entry_actions_specific";
   const chatEntrySelectableStyle = s("chat_entry_selectable", {
     "": (s) => {
       s.pointerEvents = "initial";
@@ -2194,6 +2244,12 @@ svg.spinner4 path {
     [`.${classStateSelected} .${chatEntrySelectSpecificStyle}`]: (s) => {
       s.borderColor = varCNotifyBright;
     },
+    [` .${chatEntryActionsSpecificStyle}`]: (s) => {
+      s.display = "none";
+    },
+    [`.${classStateSelected} .${chatEntryActionsSpecificStyle}`]: (s) => {
+      s.display = "flex";
+    },
   });
   presentation.contChatEntryModeMessage =
     /** @type { Presentation["contChatEntryModeMessage"] } */ (args) => {
@@ -2202,6 +2258,21 @@ svg.spinner4 path {
         {},
         {
           styles_: [contVboxStyle, chatEntrySelectSpecificStyle, bubbleStyle],
+        },
+      );
+      const actions = e(
+        "div",
+        {},
+        {
+          styles_: [
+            chatEntryActionsSpecificStyle,
+            s("chat_entry_actions", {
+              "": (s) => {
+                s.flexDirection = "row";
+                s.gap = "0.1cm";
+              },
+            }),
+          ],
         },
       );
 
@@ -2239,6 +2310,7 @@ svg.spinner4 path {
               },
             ),
             body,
+            actions,
           ],
         },
       );
@@ -2335,6 +2407,47 @@ svg.spinner4 path {
         ),
         portrait: portrait,
         body: body,
+        actions: actions,
+      };
+    };
+  const chatEntryMessageButtonStyles = [
+    ...onBlueIconButtonInverseStyles,
+    s("chat_entry_message_button", {
+      "": (s) => {
+        s.color = varCForegroundChatButton;
+      },
+    }),
+  ];
+  presentation.leafChatEntryMessageButtonEdit =
+    /** @type { Presentation["leafChatEntryMessageButtonEdit"] } */ (args) => {
+      return {
+        root: e(
+          "button",
+          { title: "Edit" },
+          {
+            styles_: chatEntryMessageButtonStyles,
+            children_: [
+              leafSvg({ text: svgIconEdit, width: varSChatControlsButton }),
+            ],
+          },
+        ),
+      };
+    };
+  presentation.leafChatEntryMessageButtonHistory =
+    /** @type { Presentation["leafChatEntryMessageButtonHistory"] } */ (
+      args,
+    ) => {
+      return {
+        root: e(
+          "a",
+          { title: "History", href: args.link },
+          {
+            styles_: chatEntryMessageButtonStyles,
+            children_: [
+              leafSvg({ text: svgIconHistory, width: varSChatControlsButton }),
+            ],
+          },
+        ),
       };
     };
   presentation.leafChatEntryPortrait =
@@ -2487,8 +2600,10 @@ svg.spinner4 path {
       };
     };
 
-  presentation.leafChatControlsBarModeMessage =
-    /** @type { Presentation["leafChatControlsBarModeMessage"] } */ (args) => {
+  const chatControlsBarMessage =
+    /** @type { (args: { sendSvg: string, prefix: HTMLElement[] }) => { root: HTMLElement, send: HTMLElement, text: HTMLElement, close: HTMLElement } } */ (
+      args,
+    ) => {
       const close = e(
         "button",
         {},
@@ -2506,7 +2621,7 @@ svg.spinner4 path {
           styles_: [...onBlueIconButtonStyles],
           children_: [
             leafSvg({
-              text: svgIconSend,
+              text: args.sendSvg,
               width: varSChatControlsButton,
               extraStyles: [
                 s("chat_controls_bar_message_send", {
@@ -2538,7 +2653,7 @@ svg.spinner4 path {
       );
       return {
         root: floatingBar({
-          children_: [close, text, send],
+          children_: [close, ...args.prefix, text, send],
           extraStyles: [
             contHboxStyle,
             s("leaf_chat_controls_mode_message", {
@@ -2551,6 +2666,294 @@ svg.spinner4 path {
         send: send,
         close: close,
         text: text,
+      };
+    };
+
+  presentation.leafChatControlsBarModeMessage =
+    /** @type { Presentation["leafChatControlsBarModeMessage"] } */ (args) => {
+      return chatControlsBarMessage({ sendSvg: svgIconSend, prefix: [] });
+    };
+
+  presentation.leafChatControlsBarModeEdit =
+    /** @type { Presentation["leafChatControlsBarModeEdit"] } */ (args) => {
+      return chatControlsBarMessage({
+        sendSvg: svgIconCheck,
+        prefix: [
+          leafSvg({
+            text: svgIconEdit,
+            width: varSChatControlsButton,
+            extraStyles: [
+              s("chat_controls_bar_edit_indicator", {
+                "": (s) => {
+                  s.alignSelf = "center";
+                  s.flexShrink = "0";
+                  s.color = varCForegroundVeryLight;
+                },
+              }),
+            ],
+          }),
+        ],
+      });
+    };
+
+  ///////////////////////////////////////////////////////////////////////////////
+  // xx Components, styles: message history
+
+  const varCDiffRemoved = vs(
+    "c-diff-removed",
+    "rgb(255, 228, 156)",
+    "rgb(120, 96, 30)",
+  );
+  const varCDiffAdded = vs("c-diff-added", "rgb(163, 211, 255)", "rgb(30, 80, 130)");
+  const messageHistoryDiffChangedStyle = "message_history_diff_changed";
+
+  presentation.contPageMessageHistory =
+    /** @type { Presentation["contPageMessageHistory"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [contVboxStyle, ...nonchatPageStylesOuter],
+            children_: [
+              args.headBar,
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    nonchatPageStyleInner,
+                    contVboxStyle,
+                    s("cont_page_message_history_inner", {
+                      "": (s) => {
+                        s.width = varSPageNarrow;
+                        s.alignSelf = "center";
+                        s.gap = "0.5cm";
+                      },
+                    }),
+                  ],
+                  children_: args.children,
+                },
+              ),
+            ],
+          },
+        ),
+      };
+    };
+
+  const messageHistoryRevision =
+    /** @type { (date: string, body: HTMLElement) => HTMLElement } */ (
+      date,
+      body,
+    ) => {
+      return e(
+        "div",
+        {},
+        {
+          styles_: [
+            contVboxStyle,
+            s("message_history_revision", {
+              "": (s) => {
+                s.gap = "0.1cm";
+              },
+            }),
+          ],
+          children_: [
+            e(
+              "time",
+              {
+                dateTime: date,
+                textContent: new Date(date).toLocaleString(),
+              },
+              {
+                styles_: [
+                  s("message_history_revision_stamp", {
+                    "": (s) => {
+                      s.fontSize = "9pt";
+                      s.fontWeight = "600";
+                    },
+                  }),
+                ],
+              },
+            ),
+            body,
+          ],
+        },
+      );
+    };
+
+  const messageHistoryTextStyle = s("message_history_text", {
+    "": (s) => {
+      s.whiteSpace = "pre-wrap";
+      s.overflowWrap = "anywhere";
+      s.pointerEvents = "initial";
+    },
+  });
+
+  presentation.contMessageHistoryRevisionOriginal =
+    /** @type { Presentation["contMessageHistoryRevisionOriginal"] } */ (
+      args,
+    ) => {
+      return {
+        root: messageHistoryRevision(
+          args.date,
+          e(
+            "div",
+            { textContent: args.text },
+            {
+              styles_: [
+                bubbleStyle,
+                messageHistoryTextStyle,
+                s("message_history_original", {
+                  "": (s) => {
+                    s.border = `${varLThin} solid ${varCForegroundUltraLight}`;
+                  },
+                }),
+              ],
+            },
+          ),
+        ),
+      };
+    };
+
+  presentation.contMessageHistoryRevisionEdit =
+    /** @type { Presentation["contMessageHistoryRevisionEdit"] } */ (args) => {
+      return {
+        root: messageHistoryRevision(
+          args.date,
+          e(
+            "div",
+            {},
+            {
+              styles_: [
+                s("message_history_diff", {
+                  "": (s) => {
+                    s.display = "grid";
+                    s.gridTemplateColumns = "minmax(0, 1fr) minmax(0, 1fr)";
+                    s.columnGap = varPSmall;
+                    s.rowGap = "0.1cm";
+                  },
+                }),
+              ],
+              children_: args.cells,
+            },
+          ),
+        ),
+      };
+    };
+
+  const messageHistoryDiffLineStyle = s("message_history_diff_line", {
+    "": (s) => {
+      s.borderLeft = `0.12cm solid transparent`;
+      s.borderRadius = varRSelectable;
+      s.padding = "0.05cm 0.15cm";
+    },
+  });
+
+  presentation.contMessageHistoryDiffLineContext =
+    /** @type { Presentation["contMessageHistoryDiffLineContext"] } */ (
+      args,
+    ) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              messageHistoryDiffLineStyle,
+              messageHistoryTextStyle,
+              s("message_history_diff_line_context", {
+                "": (s) => {
+                  s.borderLeftColor = varCForegroundUltraLight;
+                  s.color = varCForegroundLight;
+                },
+              }),
+            ],
+            children_: args.children,
+          },
+        ),
+      };
+    };
+
+  presentation.contMessageHistoryDiffLineRemoved =
+    /** @type { Presentation["contMessageHistoryDiffLineRemoved"] } */ (
+      args,
+    ) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              messageHistoryDiffLineStyle,
+              messageHistoryTextStyle,
+              s("message_history_diff_line_removed", {
+                "": (s) => {
+                  s.borderLeftColor = varCDiffRemoved;
+                  s.backgroundColor = `color-mix(in srgb, ${varCDiffRemoved} 25%, transparent)`;
+                },
+                [` .${messageHistoryDiffChangedStyle}`]: (s) => {
+                  s.backgroundColor = varCDiffRemoved;
+                },
+              }),
+            ],
+            children_: args.children,
+          },
+        ),
+      };
+    };
+
+  presentation.contMessageHistoryDiffLineAdded =
+    /** @type { Presentation["contMessageHistoryDiffLineAdded"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              messageHistoryDiffLineStyle,
+              messageHistoryTextStyle,
+              s("message_history_diff_line_added", {
+                "": (s) => {
+                  s.borderLeftColor = varCDiffAdded;
+                  s.backgroundColor = `color-mix(in srgb, ${varCDiffAdded} 25%, transparent)`;
+                },
+                [` .${messageHistoryDiffChangedStyle}`]: (s) => {
+                  s.backgroundColor = varCDiffAdded;
+                },
+              }),
+            ],
+            children_: args.children,
+          },
+        ),
+      };
+    };
+
+  presentation.leafMessageHistoryDiffLineEmpty =
+    /** @type { Presentation["leafMessageHistoryDiffLineEmpty"] } */ (args) => {
+      return { root: e("div", {}, {}) };
+    };
+
+  presentation.leafMessageHistoryDiffText =
+    /** @type { Presentation["leafMessageHistoryDiffText"] } */ (args) => {
+      return {
+        root: e(
+          "span",
+          { textContent: args.text },
+          {
+            styles_: args.changed
+              ? [
+                  messageHistoryDiffChangedStyle,
+                  s("message_history_diff_text_changed", {
+                    "": (s) => {
+                      s.borderRadius = "0.05cm";
+                      s.fontWeight = "600";
+                    },
+                  }),
+                ]
+              : [],
+          },
+        ),
       };
     };
 

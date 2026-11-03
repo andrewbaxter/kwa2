@@ -26,6 +26,12 @@ pub fn build() -> El {
                 generated_image: None,
             }).root,
             style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+                text: format!("Join (QR)"),
+                link: ministate_octothorpe(&Ministate::ChannelJoinQr),
+                image: None,
+                generated_image: None,
+            }).root,
+            style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                 text: format!("New group"),
                 link: ministate_octothorpe(&Ministate::ChannelGroupNew),
                 image: None,

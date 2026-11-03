@@ -49,9 +49,10 @@ pub fn new_message_client_id() -> Result<MessageClientId, String> {
         Some(last) if now <= last => last + SignedDuration::from_nanos(1),
         _ => now,
     };
-    LocalStorage::set(LOCALSTORAGE_LAST_CLIENT_ID_STAMP, stamp).map_err(
-        |e| format!("Error storing last message client id timestamp: {}", e),
-    )?;
+    LocalStorage::set(
+        LOCALSTORAGE_LAST_CLIENT_ID_STAMP,
+        stamp,
+    ).map_err(|e| format!("Error storing last message client id timestamp: {}", e))?;
     return Ok(MessageClientId::from_timestamp(stamp));
 }
 
@@ -61,9 +62,16 @@ pub enum OutboxMessageReplyTo {
     Outbox(MessageClientId),
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub enum OutboxMessageRel {
+    None,
+    ReplyTo(OutboxMessageReplyTo),
+    EditOf(QualifiedMessageId),
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct OutboxMessage {
-    pub reply_to: Option<OutboxMessageReplyTo>,
+    pub rel: OutboxMessageRel,
     pub client_id: MessageClientId,
     pub body: String,
 }

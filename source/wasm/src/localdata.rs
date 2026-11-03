@@ -144,11 +144,11 @@ impl<T: 'static + Clone> NowOrLater<T> {
     pub fn map<U: 'static + Clone>(self, f: impl 'static + FnOnce(T) -> U) -> NowOrLater<U> {
         match self {
             NowOrLater::Now(v) => return NowOrLater::Now(f(v)),
-            NowOrLater::Later(v) => NowOrLater::Later(bg_val(async move {
+            NowOrLater::Later(v) => return NowOrLater::Later(bg_val(async move {
                 match v.get().await {
-                    Ok(Some(v)) => Ok(Some(f(v))),
-                    Ok(None) => Ok(None),
-                    Err(e) => Err(e),
+                    Ok(Some(v)) => return Ok(Some(f(v))),
+                    Ok(None) => return Ok(None),
+                    Err(e) => return Err(e),
                 }
             })),
         }
@@ -353,11 +353,8 @@ pub fn get_or_req_api_channel_(id: &QualifiedChannelId, touch: bool) -> NowOrLat
     return get_or_req_api_value(LOCALSTORAGE_CHANNELS, c2s::ChannelList, |x| x.id.clone(), id.clone(), touch);
 }
 
-// ChannelMember
-const PREFIX_LOCALSTORAGE_CHANNELMEMBERS: &str = "channelmembers";
-
 fn key_localstorage_channelmembers(channel: &QualifiedChannelId) -> String {
-    return format!("{}__{}__{}", PREFIX_LOCALSTORAGE_CHANNELMEMBERS, channel.identity.to_string(), channel.channel.0);
+    return format!("channelmembers__{}__{}", channel.identity.to_string(), channel.channel.0);
 }
 
 pub type LocalChannelMember = LocalValue<ChannelMemberRes>;

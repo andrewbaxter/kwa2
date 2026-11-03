@@ -29,7 +29,7 @@ let
     ).overrideToolchain
       toolchain;
   stageWorkspace =
-    name: files:
+    name: manifest: files:
     let
       linkLines = lib.strings.concatStringsSep "\n" (
         map (f: ''
@@ -42,6 +42,7 @@ let
       set -xeu -o pipefail
       ${pkgs.coreutils}/bin/mkdir $out
       cd $out
+      ${pkgs.coreutils}/bin/cp ${manifest} Cargo.toml
       ${linkLines}
     '';
 
@@ -67,14 +68,12 @@ let
         && lib.any (k: rel == k || lib.hasPrefix (k + "/") rel || lib.hasPrefix (rel + "/") k) keep;
     };
 
-  workspaceWasm = stageWorkspace "kwa-wasm" [
-    ./nixbuild/wasm/Cargo.toml
+  workspaceWasm = stageWorkspace "kwa-wasm" ./nixbuild/wasm/workspace.toml [
     ./wasm/Cargo.lock
     ./wasm/.cargo
     ./wasm
     ./shared
     spaghettinuumSrc
-    ./rooting-forms
   ];
   wasm = craneLib.buildPackage {
     pname = "kwa-wasm";
@@ -109,8 +108,7 @@ let
     ${pkgs.gnused}/bin/sed -i -e "s/KWA_VERSION/$hash/g" $out/index.html
   '';
 
-  workspaceNative = stageWorkspace "kwa-native" [
-    ./nixbuild/native/Cargo.toml
+  workspaceNative = stageWorkspace "kwa-native" ./nixbuild/native/workspace.toml [
     ./native/Cargo.lock
     ./native
     ./shared

@@ -475,7 +475,7 @@ pub fn el_async<E: ToString, F: 'static + Future<Output = Result<Vec<El>, E>>>(f
                 Err(e) => {
                     new_el =
                         vec![
-                            style_export::leaf_err_block(style_export::LeafErrBlockArgs { data: e.to_string() }).root
+                            style_export::leaf_err_block(style_export::LeafErrBlockArgs { data: e.to_string() }).root,
                         ];
                 },
             }
@@ -521,7 +521,7 @@ pub fn lazy_el_async<E: ToString, F: 'static + AsyncFnOnce() -> Result<Vec<El>, 
                                         vec![
                                             style_export::leaf_err_block(
                                                 style_export::LeafErrBlockArgs { data: e.to_string() },
-                                            ).root
+                                            ).root,
                                         ];
                                 },
                             }
@@ -577,14 +577,14 @@ impl ElExt for El {
 static CLIPBOARD_MIME: &str = "text/plain";
 
 pub fn as_blob(data: impl serde::Serialize) -> Blob {
-    return Blob::new_with_str_sequence_and_options(&JsValue::from(vec![
-        //. .
-        JsValue::from(serde_json::to_string_pretty(&data).unwrap())
-    ]), &{
-        let p = BlobPropertyBag::new();
-        p.set_type(CLIPBOARD_MIME);
-        p
-    }).unwrap();
+    return Blob::new_with_str_sequence_and_options(
+        &JsValue::from(vec![JsValue::from(serde_json::to_string_pretty(&data).unwrap())]),
+        &{
+            let p = BlobPropertyBag::new();
+            p.set_type(CLIPBOARD_MIME);
+            p
+        },
+    ).unwrap();
 }
 
 pub fn copy(log: &Rc<dyn Log>, data: impl serde::Serialize) {
@@ -595,9 +595,9 @@ pub fn copy(log: &Rc<dyn Log>, data: impl serde::Serialize) {
             JsValue::from(vec![
                 //. .
                 JsValue::from(CLIPBOARD_MIME),
-                JsValue::from(as_blob(data))
-            ])
-        ])).unwrap()).unwrap()
+                JsValue::from(as_blob(data)),
+            ]),
+        ])).unwrap()).unwrap(),
     ]));
     spawn_local({
         let log = log.clone();

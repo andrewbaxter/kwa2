@@ -7,6 +7,7 @@ use {
         GetChannelInfo,
         GetFile,
         GetJoinPreview,
+        GetMessageHistory,
         JoinPreviewRes,
         GetSnapLookup,
         GetSnapPage,
@@ -33,7 +34,6 @@ use {
     http_body_util::Full,
     htwrap::htreq::{
         self,
-        Conn,
         Host,
         Ips,
         Limits,
@@ -83,8 +83,6 @@ use {
 };
 
 pub const S2SV1_PATH: &str = "/s/1";
-const TOKEN_CACHE_TTL: Duration = Duration::from_secs(240);
-
 pub type Signer = Arc<Mutex<dyn IdentitySigner>>;
 
 pub struct S2sClient {
@@ -114,11 +112,36 @@ impl S2sClient {
                 read_body_size: 16 * 1024 * 1024,
                 ..Default::default()
             },
-            tokens: Cache::builder().time_to_live(TOKEN_CACHE_TTL).build(),
+            tokens: Cache::builder().time_to_live(Duration::from_secs(240)).build(),
         };
     }
 
-    async fn connect(&self, target: Identity, path: &str) -> Result<(Conn, Uri), loga::Error> {
+    async fn request<
+        T: DeserializeOwned,
+    >(
+        &self,
+        target: Identity,
+        method: Method,
+        path: &str,
+        headers: &HashMap<String, String>,
+        body: Vec<u8>,
+    ) -> Result<T, loga::Error> {
+        let (_, body, url) = self.request_raw(target, method, path, headers, body).await?;
+        return Ok(
+            serde_json::from_slice::<T>(
+                &body,
+            ).context_with("Error deserializing s2s response", ea!(url = url, body = String::from_utf8_lossy(&body)))?,
+        );
+    }
+
+    async fn request_raw(
+        &self,
+        target: Identity,
+        method: Method,
+        path: &str,
+        headers: &HashMap<String, String>,
+        body: Vec<u8>,
+    ) -> Result<(String, Vec<u8>, Uri), loga::Error> {
         let key_record = vec![SPAGH_RECORD_KEY.to_string()];
         let key_tls = vec![tls_record::KEY_SUFFIX_TLS.to_string()];
         let mut found =
@@ -159,54 +182,20 @@ impl S2sClient {
         }
         let host = format!("{}{}", target, DNS_DOT_SUFFIX);
         let url = Uri::from_str(&format!("https://{}:{}{}{}", host, record.port, S2SV1_PATH, path)).unwrap();
-        let conn =
+        let mut conn =
             htreq::connect_ips(
                 self.limits,
                 ips,
-                client_config_builder()
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(SpaghTlsClientVerifier {
-                        hashes: cert_hashes,
-                        inner: None,
-                    }))
-                    .with_no_client_auth(),
+                client_config_builder().dangerous().with_custom_certificate_verifier(Arc::new(SpaghTlsClientVerifier {
+                    hashes: cert_hashes,
+                    inner: None,
+                })).with_no_client_auth(),
                 "https".to_string(),
                 Host::Name(host),
                 record.port,
             )
                 .await
                 .context_with("Error connecting to peer", ea!(url = url))?;
-        return Ok((conn, url));
-    }
-
-    async fn request<T: DeserializeOwned>(
-        &self,
-        target: Identity,
-        method: Method,
-        path: &str,
-        headers: &HashMap<String, String>,
-        body: Vec<u8>,
-    ) -> Result<T, loga::Error> {
-        let (_, body, url) = self.request_raw(target, method, path, headers, body).await?;
-        return Ok(
-            serde_json::from_slice::<T>(
-                &body,
-            ).context_with(
-                "Error deserializing s2s response",
-                ea!(url = url, body = String::from_utf8_lossy(&body)),
-            )?,
-        );
-    }
-
-    async fn request_raw(
-        &self,
-        target: Identity,
-        method: Method,
-        path: &str,
-        headers: &HashMap<String, String>,
-        body: Vec<u8>,
-    ) -> Result<(String, Vec<u8>, Uri), loga::Error> {
-        let (mut conn, url) = self.connect(target, path).await?;
         let mut builder = Request::builder().method(method).uri(url.clone());
         if !body.is_empty() {
             builder = builder.header(CONTENT_TYPE, "application/json");
@@ -247,21 +236,15 @@ impl S2sClient {
         return Ok((content_type, body, url));
     }
 
-    async fn post<T: DeserializeOwned>(
-        &self,
-        target: Identity,
-        headers: &HashMap<String, String>,
-        req: &s2sv1::Req,
-    ) -> Result<T, loga::Error> {
+    async fn post<
+        T: DeserializeOwned,
+    >(&self, target: Identity, headers: &HashMap<String, String>, req: &s2sv1::Req) -> Result<T, loga::Error> {
         return self.request(target, Method::POST, "", headers, serde_json::to_vec(req).unwrap()).await;
     }
 
-    async fn get<R: PathReqTrait>(
-        &self,
-        target: Identity,
-        headers: &HashMap<String, String>,
-        req: &R,
-    ) -> Result<R::Resp, loga::Error> {
+    async fn get<
+        R: PathReqTrait,
+    >(&self, target: Identity, headers: &HashMap<String, String>, req: &R) -> Result<R::Resp, loga::Error> {
         return self.request(target, Method::GET, &format!("/{}", req.serialize_path()), headers, vec![]).await;
     }
 
@@ -284,21 +267,17 @@ impl S2sClient {
             signature: BytesZb32(sig),
             _p: Default::default(),
         };
-        let identify: IdentifyRes =
-            self.post(target, &HashMap::new(), &s2sv1::Req::Identify(Identify {
-                identity: identity,
-                challenge: signed,
-            })).await?;
+        let identify: IdentifyRes = self.post(target, &HashMap::new(), &s2sv1::Req::Identify(Identify {
+            identity: identity,
+            challenge: signed,
+        })).await?;
         self.tokens.insert((target, identity), identify.token.clone()).await;
         return Ok(identify.token);
     }
 
-    async fn post_authed<T: DeserializeOwned>(
-        &self,
-        target: Identity,
-        signer: &Signer,
-        req: &s2sv1::Req,
-    ) -> Result<T, loga::Error> {
+    async fn post_authed<
+        T: DeserializeOwned,
+    >(&self, target: Identity, signer: &Signer, req: &s2sv1::Req) -> Result<T, loga::Error> {
         let identity = signer_identity(signer)?;
         let token = self.authenticate(target, signer).await?;
         let res = self.post(target, &auth_headers(&token), req).await;
@@ -308,12 +287,9 @@ impl S2sClient {
         return res;
     }
 
-    async fn get_opt_authed<R: PathReqTrait>(
-        &self,
-        target: Identity,
-        signer: Option<&Signer>,
-        req: &R,
-    ) -> Result<R::Resp, loga::Error> {
+    async fn get_opt_authed<
+        R: PathReqTrait,
+    >(&self, target: Identity, signer: Option<&Signer>, req: &R) -> Result<R::Resp, loga::Error> {
         let Some(signer) = signer else {
             return self.get(target, &HashMap::new(), req).await;
         };
@@ -440,6 +416,15 @@ impl S2sClient {
         signer: Option<&Signer>,
         req: GetSnapLookup,
     ) -> Result<Option<SnapLookupRes>, loga::Error> {
+        return self.get_opt_authed(target, signer, &req).await;
+    }
+
+    pub async fn get_message_history(
+        &self,
+        target: Identity,
+        signer: Option<&Signer>,
+        req: GetMessageHistory,
+    ) -> Result<Option<PulledMessages>, loga::Error> {
         return self.get_opt_authed(target, signer, &req).await;
     }
 }

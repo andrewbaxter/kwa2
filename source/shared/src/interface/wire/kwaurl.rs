@@ -84,50 +84,32 @@ impl KwaUrl {
         match self {
             KwaUrl::IdentityInvite(u) => {
                 suffix =
-                    format!(
-                        "{}?{}",
-                        KWA_URL_PREFIX_IDENTITY_INVITE,
-                        serde_urlencoded::to_string(WireIdentityInvite {
-                            identity: u.identity.to_string(),
-                            code: u.code.clone(),
-                        }).unwrap()
-                    );
+                    format!("{}?{}", KWA_URL_PREFIX_IDENTITY_INVITE, serde_urlencoded::to_string(WireIdentityInvite {
+                        identity: u.identity.to_string(),
+                        code: u.code.clone(),
+                    }).unwrap());
             },
             KwaUrl::ChannelInvite(u) => {
                 suffix =
-                    format!(
-                        "{}?{}",
-                        KWA_URL_PREFIX_CHANNEL_INVITE,
-                        serde_urlencoded::to_string(WireChannelInvite {
-                            identity: u.channel.identity.to_string(),
-                            channel: u.channel.channel.0,
-                            code: u.code.clone(),
-                        }).unwrap()
-                    );
+                    format!("{}?{}", KWA_URL_PREFIX_CHANNEL_INVITE, serde_urlencoded::to_string(WireChannelInvite {
+                        identity: u.channel.identity.to_string(),
+                        channel: u.channel.channel.0,
+                        code: u.code.clone(),
+                    }).unwrap());
             },
             KwaUrl::Channel(u) => {
-                suffix =
-                    format!(
-                        "{}?{}",
-                        KWA_URL_PREFIX_CHANNEL,
-                        serde_urlencoded::to_string(WireChannel {
-                            identity: u.identity.to_string(),
-                            channel: u.channel.0,
-                        }).unwrap()
-                    );
+                suffix = format!("{}?{}", KWA_URL_PREFIX_CHANNEL, serde_urlencoded::to_string(WireChannel {
+                    identity: u.identity.to_string(),
+                    channel: u.channel.0,
+                }).unwrap());
             },
             KwaUrl::Message(u) => {
-                suffix =
-                    format!(
-                        "{}?{}",
-                        KWA_URL_PREFIX_MESSAGE,
-                        serde_urlencoded::to_string(WireMessage {
-                            identity: u.channel.identity.to_string(),
-                            channel: u.channel.channel.0,
-                            sender: u.message.identity.to_string(),
-                            unique: u.message.unique,
-                        }).unwrap()
-                    );
+                suffix = format!("{}?{}", KWA_URL_PREFIX_MESSAGE, serde_urlencoded::to_string(WireMessage {
+                    identity: u.channel.identity.to_string(),
+                    channel: u.channel.channel.0,
+                    sender: u.message.identity.to_string(),
+                    unique: u.message.unique,
+                }).unwrap());
             },
         }
         return format!("{}{}", KWA_URL_PREFIX0, suffix);

@@ -117,8 +117,7 @@ use {
     },
 };
 
-const PX_PER_CM: f64 = 96. / 2.54;
-const BUFFER: f64 = PX_PER_CM * 40.;
+const BUFFER: f64 = 96. / 2.54 * 40.;
 const MIN_RESERVE: usize = 50;
 const MAX_RESERVE: usize = MIN_RESERVE + 2 * 50;
 
@@ -309,20 +308,6 @@ impl<E: Entry> Infiniscroll_<E> {
         self.anchor_i.set(Some(anchor_i));
     }
 
-    fn scroll_reanchor(&self) {
-        if let Some(anchor_i) = self.anchor_i.get() {
-            let real_origin_y = 
-                // Origin in content space
-                self.logical_scroll_top.get() + self.anchor_alignment.get().mix(0., self.cached_frame_height.get())
-                // Origin in content-layout space
-                - self.logical_content_layout_offset.get() - self.cached_real_offset.get();
-            self.reanchor_inner(anchor_i, real_origin_y);
-        } else {
-            self.anchor_i.set(None);
-            self.anchor_offset.set(0.);
-        }
-    }
-
     // Change anchor based on logical values (anchor, alignment), + frame height
     fn transition_alignment_reanchor(&self) {
         let Some(anchor_i) = self.anchor_i.get() else {
@@ -350,7 +335,6 @@ impl<E: Entry> Infiniscroll_<E> {
         let first_el_top = 0.;
         let first_el_height = first_el.offset_height();
         let first_el_bottom = first_el_top + first_el_height;
-
         let hovering_late = candidate_late_real_origin_y >= last_el_top;
 
         // # Hovering late end, align to late end
@@ -460,7 +444,7 @@ pub struct Infinite<E: Entry>(Rc<Infiniscroll_<E>>);
 
 impl<E: Entry> Clone for Infinite<E> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        return Self(self.0.clone());
     }
 }
 
@@ -563,20 +547,15 @@ impl<E: 'static + Entry> Infinite<E> {
             return e;
         }
 
-        outer_stack.ref_extend(
-            vec![
-                set_el_col(scroll_outer.clone(), "1"),
-                set_el_col({
-                    let overlay =
-                        el("div").extend(vec![padding_pre.clone(), center_spinner.clone(), padding_post.clone()]);
-                    let s = el_style(&overlay);
-                    s.set_property("display", "flex").unwrap();
-                    s.set_property("flex-direction", "column").unwrap();
-                    s.set_property("justify-content", "space-between").unwrap();
-                    overlay
-                }, "1")
-            ],
-        );
+        outer_stack.ref_extend(vec![set_el_col(scroll_outer.clone(), "1"), set_el_col({
+            let overlay =
+                el("div").extend(vec![padding_pre.clone(), center_spinner.clone(), padding_post.clone()]);
+            let s = el_style(&overlay);
+            s.set_property("display", "flex").unwrap();
+            s.set_property("flex-direction", "column").unwrap();
+            s.set_property("justify-content", "space-between").unwrap();
+            overlay
+        }, "1")]);
         scroll_outer.ref_push(scroll_inner.clone());
         scroll_inner.ref_push(content_layout.clone());
         content_layout.ref_extend(
@@ -585,7 +564,7 @@ impl<E: 'static + Entry> Infinite<E> {
                 content_lines_early_sticky.clone(),
                 content_lines_real.el().clone(),
                 content_lines_late_sticky.clone(),
-                late_spinner.clone()
+                late_spinner.clone(),
             ],
         );
         let state = Infinite(Rc::new(Infiniscroll_ {
@@ -641,7 +620,17 @@ impl<E: 'static + Entry> Infinite<E> {
                     return;
                 }
                 state.0.logical_scroll_top.set(state.0.scroll_outer.raw().scroll_top() as f64);
-                state.0.scroll_reanchor();
+                if let Some(anchor_i) = state.0.anchor_i.get() {
+                    let real_origin_y =
+                        state.0.logical_scroll_top.get() +
+                            state.0.anchor_alignment.get().mix(0., state.0.cached_frame_height.get()) -
+                            state.0.logical_content_layout_offset.get() -
+                            state.0.cached_real_offset.get();
+                    state.0.reanchor_inner(anchor_i, real_origin_y);
+                } else {
+                    state.0.anchor_i.set(None);
+                    state.0.anchor_offset.set(0.);
+                }
                 state.0.transition_alignment_reanchor();
                 state.0.delay_shake.set(200);
                 state.shake();
@@ -1349,7 +1338,8 @@ impl<E: 'static + Entry> Infinite<E> {
                 'assert _;
                 let mut at = if feed_has_entries {
                     Some(initial_pivot.clone())
-                } else {
+                }
+                else {
                     None
                 };
                 for e in &entries {
@@ -1508,9 +1498,11 @@ impl<E: 'static + Entry> Infinite<E> {
             return None;
         }
         return Some(
-            get_pivot_late(&self.0.real.borrow(), &feed_id, f_state).unwrap_or_else(
-                || self.0.reset_time.borrow().clone(),
-            ),
+            get_pivot_late(
+                &self.0.real.borrow(),
+                &feed_id,
+                f_state,
+            ).unwrap_or_else(|| self.0.reset_time.borrow().clone()),
         );
     }
 }

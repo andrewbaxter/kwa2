@@ -16,7 +16,9 @@ use {
             i64_to_u64,
             latest_activity_map,
             local_channel_get,
+            message_history_rows,
             member_fetch_activity_range,
+            member_fetch_message_history,
             member_fetch_snap_lookup,
             member_fetch_snap_page,
             member_fetch_snap_page_containing_time,
@@ -84,7 +86,9 @@ use {
             GetJoinPreviewFile,
             GetResp,
             GetSnapPage,
+            MessageHistory,
             MessageIdByClientId,
+            MessageRevision,
             NotificationServerKey,
             OutboxEntry,
             OutboxList,
@@ -167,19 +171,17 @@ pub async fn handle(
             return Ok(json_response(&GetResp::Ok(&state.vapid_keys.public_b64url), CachePolicy::NoStore));
         },
         "file" => {
-            let req =
-                match GetFile::deserialize_path(remainder) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(response_400(e)),
-                };
-            let result =
-                match crate::subsystems::files::read_file(state, DbAccountId(account), &req.hash).await {
-                    Ok(v) => v,
-                    Err(e) => {
-                        state.log.log_err(loga::WARN, e.context("Error fetching file"));
-                        return Ok(response_503());
-                    },
-                };
+            let req = match GetFile::deserialize_path(remainder) {
+                Ok(r) => r,
+                Err(e) => return Ok(response_400(e)),
+            };
+            let result = match crate::subsystems::files::read_file(state, DbAccountId(account), &req.hash).await {
+                Ok(v) => v,
+                Err(e) => {
+                    state.log.log_err(loga::WARN, e.context("Error fetching file"));
+                    return Ok(response_503());
+                },
+            };
             let Some((mime, bytes)) = result else {
                 return Ok(response_404());
             };
@@ -195,19 +197,17 @@ pub async fn handle(
             );
         },
         "join_preview_file" => {
-            let req =
-                match GetJoinPreviewFile::deserialize_path(remainder) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(response_400(e)),
-                };
-            let (mime, bytes) =
-                match crate::subsystems::c2s::fetch_join_portrait(state, &req.url, req.hash).await {
-                    Ok(v) => v,
-                    Err(e) => {
-                        state.log.log_err(loga::DEBUG, e.context("Error fetching join preview file"));
-                        return Ok(response_404());
-                    },
-                };
+            let req = match GetJoinPreviewFile::deserialize_path(remainder) {
+                Ok(r) => r,
+                Err(e) => return Ok(response_400(e)),
+            };
+            let (mime, bytes) = match crate::subsystems::c2s::fetch_join_portrait(state, &req.url, req.hash).await {
+                Ok(v) => v,
+                Err(e) => {
+                    state.log.log_err(loga::DEBUG, e.context("Error fetching join preview file"));
+                    return Ok(response_404());
+                },
+            };
             return Ok(
                 Response::builder()
                     .status(200)
@@ -293,6 +293,15 @@ pub async fn handle(
                 ),
             );
         },
+        "message_history" => {
+            let req = match MessageHistory::deserialize_path(remainder) {
+                Ok(r) => r,
+                Err(e) => return Ok(response_400(e)),
+            };
+            return Ok(
+                json_or_err(state, "message_history", no_store(message_history(state, account, req.id).await)),
+            );
+        },
         "message_id_by_client_id" => {
             let req = match MessageIdByClientId::deserialize_path(remainder) {
                 Ok(r) => r,
@@ -323,6 +332,7 @@ pub const GET_PATH_PREFIXES: &[&str] =
         "snap_by_client_id",
         "snap_page_containing_time",
         "outbox",
+        "message_history",
         "message_id_by_client_id",
     ];
 
@@ -358,26 +368,6 @@ fn range_complete(count: usize, start: i64, page_size: usize, latest: Option<i64
     return count as i64 == latest - effective_start + 1;
 }
 
-fn activity_pos(offset: usize, page_size: usize) -> ActivityPageOffsetPos {
-    return ActivityPageOffsetPos {
-        page: ActivityPage(offset / page_size),
-        offset_pos: ActivityOffsetPos {
-            offset: ActivityOffset(offset),
-            pos: page_position(offset, page_size, None),
-        },
-    };
-}
-
-fn snap_pos(offset: usize, page_size: usize, floor: Option<usize>) -> SnapPageOffsetPos {
-    return SnapPageOffsetPos {
-        page: SnapPage(offset / page_size),
-        offset_pos: SnapOffsetPos {
-            offset: SnapOffset(offset),
-            pos: page_position(offset, page_size, floor),
-        },
-    };
-}
-
 fn floor_usize(floor: Option<i64>) -> Option<usize> {
     return floor.map(|f| i64_to_u64(f) as usize);
 }
@@ -411,27 +401,6 @@ pub async fn activity_latest_all(
     return Ok(rows.into_iter().map(|(k, v)| (k, ActivityOffset(v as usize))).collect());
 }
 
-fn build_activity_page(
-    rows: BTreeMap<i64, String>,
-    page_size: usize,
-) -> Result<Option<ActivityPageRes>, loga::Error> {
-    if rows.is_empty() {
-        return Ok(None);
-    }
-    let mut messages = Vec::with_capacity(rows.len());
-    for (seq, raw) in rows {
-        let offset = i64_to_u64(seq) as usize;
-        messages.push(ActivityPageMessage {
-            message: serde_json::from_str::<Message>(&raw).context("Stored message row has invalid raw JSON")?,
-            offset_pos: ActivityOffsetPos {
-                offset: ActivityOffset(offset),
-                pos: page_position(offset, page_size, None),
-            },
-        });
-    }
-    return Ok(Some(ActivityPageRes { messages: messages }));
-}
-
 pub async fn get_activity_page(
     state: &Arc<State>,
     account: AccountId,
@@ -458,7 +427,8 @@ pub async fn get_activity_page(
     let page_size = local.page_size;
     let start = u64_to_i64(page.0 as u64 * page_size as u64);
     let mut merged: BTreeMap<i64, String> = rows.into_iter().collect();
-    if !local.is_owner(ctx.channel.identity) && !range_complete(merged.len(), start, page_size, local.latest_seq, None) {
+    if !local.is_owner(ctx.channel.identity) &&
+        !range_complete(merged.len(), start, page_size, local.latest_seq, None) {
         let fetched =
             remote(
                 member_fetch_activity_range(
@@ -475,83 +445,28 @@ pub async fn get_activity_page(
         }
     }
     let full = merged.len() == page_size;
+    let value = flowcontrol::shed!{
+        'build _;
+        if merged.is_empty() {
+            break 'build None;
+        }
+        let mut messages = Vec::with_capacity(merged.len());
+        for (seq, raw) in merged {
+            let offset = i64_to_u64(seq) as usize;
+            messages.push(ActivityPageMessage {
+                message: serde_json::from_str::<Message>(&raw).context("Stored message row has invalid raw JSON")?,
+                offset_pos: ActivityOffsetPos {
+                    offset: ActivityOffset(offset),
+                    pos: page_position(offset, page_size, None),
+                },
+            });
+        }
+        break 'build Some(ActivityPageRes { messages: messages });
+    };
     return Ok(Cached {
-        value: build_activity_page(merged, page_size)?,
+        value: value,
         policy: CachePolicy::Immutable.only_if(local.public_read && full),
     });
-}
-
-fn build_snap_page(
-    channel: &QualifiedChannelId,
-    page_size: usize,
-    page: u64,
-    latest_seq: Option<i64>,
-    floor: Option<i64>,
-    originals: BTreeMap<i64, MsgRow>,
-    edits: Vec<MsgRow>,
-) -> Result<Option<SnapPageRes>, loga::Error> {
-    if originals.is_empty() && page > 0 {
-        return Ok(None);
-    }
-    let mut latest_edits: HashMap<(spaghettinuum::interface::identity::Identity, i64), MsgRow> = HashMap::new();
-    for e in edits {
-        let (Some(target_sender), Some(target_unique)) = (e.rel_target_sender, e.rel_target_unique) else {
-            return Err(loga::err("Edit row missing target columns"));
-        };
-        let key = (target_sender, target_unique);
-        let replace = latest_edits.get(&key).map(|existing| e.seq > existing.seq).unwrap_or(true);
-        if replace {
-            latest_edits.insert(key, e);
-        }
-    }
-    let mut messages = Vec::with_capacity(originals.len());
-    for (_, r) in originals {
-        let offset = i64_to_u64(r.snap_offset.context("Snap original without snap offset")?) as usize;
-        let origin_client_id = r.client_id.clone().map(MessageClientId);
-        let (final_body, final_client_id) = match latest_edits.get(&(r.sender, r.sender_unique)) {
-            Some(e) => (
-                e.body_text.clone(),
-                e.client_id.clone().map(MessageClientId).or_else(|| origin_client_id.clone()),
-            ),
-            None => (r.body_text.clone(), origin_client_id.clone()),
-        };
-        let rel = match (r.rel_type.as_deref(), r.rel_target_sender, r.rel_target_unique) {
-            (Some(REL_REPLY_TO), Some(target_sender), Some(target_unique)) => MessageRel::ReplyTo(MessageId {
-                identity: target_sender,
-                unique: i64_to_u64(target_unique),
-            }),
-            (None, _, _) => MessageRel::None,
-            (Some(REL_EDIT_OF), _, _) => return Err(loga::err("Edit row stored with a snap offset")),
-            _ => return Err(loga::err("Snap row has inconsistent relation columns")),
-        };
-        let id = MessageId {
-            identity: r.sender,
-            unique: i64_to_u64(r.sender_unique),
-        };
-        messages.push(SnapMessage {
-            offset_pos: SnapOffsetPos {
-                offset: SnapOffset(offset),
-                pos: page_position(offset, page_size, floor_usize(floor)),
-            },
-            original_id: QualifiedMessageId {
-                channel: channel.clone(),
-                message: id.clone(),
-            },
-            original_receive_time: r.receive_time,
-            client_id: final_client_id,
-            message: MessageBody {
-                channel: channel.clone(),
-                client_id: origin_client_id,
-                id: id,
-                rel: rel,
-                body: final_body,
-            },
-        });
-    }
-    return Ok(Some(SnapPageRes {
-        latest_activity: latest_seq.map(|s| activity_pos(i64_to_u64(s) as usize, page_size)),
-        messages: messages,
-    }));
 }
 
 pub async fn get_snap_page(
@@ -575,7 +490,8 @@ pub async fn get_snap_page(
             } else {
                 local.floor_snap_offset
             };
-            let (originals, edits) = snap_page_rows(db_tx, account, db_owner, &db_channel_id, local.page_size, page)?;
+            let (originals, edits) =
+                snap_page_rows(db_tx, account, db_owner, &db_channel_id, local.page_size, page)?;
             return Ok(Some((local, floor, originals, edits)));
         }
     }).await.context("Error querying snap page")? else {
@@ -609,8 +525,85 @@ pub async fn get_snap_page(
             floor = info.earliest_snap_offset.map(u64_to_i64);
         }
     }
+    let value = flowcontrol::shed!{
+        'build _;
+        if originals.is_empty() && page > 0 {
+            break 'build None;
+        }
+        let mut latest_edits: HashMap <(spaghettinuum::interface::identity::Identity, i64),
+        MsgRow > = HashMap:: new();
+        for e in edits {
+            let (Some(target_sender), Some(target_unique)) = (e.rel_target_sender, e.rel_target_unique) else {
+                return Err(GetErr::Local(loga::err("Edit row missing target columns")));
+            };
+            let key = (target_sender, target_unique);
+            let replace = latest_edits.get(&key).map(|existing| e.seq > existing.seq).unwrap_or(true);
+            if replace {
+                latest_edits.insert(key, e);
+            }
+        }
+        let mut messages = Vec::with_capacity(originals.len());
+        for (_, r) in originals {
+            let offset = i64_to_u64(r.snap_offset.context("Snap original without snap offset")?) as usize;
+            let origin_client_id = r.client_id.clone().map(MessageClientId);
+            let (final_body, final_client_id) = match latest_edits.get(&(r.sender, r.sender_unique)) {
+                Some(e) => (
+                    e.body_text.clone(),
+                    e.client_id.clone().map(MessageClientId).or_else(|| origin_client_id.clone()),
+                ),
+                None => (r.body_text.clone(), origin_client_id.clone()),
+            };
+            let rel = match (r.rel_type.as_deref(), r.rel_target_sender, r.rel_target_unique) {
+                (Some(REL_REPLY_TO), Some(target_sender), Some(target_unique)) => MessageRel::ReplyTo(MessageId {
+                    identity: target_sender,
+                    unique: i64_to_u64(target_unique),
+                }),
+                (None, _, _) => MessageRel::None,
+                (Some(REL_EDIT_OF), _, _) => return Err(
+                    GetErr::Local(loga::err("Edit row stored with a snap offset"))
+                ),
+                _ => return Err(GetErr::Local(loga::err("Snap row has inconsistent relation columns"))),
+            };
+            let id = MessageId {
+                identity: r.sender,
+                unique: i64_to_u64(r.sender_unique),
+            };
+            messages.push(SnapMessage {
+                offset_pos: SnapOffsetPos {
+                    offset: SnapOffset(offset),
+                    pos: page_position(offset, page_size, floor_usize(floor)),
+                },
+                original_id: QualifiedMessageId {
+                    channel: ctx.channel.clone(),
+                    message: id.clone(),
+                },
+                original_receive_time: r.receive_time,
+                client_id: final_client_id,
+                message: MessageBody {
+                    channel: ctx.channel.clone(),
+                    client_id: origin_client_id,
+                    id: id,
+                    rel: rel,
+                    body: final_body,
+                },
+            });
+        }
+        break 'build Some(SnapPageRes {
+            latest_activity: latest_seq.map(|s| {
+                let offset = i64_to_u64(s) as usize;
+                return ActivityPageOffsetPos {
+                    page: ActivityPage(offset / page_size),
+                    offset_pos: ActivityOffsetPos {
+                        offset: ActivityOffset(offset),
+                        pos: page_position(offset, page_size, None),
+                    },
+                };
+            }),
+            messages: messages,
+        });
+    };
     return Ok(Cached {
-        value: build_snap_page(&ctx.channel, page_size, page, latest_seq, floor, originals, edits)?,
+        value: value,
         policy: CachePolicy::MaxAge(SNAP_PAGE_MAX_AGE_SECS).only_if(local.public_read),
     });
 }
@@ -618,17 +611,14 @@ pub async fn get_snap_page(
 fn snap_by_res(pos: SnapPosition, page_size: usize, floor: Option<i64>) -> SnapByRes {
     return SnapByRes {
         original_receive_time: pos.receive_time,
-        offset: snap_pos(i64_to_u64(pos.snap_offset) as usize, page_size, floor_usize(floor)),
+        offset: SnapPageOffsetPos {
+            page: SnapPage(i64_to_u64(pos.snap_offset) as usize / page_size),
+            offset_pos: SnapOffsetPos {
+                offset: SnapOffset(i64_to_u64(pos.snap_offset) as usize),
+                pos: page_position(i64_to_u64(pos.snap_offset) as usize, page_size, floor_usize(floor)),
+            },
+        },
     };
-}
-
-async fn local_channel(state: &Arc<State>, ctx: &ChannelCtx) -> Result<Option<LocalChannel>, loga::Error> {
-    let account = ctx.account;
-    let db_owner = ctx.db_owner;
-    let db_channel_id = ctx.db_channel_id.clone();
-    return tx(&state.db, move |db_tx| {
-        return local_channel_get(db_tx, account, db_owner, &db_channel_id);
-    }).await.context("Error loading channel");
 }
 
 fn channel_floor(
@@ -678,7 +668,9 @@ pub async fn snap_by_qualified_id(
         return Ok(Cached::no_store(None));
     }
     let Some(found) =
-        remote(member_fetch_snap_lookup(state, account, &ctx.channel, &local, SnapLookupBy::Id(message)).await)? else {
+        remote(
+            member_fetch_snap_lookup(state, account, &ctx.channel, &local, SnapLookupBy::Id(message)).await,
+        )? else {
             return Ok(Cached::no_store(None));
         };
     return Ok(Cached {
@@ -770,24 +762,22 @@ pub async fn message_id_by_client_id(
                 return Ok(None);
             };
             let db_sender = DbIdentity(local.local_identity);
-            let outbox =
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select sender_unique from outbox where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_sender} and client_id = ${string = client_id.as_str()}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
+            let outbox = good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select sender_unique from outbox where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_sender} and client_id = ${string = client_id.as_str()}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
             if let Some(unique) = outbox {
                 return Ok(Some((local.clone(), Some(MessageId {
                     identity: local.local_identity,
                     unique: i64_to_u64(unique),
                 }))));
             }
-            let stored =
-                good_ormning::sqlite::good_query_opt!(
-                    db,
-                    r#"select sender_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_sender} and client_id = ${string = client_id.as_str()}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
+            let stored = good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select sender_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_sender} and client_id = ${string = client_id.as_str()}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
             return Ok(Some((local.clone(), stored.map(|unique| MessageId {
                 identity: local.local_identity,
                 unique: i64_to_u64(unique),
@@ -815,6 +805,77 @@ pub async fn message_id_by_client_id(
     return Ok(found.map(|f| f.original_id));
 }
 
+fn build_message_history(id: &MessageId, rows: Vec<MsgRow>) -> Option<Vec<MessageRevision>> {
+    let sender_unique = u64_to_i64(id.unique);
+    let mut original = None;
+    let mut edits = vec![];
+    for r in rows {
+        if r.sender != id.identity {
+            continue;
+        }
+        match r.rel_type.as_deref() {
+            Some(REL_EDIT_OF) => {
+                if r.rel_target_sender == Some(id.identity) && r.rel_target_unique == Some(sender_unique) {
+                    edits.push(r);
+                }
+            },
+            _ => {
+                if r.sender_unique == sender_unique && r.snap_offset.is_some() {
+                    original = Some(r);
+                }
+            },
+        }
+    }
+    let original = original?;
+    edits.sort_by_key(|r| r.seq);
+    let mut out = Vec::with_capacity(edits.len() + 1);
+    for r in [original].into_iter().chain(edits) {
+        out.push(MessageRevision {
+            receive_time: r.receive_time,
+            body: r.body_text,
+        });
+    }
+    return Some(out);
+}
+
+pub async fn message_history(
+    state: &Arc<State>,
+    account: AccountId,
+    id: QualifiedMessageId,
+) -> Result<Option<Vec<MessageRevision>>, GetErr> {
+    let ctx = ChannelCtx::new(account, id.channel.clone());
+    let message = id.message;
+    let Some((local, rows)) = tx(&state.db, {
+        let account = ctx.account;
+        let db_owner = ctx.db_owner;
+        let db_channel_id = ctx.db_channel_id.clone();
+        let message = message.clone();
+        move |db_tx| {
+            let Some(local) = local_channel_get(db_tx, account, db_owner, &db_channel_id)? else {
+                return Ok(None);
+            };
+            if !local.is_owner(db_owner.0) {
+                return Ok(Some((local, None)));
+            }
+            let rows = message_history_rows(db_tx, account, db_owner, &db_channel_id, &message)?;
+            return Ok(Some((local, rows)));
+        }
+    }).await.context("Error querying message history")? else {
+        return Ok(None);
+    };
+    if local.is_owner(ctx.channel.identity) {
+        let Some(rows) = rows else {
+            return Ok(None);
+        };
+        return Ok(build_message_history(&message, rows));
+    }
+    let Some(fetched) =
+        remote(member_fetch_message_history(state, account, &ctx.channel, &local, &message).await)? else {
+            return Ok(None);
+        };
+    return Ok(build_message_history(&message, fetched.iter().map(MsgRow::from_verified).collect()));
+}
+
 pub async fn outbox_list(
     state: &Arc<State>,
     account: AccountId,
@@ -826,20 +887,20 @@ pub async fn outbox_list(
         let db_owner = ctx.db_owner;
         let db_channel_id = ctx.db_channel_id.clone();
         move |db_tx| {
-            return Ok(
-                good_ormning::sqlite::good_query_many!(
-                    db,
-                    r#"select sender, client_id, created, raw from outbox where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} order by sender_unique"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?,
-            );
+            return Ok(good_ormning::sqlite::good_query_many!(
+                db,
+                r#"select sender, client_id, created, raw from outbox where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} order by sender_unique"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?);
         }
     }).await.context("Error listing outbox")?;
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
         let message = serde_json::from_str::<Message>(&r.raw).context("Stored outbox message was not valid JSON")?;
         let body =
-            serde_json::from_str::<MessageBody>(&message.0.message).context("Stored outbox body was not valid JSON")?;
+            serde_json::from_str::<MessageBody>(
+                &message.0.message,
+            ).context("Stored outbox body was not valid JSON")?;
         out.push(OutboxEntry {
             sender: r.sender.0,
             client_id: MessageClientId(r.client_id),
@@ -859,7 +920,14 @@ pub async fn snap_page_containing_time(
     time: jiff::Timestamp,
 ) -> Result<Option<SnapPage>, GetErr> {
     let ctx = ChannelCtx::new(account, channel);
-    let Some(local) = local_channel(state, &ctx).await? else {
+    let Some(local) = tx(&state.db, {
+        let account = ctx.account;
+        let db_owner = ctx.db_owner;
+        let db_channel_id = ctx.db_channel_id.clone();
+        move |db_tx| {
+            return local_channel_get(db_tx, account, db_owner, &db_channel_id);
+        }
+    }).await.context("Error loading channel")? else {
         return Ok(None);
     };
     let page_size = local.page_size;
@@ -880,7 +948,8 @@ pub async fn snap_page_containing_time(
         }
     }
     return Ok(
-        remote(member_fetch_snap_page_containing_time(state, account, &ctx.channel, &local, time).await)?
-            .map(|p| SnapPage(p as usize)),
+        remote(
+            member_fetch_snap_page_containing_time(state, account, &ctx.channel, &local, time).await,
+        )?.map(|p| SnapPage(p as usize)),
     );
 }

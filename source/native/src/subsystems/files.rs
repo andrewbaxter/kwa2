@@ -70,12 +70,11 @@ pub fn file_ref(
     let Some(hash) = hash else {
         return Ok(None);
     };
-    let row =
-        good_ormning::sqlite::good_query_opt!(
-            db,
-            r#"select mime_type from file where account_id = ${account_id_t = &account} and hash = ${string = hash.as_str()}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
+    let row = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select mime_type from file where account_id = ${account_id_t = &account} and hash = ${string = hash.as_str()}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?;
     return Ok(row.map(|mime_type| FileRef {
         hash: FileHash(hash),
         mime_type: mime_type,

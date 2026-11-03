@@ -3,11 +3,10 @@ use {
         api::identity_image,
         chat::{
             ChatMode,
+            ChatModeEditMessage,
             ChatModeReplyMessage,
             ChatModeReplyMessageTarget,
             ChatModeReplyMessageTargetOutbox,
-            ChatState,
-            ClientIdKey,
         },
         chat_entry::{
             ChatEntryMessage,
@@ -16,7 +15,14 @@ use {
         js::style_export,
         localdata,
         state::{
+            CurrentChatSource,
+            Ministate,
+            MinistateChannel,
+            MinistateChannelGroup,
+            MinistateChannelGroupResetId,
+            MinistateMessageHistory,
             identity_portrait,
+            ministate_octothorpe,
             state,
         },
     },
@@ -24,62 +30,10 @@ use {
         ProcessingContext,
         link,
     },
+    flowcontrol::shed,
     rooting::El,
-    shared::interface::shared::QualifiedMessageId,
     std::rc::Rc,
 };
-
-fn is_selected(mode: &ChatMode, message_id: &Option<QualifiedMessageId>, client_key: &Option<ClientIdKey>) -> bool {
-    let ChatMode::ReplyMessage(mode) = mode else {
-        return false;
-    };
-    match &mode.target {
-        ChatModeReplyMessageTarget::Channel(target) => {
-            return message_id.as_ref() == Some(target);
-        },
-        ChatModeReplyMessageTarget::Outbox(target) => {
-            let Some((channel, identity, client_id)) = client_key else {
-                return false;
-            };
-            return *channel == target.channel && *identity == mode.own_identity && *client_id == target.message;
-        },
-    }
-}
-
-fn reply_mode(
-    chat_state: &ChatState,
-    message_id: &Option<QualifiedMessageId>,
-    client_key: &Option<ClientIdKey>,
-) -> Option<ChatMode> {
-    match message_id {
-        Some(message_id) => {
-            let Some(own_identity) =
-                chat_state
-                    .channels_meta
-                    .borrow()
-                    .iter()
-                    .find(|c| c.2 == message_id.channel)
-                    .map(|c| c.1.clone()) else {
-                    state().log.log(&format!("No local identity for channel [{:?}] of message", message_id.channel));
-                    return None;
-                };
-            return Some(ChatMode::ReplyMessage(ChatModeReplyMessage {
-                target: ChatModeReplyMessageTarget::Channel(message_id.clone()),
-                own_identity: own_identity,
-            }));
-        },
-        None => {
-            let (channel, identity, client_id) = client_key.as_ref().unwrap();
-            return Some(ChatMode::ReplyMessage(ChatModeReplyMessage {
-                target: ChatModeReplyMessageTarget::Outbox(ChatModeReplyMessageTargetOutbox {
-                    channel: channel.clone(),
-                    message: client_id.clone(),
-                }),
-                own_identity: identity.clone(),
-            }));
-        },
-    }
-}
 
 pub fn build_chat_entry_message(pc: &mut ProcessingContext, m: &ChatEntryMessage) -> El {
     let out = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
@@ -139,6 +93,72 @@ pub fn build_chat_entry_message(pc: &mut ProcessingContext, m: &ChatEntryMessage
                                     }
                                 ),
                             );
+                        shed!{
+                            let Some(message_id) = message_id else {
+                                break;
+                            };
+                            let Some(own_identity) =
+                                chat_state
+                                    .channels_meta
+                                    .borrow()
+                                    .iter()
+                                    .find(|c| c.2 == message_id.channel)
+                                    .map(|c| c.1.clone()) else {
+                                    break;
+                                };
+                            if own_identity == *sender {
+                                m_el
+                                    .actions
+                                    .ref_push(style_export::leaf_chat_entry_message_button_edit().root.on("click", {
+                                        let eg = pc.eg();
+                                        let chat_state = Rc::downgrade(chat_state);
+                                        let message_id = message_id.clone();
+                                        let own_identity = own_identity.clone();
+                                        let body = m.body.clone();
+                                        move |ev| {
+                                            ev.stop_propagation();
+                                            let Some(chat_state) = chat_state.upgrade() else {
+                                                return;
+                                            };
+                                            eg.event(|pc| {
+                                                chat_state.mode.set(pc, ChatMode::EditMessage(ChatModeEditMessage {
+                                                    target: message_id.clone(),
+                                                    own_identity: own_identity.clone(),
+                                                    body: body.borrow().clone(),
+                                                }));
+                                            }).unwrap();
+                                        }
+                                    }));
+                            }
+                            let back = match &chat_state.source {
+                                CurrentChatSource::Channel(id) => Ministate::Channel(MinistateChannel {
+                                    id: id.clone(),
+                                    own_identity: own_identity.clone(),
+                                    reset_id: Some(message_id.clone()),
+                                }),
+                                CurrentChatSource::Group(id) => Ministate::ChannelGroup(MinistateChannelGroup {
+                                    id: id.clone(),
+                                    reset_id: Some(MinistateChannelGroupResetId {
+                                        own_identity: own_identity.clone(),
+                                        message: message_id.clone(),
+                                    }),
+                                }),
+                            };
+                            m_el
+                                .actions
+                                .ref_push(
+                                    style_export::leaf_chat_entry_message_button_history(
+                                        style_export::LeafChatEntryMessageButtonHistoryArgs {
+                                            link: ministate_octothorpe(
+                                                &Ministate::MessageHistory(MinistateMessageHistory {
+                                                    id: message_id.clone(),
+                                                    back: Box::new(back),
+                                                })
+                                            ),
+                                        },
+                                    ).root,
+                                );
+                        }
                         m_el
                             .root
                             .ref_own(|_| link!((_pc = pc), (body = m.body.clone()), (), (body_el = m_el.body.clone()) {
@@ -151,15 +171,32 @@ pub fn build_chat_entry_message(pc: &mut ProcessingContext, m: &ChatEntryMessage
                                     (_pc = pc),
                                     (mode = chat_state.mode.clone()),
                                     (),
-                                    (el_ = el_.weak(), message_id = message_id.clone(), client_key = client_key.clone()) {
+                                    (
+                                        el_ = el_.weak(),
+                                        message_id = message_id.clone(),
+                                        client_key = client_key.clone()
+                                    ) {
                                         let el_ = el_.upgrade()?;
+                                        let selected = shed!{
+                                            let Some(mode) = mode.borrow().focus() else {
+                                                break false;
+                                            };
+                                            match &mode.target {
+                                                ChatModeReplyMessageTarget::Channel(target) => {
+                                                    break message_id.as_ref() == Some(target);
+                                                },
+                                                ChatModeReplyMessageTarget::Outbox(target) => {
+                                                    let Some((channel, identity, client_id)) = client_key else {
+                                                        break false;
+                                                    };
+                                                    break *channel == target.channel &&
+                                                        *identity == mode.own_identity &&
+                                                        *client_id == target.message;
+                                                },
+                                            }
+                                        };
                                         el_.ref_modify_classes(
-                                            &[
-                                                (
-                                                    &style_export::class_state_selected().value,
-                                                    is_selected(&*mode.borrow(), message_id, client_key),
-                                                ),
-                                            ],
+                                            &[(&style_export::class_state_selected().value, selected)],
                                         );
                                     }
                                 ),
@@ -173,8 +210,44 @@ pub fn build_chat_entry_message(pc: &mut ProcessingContext, m: &ChatEntryMessage
                                 let Some(chat_state) = chat_state.upgrade() else {
                                     return;
                                 };
-                                let Some(new_mode) = reply_mode(&chat_state, &message_id, &client_key) else {
-                                    return;
+                                let new_mode = shed!{
+                                    match &message_id {
+                                        Some(message_id) => {
+                                            let Some(own_identity) =
+                                                chat_state
+                                                    .channels_meta
+                                                    .borrow()
+                                                    .iter()
+                                                    .find(|c| c.2 == message_id.channel)
+                                                    .map(|c| c.1.clone()) else {
+                                                    state()
+                                                        .log
+                                                        .log(
+                                                            &format!(
+                                                                "No local identity for channel [{:?}] of message",
+                                                                message_id.channel
+                                                            ),
+                                                        );
+                                                    return;
+                                                };
+                                            break ChatMode::ReplyMessage(ChatModeReplyMessage {
+                                                target: ChatModeReplyMessageTarget::Channel(message_id.clone()),
+                                                own_identity: own_identity,
+                                            });
+                                        },
+                                        None => {
+                                            let (channel, identity, client_id) = client_key.as_ref().unwrap();
+                                            break ChatMode::ReplyMessage(ChatModeReplyMessage {
+                                                target: ChatModeReplyMessageTarget::Outbox(
+                                                    ChatModeReplyMessageTargetOutbox {
+                                                        channel: channel.clone(),
+                                                        message: client_id.clone(),
+                                                    },
+                                                ),
+                                                own_identity: identity.clone(),
+                                            });
+                                        },
+                                    }
                                 };
                                 eg.event(|pc| {
                                     chat_state.mode.set(pc, new_mode);

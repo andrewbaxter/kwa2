@@ -1,0 +1,27 @@
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust_ai_lint:
+    runs-on: ubuntu-latest
+    env:
+      NIX_PATH: nixpkgs=https://github.com/NixOS/nixpkgs/archive/f3a73bcf5d1c5b75a66cf35a48957e30d41d647a.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: cachix/install-nix-action@v31
+      - name: Build rust-ai-lint
+        run: nix-build https://github.com/andrewbaxter/rust-ai-lint/archive/ce967ffd85f681434b58a4b07d4beb7324dce161.tar.gz -o "$RUNNER_TEMP/rust-ai-lint"
+      - name: Lint
+        env:
+          AGAINST: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -eu
+          if [ "$AGAINST" = 0000000000000000000000000000000000000000 ] || ! git cat-file -e "$AGAINST^{commit}"; then
+            AGAINST=1de15d0fa515fae568fd251763ba8ea3982479ed
+          fi
+          nix-shell -p openssl pkg-config --run "$RUNNER_TEMP/rust-ai-lint/bin/rust-ai-lint --against $AGAINST"
+          git diff --exit-code

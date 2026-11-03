@@ -84,9 +84,6 @@ use {
 };
 
 pub const COOKIE_SESSION: &str = "kwa_session";
-const PRE_SESSION_CAPACITY: u64 = 10_000;
-const SESSION_IDLE_TIMEOUT: jiff::SignedDuration = jiff::SignedDuration::from_hours(24 * 7);
-const SESSION_TOUCH_INTERVAL: jiff::SignedDuration = jiff::SignedDuration::from_hours(1);
 
 async fn oidc_http_client(
     log: &loga::Log,
@@ -113,7 +110,14 @@ struct OidcPreSession {
 pub struct OidcState {
     log: loga::Log,
     public_url: Uri,
-    client: CoreClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointMaybeSet, EndpointMaybeSet>,
+    client: CoreClient<
+        EndpointSet,
+        EndpointNotSet,
+        EndpointNotSet,
+        EndpointNotSet,
+        EndpointMaybeSet,
+        EndpointMaybeSet,
+    >,
     pre_sessions: Cache<String, Arc<OidcPreSession>>,
 }
 
@@ -136,18 +140,11 @@ pub async fn new_state(log: &Log, public_url: &str, oidc_config: OidcConfig) -> 
         log: log,
         public_url: public_url,
         client: client,
-        pre_sessions: Cache::builder()
-            .max_capacity(PRE_SESSION_CAPACITY)
-            .time_to_live(Duration::from_secs(60 * 10))
-            .build(),
+        pre_sessions: Cache::builder().max_capacity(10_000).time_to_live(Duration::from_secs(60 * 10)).build(),
     });
 }
 
-pub async fn handle_oidc(
-    state: &OidcState,
-    db: &Pool,
-    head: Parts,
-) -> Result<Response<Body>, VisErr<loga::Error>> {
+pub async fn handle_oidc(state: &OidcState, db: &Pool, head: Parts) -> Result<Response<Body>, VisErr<loga::Error>> {
     let log = state.log.clone();
 
     #[derive(Deserialize)]
@@ -205,9 +202,17 @@ pub async fn handle_oidc(
             }
         }
         let session_cookie = Alphanumeric.sample_string(&mut rand::rng(), 32);
-        session_create(db, session_cookie.clone(), AccountExternalId(claims.subject().to_string()))
-            .await
-            .err_internal()?;
+        let now = jiff::Timestamp::now();
+        let session = session_cookie.clone();
+        let external_id = AccountExternalId(claims.subject().to_string());
+        tx(db, move |db_tx| {
+            good_ormning::sqlite::good_query!(
+                db,
+                r#"insert into session (id, external_id, last_used) values (${string = session.as_str()}, ${string = external_id.0.as_str()}, ${time_ms_t = &crate::interface::db::DbTimeMs(now)})"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
+            return Ok(());
+        }).await.context("Error storing session").err_internal()?;
         return Ok(
             http::Response::builder()
                 .status(http::StatusCode::TEMPORARY_REDIRECT)
@@ -226,7 +231,6 @@ pub async fn handle_oidc(
                 .unwrap(),
         );
     }
-
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
     let (auth_url, csrf_token, nonce) =
         state
@@ -266,32 +270,20 @@ pub fn get_req_session<'a>(log: &Log, headers: &HeaderMap) -> Option<String> {
     return None;
 }
 
-async fn session_create(db: &Pool, session: String, external_id: AccountExternalId) -> Result<(), loga::Error> {
-    let now = jiff::Timestamp::now();
-    tx(db, move |db_tx| {
-        good_ormning::sqlite::good_query!(
-            db,
-            r#"insert into session (id, external_id, last_used) values (${string = session.as_str()}, ${string = external_id.0.as_str()}, ${time_ms_t = &crate::interface::db::DbTimeMs(now)})"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
-        return Ok(());
-    }).await.context("Error storing session")?;
-    return Ok(());
-}
-
 pub async fn session_lookup(db: &Pool, session: String) -> Result<Option<AccountExternalId>, loga::Error> {
     let now = jiff::Timestamp::now();
-    let idle_cutoff = now.checked_sub(SESSION_IDLE_TIMEOUT).context("Session idle cutoff out of range")?;
-    let touch_cutoff = now.checked_sub(SESSION_TOUCH_INTERVAL).context("Session touch cutoff out of range")?;
+    let idle_cutoff =
+        now.checked_sub(jiff::SignedDuration::from_hours(24 * 7)).context("Session idle cutoff out of range")?;
+    let touch_cutoff =
+        now.checked_sub(jiff::SignedDuration::from_hours(1)).context("Session touch cutoff out of range")?;
     return Ok(tx(db, move |db_tx| {
-        let Some(row) =
-            good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select external_id, last_used from session where id = ${string = session.as_str()}"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))? else {
-                return Ok(None);
-            };
+        let Some(row) = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select external_id, last_used from session where id = ${string = session.as_str()}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))? else {
+            return Ok(None);
+        };
         if row.last_used.0 < idle_cutoff {
             good_ormning::sqlite::good_query!(
                 db,

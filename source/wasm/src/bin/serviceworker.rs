@@ -1,5 +1,8 @@
 use {
-    flowcontrol::ta_return,
+    flowcontrol::{
+        shed,
+        ta_return,
+    },
     futures::channel::oneshot,
     gloo::{
         timers::future::TimeoutFuture,
@@ -46,10 +49,7 @@ use {
 };
 
 const CACHE: &str = "cache1";
-const VERSIONED_PREFIX: &str = "v/";
 const ETAG: &str = "ETag";
-const CACHE_CONTROL: &str = "Cache-Control";
-const RELOAD_DEBOUNCE_MS: u32 = 1000;
 
 #[derive(Default)]
 struct ClientRequests {
@@ -58,7 +58,7 @@ struct ClientRequests {
     generation: usize,
 }
 
-thread_local! {
+thread_local!{
     static CLIENT_REQUESTS: RefCell<HashMap<String, ClientRequests>> = RefCell::new(HashMap::new());
 }
 
@@ -93,26 +93,10 @@ fn post_message(client: &Client, message: &FromSw) -> Result<(), String> {
 fn is_immutable(resp: &web_sys::Response) -> bool {
     return resp
         .headers()
-        .get(CACHE_CONTROL)
+        .get("Cache-Control")
         .expect("Error checking for cache control header")
         .map(|directive| directive.contains("immutable"))
         .unwrap_or(false);
-}
-
-async fn evict_other_versions(cache: &Cache, base_url: &str, url: &str) -> Result<(), JsValue> {
-    let versioned_base = format!("{}{}", base_url, VERSIONED_PREFIX);
-    let Some(rest) = url.strip_prefix(&versioned_base) else {
-        return Ok(());
-    };
-    let keep = format!("{}{}/", versioned_base, rest.split('/').next().unwrap());
-    for key in Array::from(&JsFuture::from(cache.keys()).await?) {
-        let key = key.dyn_into::<web_sys::Request>()?;
-        let key_url = key.url();
-        if key_url.starts_with(&versioned_base) && !key_url.starts_with(&keep) {
-            JsFuture::from(cache.delete_with_request(&key)).await?;
-        }
-    }
-    return Ok(());
 }
 
 fn sw_global() -> ServiceWorkerGlobalScope {
@@ -145,82 +129,85 @@ pub fn handle_activate() -> Promise {
         JsFuture::from(clients.claim()).await?;
         for client in stale_clients {
             if let Err(e) = post_reload(&Client::from(client), format!("Service worker updated")) {
-                console::log_1(&JsValue::from(format!("Error reloading client after service worker update: {}", e)));
+                console::log_1(
+                    &JsValue::from(format!("Error reloading client after service worker update: {}", e)),
+                );
             }
         }
         return Ok(JsValue::null());
     });
 }
 
-fn track_client_request(self_: &ServiceWorkerGlobalScope, ev: &FetchEvent) -> Option<oneshot::Sender<String>> {
-    let client_id = match ev.client_id().filter(|c| !c.is_empty()) {
-        Some(c) => c,
-        None => Some(ev.unchecked_ref::<NavigationFetchEvent>().resulting_client_id()).filter(|c| !c.is_empty())?,
-    };
-    CLIENT_REQUESTS.with_borrow_mut(|clients| {
-        let client = clients.entry(client_id.clone()).or_default();
-        client.pending += 1;
-        client.generation += 1;
-    });
-    let (stale_tx, stale_rx) = oneshot::channel::<String>();
-    let self_ = self_.clone();
-    ev.wait_until(&future_to_promise(async move {
-        let stale = stale_rx.await.ok();
-        finish_client_request(self_, client_id, stale).await;
-        return Ok(JsValue::UNDEFINED);
-    })).expect("Fetch event no longer active while handling fetch");
-    return Some(stale_tx);
-}
-
-async fn finish_client_request(self_: ServiceWorkerGlobalScope, client_id: String, stale: Option<String>) {
-    let Some(generation) = CLIENT_REQUESTS.with_borrow_mut(|clients| {
-        let client = clients.get_mut(&client_id).unwrap();
-        client.pending -= 1;
-        client.stale.extend(stale);
-        if client.pending > 0 {
-            return None;
-        }
-        if client.stale.is_empty() {
-            clients.remove(&client_id);
-            return None;
-        }
-        return Some(client.generation);
-    }) else {
-        return;
-    };
-    TimeoutFuture::new(RELOAD_DEBOUNCE_MS).await;
-    let Some(stale) = CLIENT_REQUESTS.with_borrow_mut(|clients| {
-        if clients.get(&client_id).unwrap().generation != generation {
-            return None;
-        }
-        return Some(clients.remove(&client_id).unwrap().stale);
-    }) else {
-        return;
-    };
-    match async {
-        ta_return!((), String);
-        let Ok(client) =
-            JsFuture::from(self_.clients().get(&client_id))
-                .await
-                .map_err(|e| format!("Error looking up client {}: {:?}", client_id, e.as_string()))?
-                .dyn_into::<Client>() else {
-                return Ok(());
-            };
-        post_reload(&client, format!("Cached responses were stale: {}", stale.join(", ")))?;
-        return Ok(());
-    }.await {
-        Ok(_) => { },
-        Err(e) => {
-            console::log_1(&JsValue::from(format!("Error triggering client reload due to stale cached responses: {}", e)));
-        },
-    }
-}
-
 #[wasm_bindgen]
 pub fn handle_fetch(ev: FetchEvent) -> Promise {
     let self_ = sw_global();
     let base_url = format!("{}/", self_.location().origin());
-    let stale_tx = track_client_request(&self_, &ev);
+    let stale_tx = shed!{
+        let client_id = match ev.client_id().filter(|c| !c.is_empty()) {
+            Some(c) => c,
+            None => match Some(
+                ev.unchecked_ref::<NavigationFetchEvent>().resulting_client_id()
+            ).filter(|c| !c.is_empty(),) {
+                Some(c) => c,
+                None => break None,
+            },
+        };
+        CLIENT_REQUESTS.with_borrow_mut(|clients| {
+            let client = clients.entry(client_id.clone()).or_default();
+            client.pending += 1;
+            client.generation += 1;
+        });
+        let (stale_tx, stale_rx) = oneshot::channel::<String>();
+        let self_ = self_.clone();
+        ev.wait_until(&future_to_promise(async move {
+            let stale = stale_rx.await.ok();
+            let Some(generation) = CLIENT_REQUESTS.with_borrow_mut(|clients| {
+                let client = clients.get_mut(&client_id).unwrap();
+                client.pending -= 1;
+                client.stale.extend(stale);
+                if client.pending > 0 {
+                    return None;
+                }
+                if client.stale.is_empty() {
+                    clients.remove(&client_id);
+                    return None;
+                }
+                return Some(client.generation);
+            }) else {
+                return Ok(JsValue::UNDEFINED);
+            };
+            TimeoutFuture::new(1000).await;
+            let Some(stale) = CLIENT_REQUESTS.with_borrow_mut(|clients| {
+                if clients.get(&client_id).unwrap().generation != generation {
+                    return None;
+                }
+                return Some(clients.remove(&client_id).unwrap().stale);
+            }) else {
+                return Ok(JsValue::UNDEFINED);
+            };
+            match async {
+                ta_return!((), String);
+                let Ok(client) =
+                    JsFuture::from(self_.clients().get(&client_id))
+                        .await
+                        .map_err(|e| format!("Error looking up client {}: {:?}", client_id, e.as_string()))?
+                        .dyn_into::<Client>() else {
+                        return Ok(());
+                    };
+                post_reload(&client, format!("Cached responses were stale: {}", stale.join(", ")))?;
+                return Ok(());
+            }.await {
+                Ok(_) => { },
+                Err(e) => {
+                    console::log_1(
+                        &JsValue::from(format!("Error triggering client reload due to stale cached responses: {}", e)),
+                    );
+                },
+            }
+            return Ok(JsValue::UNDEFINED);
+        })).expect("Fetch event no longer active while handling fetch");
+        break Some(stale_tx);
+    };
     let req = ev.request();
     return future_to_promise(async move {
         let url = req.url();
@@ -238,7 +225,8 @@ pub fn handle_fetch(ev: FetchEvent) -> Promise {
             let cache = cache_store.clone();
             async move |req: &web_sys::Request, resp: &web_sys::Response| -> bool {
                 let want_cache =
-                    resp.headers().get(ETAG).expect("Error checking for etag header").is_some() || is_immutable(resp);
+                    resp.headers().get(ETAG).expect("Error checking for etag header").is_some() ||
+                        is_immutable(resp);
                 if !want_cache {
                     return false;
                 }
@@ -262,14 +250,27 @@ pub fn handle_fetch(ev: FetchEvent) -> Promise {
             let resp = JsFuture::from(self_.fetch_with_request(&req)).await?;
             let resp = resp.dyn_into::<web_sys::Response>()?;
             if cache(&req, &resp).await {
-                if let Err(e) = evict_other_versions(&cache_store, &base_url, &url).await {
+                if let Err(e) = async {
+                    let versioned_base = format!("{}v/", base_url);
+                    let Some(rest) = url.strip_prefix(&versioned_base) else {
+                        return Ok(());
+                    };
+                    let keep = format!("{}{}/", versioned_base, rest.split('/').next().unwrap());
+                    for key in Array::from(&JsFuture::from(cache_store.keys()).await?) {
+                        let key = key.dyn_into::<web_sys::Request>()?;
+                        let key_url = key.url();
+                        if key_url.starts_with(&versioned_base) && !key_url.starts_with(&keep) {
+                            JsFuture::from(cache_store.delete_with_request(&key)).await?;
+                        }
+                    }
+                    return Ok::<(), JsValue>(());
+                }.await {
                     console::log_2(&JsValue::from("Error evicting other app versions from cache"), &e);
                 }
             }
             return Ok(resp.into());
         }
         let cached_resp = cached_resp.dyn_into::<web_sys::Response>().unwrap();
-
         if is_immutable(&cached_resp) {
             return Ok(cached_resp.into());
         }
@@ -306,16 +307,21 @@ pub fn handle_fetch(ev: FetchEvent) -> Promise {
                 if resp.status() == 200 {
                     if !cache(&req, &resp).await {
                         console::log_1(
-                            &JsValue::from(format!("Revalidated response for {} changed but wasn't cached, not reloading", url)),
+                            &JsValue::from(
+                                format!("Revalidated response for {} changed but wasn't cached, not reloading", url),
+                            ),
                         );
                         return;
                     }
                     if let Some(stale_tx) = stale_tx {
-                        _ = stale_tx.send(format!("{} (ETag {} -> {})", url, cached_etag_value, match resp.headers().get(ETAG) {
-                            Ok(Some(v)) => v,
-                            Ok(None) => format!("none"),
-                            Err(e) => format!("error reading: {:?}", e.as_string()),
-                        }));
+                        _ =
+                            stale_tx.send(
+                                format!("{} (ETag {} -> {})", url, cached_etag_value, match resp.headers().get(ETAG) {
+                                    Ok(Some(v)) => v,
+                                    Ok(None) => format!("none"),
+                                    Err(e) => format!("error reading: {:?}", e.as_string()),
+                                }),
+                            );
                     }
                 }
             });
@@ -323,7 +329,6 @@ pub fn handle_fetch(ev: FetchEvent) -> Promise {
             // Optimistically return cached response
             return Ok(cached_resp.into());
         }
-
         unreachable!();
     });
 }

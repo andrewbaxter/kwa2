@@ -34,10 +34,12 @@ use {
 };
 
 fn link_selected(pc: &mut ProcessingContext, el: &El, selected: fn(&Ministate) -> bool) {
-    el.ref_own(|el_| link!((_pc = pc), (ministate = state().ministate.clone()), (), (el_ = el_.weak(), selected = selected) {
-        let el_ = el_.upgrade()?;
-        el_.ref_modify_classes(&[(&style_export::class_state_selected().value, selected(&*ministate.borrow()))]);
-    }));
+    el.ref_own(
+        |el_| link!((_pc = pc), (ministate = state().ministate.clone()), (), (el_ = el_.weak(), selected = selected) {
+            let el_ = el_.upgrade()?;
+            el_.ref_modify_classes(&[(&style_export::class_state_selected().value, selected(&*ministate.borrow()))]);
+        }),
+    );
 }
 
 fn build_channel_link(pc: &mut ProcessingContext, c: &Rc<LocalChannel1>) -> El {
@@ -56,27 +58,39 @@ fn build_channel_link(pc: &mut ProcessingContext, c: &Rc<LocalChannel1>) -> El {
         let el_ = el_.upgrade()?;
         el_.ref_text(&*name.borrow());
     }));
-    child.image.unwrap().ref_own(|el_| link!((_pc = pc), (portrait = c.portrait.clone()), (), (el_ = el_.weak(), id = c.id.clone()) {
-        let el_ = el_.upgrade()?;
-        let img = channel_image(&id, &*portrait.borrow());
-        el_.ref_clear();
-        el_.ref_push(style_export::leaf_menu_link_image(style_export::LeafMenuLinkImageArgs {
-            image: img.image,
-            generated_image: img.generated_image,
-        }).root);
-    }));
+    child
+        .image
+        .unwrap()
+        .ref_own(|el_| link!((_pc = pc), (portrait = c.portrait.clone()), (), (el_ = el_.weak(), id = c.id.clone()) {
+            let el_ = el_.upgrade()?;
+            let img = channel_image(&id, &*portrait.borrow());
+            el_.ref_clear();
+            el_.ref_push(style_export::leaf_menu_link_image(style_export::LeafMenuLinkImageArgs {
+                image: img.image,
+                generated_image: img.generated_image,
+            }).root);
+        }));
     child.unread.ref_own(|el_| link!((_pc = pc), (unread = c.unread.clone()), (), (el_ = el_.weak()) {
         let el_ = el_.upgrade()?;
         el_.ref_modify_classes(&[(&style_export::class_state_hidden().value, !*unread.borrow())]);
     }));
-    child.root.ref_own(|el_| link!((_pc = pc), (ministate = state().ministate.clone()), (), (el_ = el_.weak(), id = c.id.clone()) {
-        let el_ = el_.upgrade()?;
-        let selected = match &*ministate.borrow() {
-            Ministate::Channel(m) => m.id == *id,
-            _ => false,
-        };
-        el_.ref_modify_classes(&[(&style_export::class_state_selected().value, selected)]);
-    }));
+    child
+        .root
+        .ref_own(
+            |el_| link!(
+                (_pc = pc),
+                (ministate = state().ministate.clone()),
+                (),
+                (el_ = el_.weak(), id = c.id.clone()) {
+                    let el_ = el_.upgrade()?;
+                    let selected = match &*ministate.borrow() {
+                        Ministate::Channel(m) => m.id == *id,
+                        _ => false,
+                    };
+                    el_.ref_modify_classes(&[(&style_export::class_state_selected().value, selected)]);
+                }
+            ),
+        );
     return child.root;
 }
 
@@ -100,12 +114,10 @@ fn build_root_children(pc: &mut ProcessingContext) -> El {
                             generated_image: None,
                             children: vec![],
                         });
-                        out
-                            .text
-                            .ref_own(|el_| link!((_pc = pc), (name = cg.name.clone()), (), (el_ = el_.weak()) {
-                                let el_ = el_.upgrade()?;
-                                el_.ref_text(&*name.borrow());
-                            }));
+                        out.text.ref_own(|el_| link!((_pc = pc), (name = cg.name.clone()), (), (el_ = el_.weak()) {
+                            let el_ = el_.upgrade()?;
+                            el_.ref_text(&*name.borrow());
+                        }));
                         out
                             .unread
                             .ref_own(|el_| link!((_pc = pc), (unread = cg.unread.clone()), (), (el_ = el_.weak()) {
@@ -198,7 +210,6 @@ pub fn build(pc: &mut ProcessingContext) -> El {
         add_link: ministate_octothorpe(&Ministate::TopAdd),
         body: vec![body],
     });
-
     link_selected(pc, &out.identities_link, |s| match s {
         Ministate::Identities |
         Ministate::IdentitiesNew |
@@ -219,7 +230,8 @@ pub fn build(pc: &mut ProcessingContext) -> El {
     link_selected(pc, &out.add_link, |s| match s {
         Ministate::TopAdd |
         Ministate::ChannelJoinUrl |
-        Ministate::ChannelJoinUrlConfirm(_) |
+        Ministate::ChannelJoinQr |
+        Ministate::ChannelJoinConfirm(_) |
         Ministate::ChannelNew |
         Ministate::ChannelGroupNew => true,
         _ => false,

@@ -130,7 +130,12 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
         let mode = HistPrim::new(pc, ChatMode::None);
         let chat_state =
             Rc::new(
-                ChatState::new(pc.eg(), vec![("default".to_string(), m.own_identity.clone(), m.id.clone())], mode.clone()),
+                ChatState::new(
+                    pc.eg(),
+                    CurrentChatSource::Channel(m.id.clone()),
+                    vec![("default".to_string(), m.own_identity.clone(), m.id.clone())],
+                    mode.clone(),
+                ),
             );
         inf = Infinite::new(&pc.eg(), InfiniteEls {
             center_spinner: style_export::leaf_chat_spinner_center().root,
@@ -200,20 +205,12 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
                     ) {
                         let new_reset_id;
                         let set_sticky;
-                        match &*mode.borrow() {
-                            ChatMode::None => {
+                        match mode.borrow().focus() {
+                            None => {
                                 new_reset_id = None;
                                 set_sticky = false;
                             },
-                            ChatMode::MessageChannelSelect => {
-                                new_reset_id = None;
-                                set_sticky = false;
-                            },
-                            ChatMode::TopMessage(_) => {
-                                new_reset_id = None;
-                                set_sticky = false;
-                            },
-                            ChatMode::ReplyMessage(t) => match &t.target {
+                            Some(t) => match &t.target {
                                 ChatModeReplyMessageTarget::Channel(m) => {
                                     new_reset_id = Some(m.clone());
                                     let found_time = chat_state.find_time_by_message_id(&m);
@@ -338,7 +335,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
                     let e = e.upgrade()?;
                     e.ref_text(&*name.borrow());
                 }));
-                center
+                return center;
             }
         });
         own.push(nol_channel.then(pc, {
