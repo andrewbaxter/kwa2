@@ -431,121 +431,234 @@
         "This is an error. Panic panic panic",
       );
     };
-    const buildChat = /** @type {(_:{controls: boolean}) => HTMLElement} */ (
-      args,
-    ) => {
-      const topLayer = document.createElement("div");
-      topLayer.style.display = "flex";
-      topLayer.style.flexDirection = "column";
-      topLayer.style.justifyContent = "space-between";
-      const bar = presentation.contChatHeadBar({
-        backLink: "abcd",
-        center: presentation.leafChatHeadBarCenter({
-          text: "Almonds",
-          link: "abcd",
-        }).root,
-        right: undefined,
-      }).root;
-      topLayer.appendChild(bar);
-      if (args.controls) {
-        let controls = presentation.contChatControlsBarModeMenu({
-          children: [
-            presentation.leafChatControlsBarModeMenuButtonNewMessage({}).root,
-          ],
-        });
-        topLayer.appendChild(controls.root);
-      } else {
-        let controls = presentation.leafChatControlsBarModeMessage({});
-        controls.text.textContent = "This is a message to a distant thing.";
-        topLayer.appendChild(controls.root);
-      }
+    const buildChat =
+      /** @type {(_:{controls: boolean, sticky: "none"|"real"|"holder"}) => HTMLElement} */ (
+        args,
+      ) => {
+        const infinite = document.createElement("div");
+        infinite.classList.add("infinite");
+        infinite.classList.add(presentation.classPageChat({}).value);
+        infinite.style.flexGrow = "1";
+        infinite.style.display = "grid";
+        infinite.style.gridTemplateRows = "1fr";
+        infinite.style.maxHeight = "100%";
+        infinite.style.maxWidth = "100%";
+        infinite.style.justifyContent = "stretch";
+        infinite.style.alignItems = "stretch";
 
-      const messageLayer = document.createElement("div");
-      messageLayer.style.display = "flex";
-      messageLayer.style.flexDirection = "column";
-      messageLayer.style.overflowY = "scroll";
-      messageLayer.style.height = "100dvh";
-      messageLayer.style.pointerEvents = "initial";
-      messageLayer.style.padding = ``;
-      messageLayer.appendChild(presentation.leafChatSpinnerEarly({}).root);
-      messageLayer.appendChild(presentation.leafChatSpinnerCenter({}).root);
-      messageLayer.appendChild(
-        presentation.contChatEntryModeDeleted({ left: true }).root,
-      );
-      const textMessage =
-        /** @type {(left: Boolean,text: string)=>HTMLElement} */ (
-          left,
-          text,
+        const scrollOuter = document.createElement("div");
+        scrollOuter.classList.add("scroll_outer");
+        scrollOuter.style.flexGrow = "1";
+        scrollOuter.style.overflowX = "hidden";
+        scrollOuter.style.overflowY = "scroll";
+        scrollOuter.style.scrollbarWidth = "none";
+        scrollOuter.style.maxHeight = "100%";
+        scrollOuter.style.pointerEvents = "initial";
+        scrollOuter.style.containerType = "size";
+        scrollOuter.style.isolation = "isolate";
+
+        const stylePadding = /** @type {(e: HTMLElement) => HTMLElement} */ (
+          e,
         ) => {
-          const entryMessage1 = presentation.contChatEntryModeMessage({
-            left: left,
-            date: new Date().toISOString(),
-          });
-          entryMessage1.portrait.appendChild(
-            presentation.leafChatEntryPortrait({ image: "testportrait.jpg" }).root,
-          );
-          entryMessage1.body.appendChild(
-            presentation.leafChatEntryModeMessageTextBlock({ text: text }).root,
-          );
-          return entryMessage1.root;
+          e.style.display = "flex";
+          e.style.flexDirection = "column";
+          return e;
         };
+        const paddingPre = stylePadding(document.createElement("div"));
+        const paddingPost = stylePadding(document.createElement("div"));
 
-      // Left
-      messageLayer.appendChild(textMessage(true, "Spam"));
-      messageLayer.appendChild(textMessage(true, "Spam"));
-      messageLayer.appendChild(textMessage(true, "Spam"));
-      messageLayer.appendChild(textMessage(true, "Spam"));
-      messageLayer.appendChild(textMessage(true, "Spam"));
-      messageLayer.appendChild(
-        textMessage(true, "This is a short chat message"),
-      );
-      const selectedMessage = textMessage(
-        true,
-        "This is a longer chat message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines.",
-      );
-      selectedMessage.classList.add(presentation.classStateSelected({}).value);
-      messageLayer.appendChild(selectedMessage);
+        const scrollInner = document.createElement("div");
+        scrollInner.classList.add("scroll_inner");
+        scrollInner.style.display = "flex";
+        scrollInner.style.flexDirection = "column";
+        scrollInner.style.position = "relative";
 
-      // Right
-      messageLayer.appendChild(textMessage(false, "This is a reply 1"));
-      messageLayer.appendChild(
-        presentation.contChatEntryModeDeleted({ left: false }).root,
-      );
-      messageLayer.appendChild(
-        textMessage(
-          false,
-          "This is a longer reply 1 message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines.",
-        ),
-      );
-      messageLayer.appendChild(textMessage(false, "Spam"));
-      messageLayer.appendChild(textMessage(false, "Spam"));
-      messageLayer.appendChild(textMessage(false, "Spam"));
-      messageLayer.appendChild(textMessage(false, "Spam"));
-      messageLayer.appendChild(textMessage(false, "Spam"));
-      messageLayer.appendChild(textMessage(false, "Spam"));
-      messageLayer.appendChild(textMessage(false, "Spam"));
-      messageLayer.appendChild(textMessage(false, "Spam"));
-      messageLayer.appendChild(textMessage(false, "Spam"));
-      messageLayer.appendChild(presentation.leafChatSpinnerLate({}).root);
+        const contentLayout = document.createElement("div");
+        contentLayout.style.position = "absolute";
+        contentLayout.style.left = "0";
+        contentLayout.style.right = "0";
+        contentLayout.style.display = "flex";
+        contentLayout.style.flexDirection = "column";
 
-      // Controls
-      const controlsAsEntry = presentation.contChatEntryModeControls({}).root;
-      controlsAsEntry.appendChild(
-        presentation.leafChatEntryModeControlsButtonNewMessage({}).root,
-      );
-      messageLayer.appendChild(controlsAsEntry);
+        const styleStickyHolder = /** @type {(e: HTMLElement) => HTMLElement} */ (
+          e,
+        ) => {
+          e.classList.add("real");
+          e.style.position = "sticky";
+          e.style.top = "0px";
+          e.style.bottom = "0px";
+          e.style.display = "flex";
+          e.style.flexDirection = "column";
+          return e;
+        };
+        const earlySticky = styleStickyHolder(document.createElement("div"));
+        const real = document.createElement("div");
+        real.classList.add("real");
+        real.style.display = "flex";
+        real.style.flexDirection = "column";
+        real.style.position = "relative";
+        const lateSticky = styleStickyHolder(document.createElement("div"));
 
-      const padding = document.createElement("div");
-      padding.style.height = "1cm";
-      messageLayer.appendChild(padding);
+        const wrapSpinner = /** @type {(e: HTMLElement) => HTMLElement} */ (
+          e,
+        ) => {
+          const out = document.createElement("div");
+          out.appendChild(e);
+          out.style.display = "flex";
+          out.style.justifyContent = "center";
+          out.style.alignItems = "center";
+          return out;
+        };
+        const centerSpinner = wrapSpinner(
+          presentation.leafChatSpinnerCenter({}).root,
+        );
+        centerSpinner.style.display = "none";
+        const earlySpinner = wrapSpinner(
+          presentation.leafChatSpinnerEarly({}).root,
+        );
+        const lateSpinner = wrapSpinner(presentation.leafChatSpinnerLate({}).root);
 
-      const root = document.createElement("div");
-      root.classList.add("stack");
-      root.appendChild(messageLayer);
-      root.appendChild(topLayer);
+        scrollOuter.style.gridColumn = "1";
+        scrollOuter.style.gridRow = "1";
+        const overlay = document.createElement("div");
+        overlay.style.display = "flex";
+        overlay.style.flexDirection = "column";
+        overlay.style.justifyContent = "space-between";
+        overlay.style.gridColumn = "1";
+        overlay.style.gridRow = "1";
+        overlay.appendChild(paddingPre);
+        overlay.appendChild(centerSpinner);
+        overlay.appendChild(paddingPost);
+        infinite.appendChild(scrollOuter);
+        infinite.appendChild(overlay);
+        scrollOuter.appendChild(scrollInner);
+        scrollInner.appendChild(contentLayout);
+        contentLayout.appendChild(earlySticky);
+        contentLayout.appendChild(real);
+        contentLayout.appendChild(lateSticky);
+        real.appendChild(earlySpinner);
 
-      return presentation.contPageChat({ children: [root] }).root;
-    };
+        new ResizeObserver(() => {
+          scrollOuter.style.paddingTop = `${paddingPre.offsetHeight}px`;
+        }).observe(paddingPre);
+        new ResizeObserver(() => {
+          scrollOuter.style.paddingBottom = `${paddingPost.offsetHeight}px`;
+        }).observe(paddingPost);
+        new ResizeObserver(() => {
+          scrollInner.style.height = `${contentLayout.offsetHeight}px`;
+        }).observe(contentLayout);
+
+        paddingPre.appendChild(
+          presentation.contChatHeadBar({
+            backLink: "abcd",
+            center: presentation.leafChatHeadBarCenter({
+              text: "Almonds",
+              link: "abcd",
+            }).root,
+            right: undefined,
+          }).root,
+        );
+        if (args.controls) {
+          paddingPost.appendChild(
+            presentation.contChatControlsBarModeMenu({
+              children: [
+                presentation.leafChatControlsBarModeMenuButtonNewMessage({})
+                  .root,
+              ],
+            }).root,
+          );
+        } else {
+          const controls = presentation.leafChatControlsBarModeMessage({});
+          controls.text.textContent = "This is a message to a distant thing.";
+          paddingPost.appendChild(controls.root);
+        }
+
+        const entry = /** @type {(e: HTMLElement) => HTMLElement} */ (e) => {
+          const out = presentation.contChatEntry({}).root;
+          out.appendChild(e);
+          return out;
+        };
+        const textMessage =
+          /** @type {(left: Boolean,text: string)=>HTMLElement} */ (
+            left,
+            text,
+          ) => {
+            const entryMessage1 = presentation.contChatEntryModeMessage({
+              left: left,
+              date: new Date().toISOString(),
+            });
+            entryMessage1.portrait.appendChild(
+              presentation.leafChatEntryPortrait({ image: "testportrait.jpg" })
+                .root,
+            );
+            entryMessage1.body.appendChild(
+              presentation.leafChatEntryModeMessageTextBlock({ text: text })
+                .root,
+            );
+            return entryMessage1.root;
+          };
+
+        const selectedMessage = textMessage(
+          true,
+          "This is a longer chat message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines.",
+        );
+        selectedMessage.classList.add(presentation.classStateSelected({}).value);
+        const selectedEntry = entry(selectedMessage);
+        if (args.sticky != "none") {
+          selectedEntry.style.position = "sticky";
+          selectedEntry.style.top = "0px";
+          selectedEntry.style.bottom = "0px";
+          selectedEntry.style.zIndex = "1";
+          selectedEntry.classList.add(presentation.classStateSticky({}).value);
+        }
+        if (args.sticky == "holder") {
+          earlySticky.appendChild(selectedEntry);
+        }
+
+        // Left
+        real.appendChild(
+          entry(presentation.contChatEntryModeDeleted({ left: true }).root),
+        );
+        for (let i = 0; i < 5; i += 1) {
+          real.appendChild(entry(textMessage(true, "Spam")));
+        }
+        if (args.sticky != "none") {
+          for (let i = 0; i < 10; i += 1) {
+            real.appendChild(entry(textMessage(true, "Spam")));
+          }
+        }
+        real.appendChild(entry(textMessage(true, "This is a short chat message")));
+        if (args.sticky != "holder") {
+          real.appendChild(selectedEntry);
+        }
+
+        // Right
+        real.appendChild(entry(textMessage(false, "This is a reply 1")));
+        real.appendChild(
+          entry(presentation.contChatEntryModeDeleted({ left: false }).root),
+        );
+        real.appendChild(
+          entry(
+            textMessage(
+              false,
+              "This is a longer reply 1 message. It contains multiple lines of text, hopefully. But it is not punishment. It is merely meant for testing. Nobody will complain if you don't read it all.\n\nI am obligated to add some new lines.",
+            ),
+          ),
+        );
+        for (let i = 0; i < 9; i += 1) {
+          real.appendChild(entry(textMessage(false, "Spam")));
+        }
+
+        // Controls
+        const controlsAsEntry = presentation.contChatEntryModeControls({}).root;
+        controlsAsEntry.appendChild(
+          presentation.leafChatEntryModeControlsButtonNewMessage({}).root,
+        );
+        real.appendChild(controlsAsEntry);
+        real.appendChild(lateSpinner);
+
+        return infinite;
+      };
 
     const hash = location.hash;
     switch (hash) {
@@ -586,12 +699,22 @@
         break;
       case "#chat":
         {
-          buildRoot(buildChat({ controls: false }));
+          buildRoot(buildChat({ controls: false, sticky: "none" }));
+        }
+        break;
+      case "#chat_sticky":
+        {
+          buildRoot(buildChat({ controls: false, sticky: "real" }));
+        }
+        break;
+      case "#chat_sticky_holder":
+        {
+          buildRoot(buildChat({ controls: false, sticky: "holder" }));
         }
         break;
       case "#chat_controls":
         {
-          buildRoot(buildChat({ controls: true }));
+          buildRoot(buildChat({ controls: true, sticky: "none" }));
         }
         break;
       default:

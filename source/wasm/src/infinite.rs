@@ -80,15 +80,18 @@
 //! after the last known element in the feed, so any missing elements will be
 //! included.
 use {
-    crate::util::MoreMath,
+    crate::{
+        js::style_export,
+        util::MoreMath,
+    },
     flowcontrol::shed,
+    gloo_events::EventListenerOptions,
     gloo::timers::callback::Timeout,
     lunk::{
         EventGraph,
         ProcessingContext,
     },
     rooting::{
-        Container,
         ContainerEntry,
         El,
         ObserveHandle,
@@ -113,6 +116,7 @@ use {
     wasm_bindgen::JsCast,
     web_sys::{
         CssStyleDeclaration,
+        Element,
         HtmlElement,
     },
 };
@@ -167,7 +171,7 @@ struct EntryState<E: Entry> {
     entry_el: El,
     _entry_el_observe: ObserveHandle,
     sticky: Cell<bool>,
-    sticky_scroll_top: Rc<Cell<f64>>,
+    sticky_scroll: Rc<RefCell<Option<(Element, f64)>>>,
 }
 
 impl<E: Entry> EntryState<E> {
@@ -182,26 +186,23 @@ impl<E: Entry> EntryState<E> {
             s.set_property("top", "0px").unwrap();
             s.set_property("bottom", "0px").unwrap();
             s.set_property("z-index", "1").unwrap();
-            s.set_property("max-height", "100cqh").unwrap();
-            s.set_property("overflow-y", "auto").unwrap();
-            s.set_property("overscroll-behavior", "contain").unwrap();
         } else {
             s.remove_property("position").unwrap();
             s.remove_property("top").unwrap();
             s.remove_property("bottom").unwrap();
             s.remove_property("z-index").unwrap();
-            s.remove_property("max-height").unwrap();
-            s.remove_property("overflow-y").unwrap();
-            s.remove_property("overscroll-behavior").unwrap();
-            self.sticky_scroll_top.set(0.);
+            *self.sticky_scroll.borrow_mut() = None;
         }
+        self.entry_el.ref_modify_classes(&[(&style_export::class_state_sticky().value, sticky)]);
     }
 
     fn restore_sticky_scroll(&self) {
         if !self.sticky.get() {
             return;
         }
-        self.entry_el.raw().set_scroll_top(self.sticky_scroll_top.get());
+        if let Some((scroller, scroll_top)) = &*self.sticky_scroll.borrow() {
+            scroller.set_scroll_top(*scroll_top);
+        }
     }
 
     fn top(&self) -> f64 {
@@ -293,7 +294,7 @@ struct Infiniscroll_<E: Entry> {
     early_sticky: El,
     late_sticky: El,
     /// All entries are sorted.
-    real: RefCell<Container<EntryState<E>>>,
+    real: RefCell<RealContainer<EntryState<E>>>,
     cached_real_offset: Cell<f64>,
     /// None if real is empty (i.e. invalid index)
     anchor_i: Cell<Option<usize>>,
@@ -324,15 +325,13 @@ impl<E: Entry> Infiniscroll_<E> {
     fn realize_entry(&self, pc: &mut ProcessingContext, feed_id: &E::FeedId, entry: Rc<E>) -> EntryState<E> {
         let entry_el = entry.create_el(pc);
         let sticky = self.want_sticky.borrow().iter().any(|s| s == &entry.time());
-        let sticky_scroll_top = Rc::new(Cell::new(0.));
-        entry_el.ref_on("scroll", {
-            let sticky_scroll_top = sticky_scroll_top.clone();
-            let entry_el = entry_el.weak();
-            move |_| {
-                let Some(entry_el) = entry_el.upgrade() else {
-                    return;
-                };
-                sticky_scroll_top.set(entry_el.raw().scroll_top());
+        let sticky_scroll = Rc::new(RefCell::new(None));
+        entry_el.ref_on_with_options("scroll", EventListenerOptions::run_in_capture_phase(), {
+            let sticky_scroll = sticky_scroll.clone();
+            move |ev| {
+                let scroller = ev.target().unwrap().dyn_into::<Element>().unwrap();
+                let scroll_top = scroller.scroll_top();
+                *sticky_scroll.borrow_mut() = Some((scroller, scroll_top));
             }
         });
         let out = EntryState {
@@ -341,7 +340,7 @@ impl<E: Entry> Infiniscroll_<E> {
             entry_el: entry_el.clone(),
             _entry_el_observe: self.entry_resize_observer.borrow().as_ref().unwrap().observe(&entry_el.raw()),
             sticky: Cell::new(false),
-            sticky_scroll_top: sticky_scroll_top,
+            sticky_scroll: sticky_scroll,
         };
         out.set_sticky(sticky);
         return out;
@@ -410,7 +409,7 @@ impl<E: Entry> Infiniscroll_<E> {
         let last_el = self.real.borrow().last().unwrap().entry_el.clone();
         let last_el_top = self.real.borrow().last().unwrap().top();
         let first_el = self.real.borrow().first().unwrap().entry_el.clone();
-        let first_el_top = 0.;
+        let first_el_top = self.real.borrow().first().unwrap().top();
         let first_el_height = first_el.offset_height();
         let first_el_bottom = first_el_top + first_el_height;
         let hovering_late = candidate_late_real_origin_y >= last_el_top;
@@ -458,7 +457,7 @@ impl<E: Entry> Infiniscroll_<E> {
 
 fn get_pivot_early<
     E: Entry,
->(entries: &Container<EntryState<E>>, feed_id: &E::FeedId, f_state: &FeedState<E>) -> Option<E::Time> {
+>(entries: &RealContainer<EntryState<E>>, feed_id: &E::FeedId, f_state: &FeedState<E>) -> Option<E::Time> {
     return f_state
         .early_reserve
         .back()
@@ -471,7 +470,7 @@ fn get_pivot_early<
 
 fn get_pivot_late<
     E: Entry,
->(entries: &Container<EntryState<E>>, feed_id: &E::FeedId, f_state: &FeedState<E>) -> Option<E::Time> {
+>(entries: &RealContainer<EntryState<E>>, feed_id: &E::FeedId, f_state: &FeedState<E>) -> Option<E::Time> {
     return f_state
         .late_reserve
         .back()
@@ -485,6 +484,60 @@ fn get_pivot_late<
                 .next(),
         )
         .or_else(|| f_state.early_reserve.front().map(|entry| entry.time()));
+}
+
+struct RealContainer<T: ContainerEntry> {
+    entries: Vec<T>,
+    el: El,
+}
+
+impl<T: ContainerEntry> RealContainer<T> {
+    fn el(&self) -> &El {
+        return &self.el;
+    }
+
+    fn iter(&self) -> std::slice::Iter<'_, T> {
+        return self.entries.iter();
+    }
+
+    fn push(&mut self, entry: T) {
+        self.el.ref_splice(1 + self.entries.len(), 0, vec![entry.el().clone()]);
+        self.entries.push(entry);
+    }
+
+    fn splice(&mut self, offset: usize, remove: usize, add: Vec<T>) -> std::vec::Splice<'_, std::vec::IntoIter<T>> {
+        self.el.ref_splice(1 + offset, remove, add.iter().map(|e| e.el().clone()).collect());
+        return self.entries.splice(offset .. offset + remove, add);
+    }
+
+    fn first(&self) -> Option<&T> {
+        return self.entries.first();
+    }
+
+    fn last(&self) -> Option<&T> {
+        return self.entries.last();
+    }
+
+    fn len(&self) -> usize {
+        return self.entries.len();
+    }
+
+    fn is_empty(&self) -> bool {
+        return self.entries.is_empty();
+    }
+
+    fn get(&self, i: usize) -> Option<&T> {
+        return self.entries.get(i);
+    }
+}
+
+impl<'a, T: ContainerEntry> IntoIterator for &'a RealContainer<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        return self.entries.iter();
+    }
 }
 
 pub struct WeakInfinite<E: Entry>(Weak<Infiniscroll_<E>>);
@@ -538,6 +591,7 @@ impl<E: 'static + Entry> Infinite<E> {
             s.set_property("max-height", "100%").unwrap();
             s.set_property("pointer-events", "initial").unwrap();
             s.set_property("container-type", "size").unwrap();
+            s.set_property("isolation", "isolate").unwrap();
             //. s.set_property("transition", "padding-top 0.2s ease-out, padding-bottom 0.2s ease-out").unwrap();
         }
 
@@ -579,13 +633,6 @@ impl<E: 'static + Entry> Infinite<E> {
         }
 
         let content_lines_early_sticky = style_sticky(el("div"));
-        let content_lines_real = Container::new({
-            let e = el("div").classes(&["real"]);
-            let s = el_style(&e);
-            s.set_property("display", "flex").unwrap();
-            s.set_property("flex-direction", "column").unwrap();
-            e
-        });
         let content_lines_late_sticky = style_sticky(el("div"));
 
         fn wrap_spinner(e: El) -> El {
@@ -602,6 +649,18 @@ impl<E: 'static + Entry> Infinite<E> {
         let late_spinner = wrap_spinner(els.late_spinner);
         set_el_hide(&early_spinner, true);
         set_el_hide(&late_spinner, true);
+        let content_lines_real = RealContainer {
+            entries: vec![],
+            el: {
+                let e = el("div").classes(&["real"]);
+                let s = el_style(&e);
+                s.set_property("display", "flex").unwrap();
+                s.set_property("flex-direction", "column").unwrap();
+                s.set_property("position", "relative").unwrap();
+                e.ref_extend(vec![early_spinner.clone(), late_spinner.clone()]);
+                e
+            },
+        };
 
         fn set_el_col(e: El, col: &str) -> El {
             let s = el_style(&e);
@@ -623,11 +682,9 @@ impl<E: 'static + Entry> Infinite<E> {
         scroll_inner.ref_push(content_layout.clone());
         content_layout.ref_extend(
             vec![
-                early_spinner.clone(),
                 content_lines_early_sticky.clone(),
                 content_lines_real.el().clone(),
                 content_lines_late_sticky.clone(),
-                late_spinner.clone(),
             ],
         );
         let state = Infinite(Rc::new(Infiniscroll_ {
@@ -801,7 +858,11 @@ impl<E: 'static + Entry> Infinite<E> {
 
     fn jump_to_(&self, time: &E::Time) {
         *self.0.reset_time.borrow_mut() = time.clone();
-        self.0.real.borrow_mut().clear();
+        {
+            let mut real = self.0.real.borrow_mut();
+            real.el.ref_splice(1, real.entries.len(), vec![]);
+            real.entries.clear();
+        }
         self.0.anchor_i.set(None);
         self.0.anchor_alignment.set(0.5);
         self.0.anchor_offset.set(0.);
@@ -1473,7 +1534,9 @@ impl<E: 'static + Entry> Infinite<E> {
                                 if insert_before_i <= anchor_i {
                                     self.0.anchor_i.set(Some(anchor_i + 1));
                                 }
-                                self.0.real.borrow_mut().insert(insert_before_i, real);
+                                let mut real_entries = self.0.real.borrow_mut();
+                                real_entries.el.ref_splice(1 + insert_before_i, 0, vec![real.entry_el.clone()]);
+                                real_entries.entries.insert(insert_before_i, real);
                             }
                         }
                         // Remaining new elements come after the final real element

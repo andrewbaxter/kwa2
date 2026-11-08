@@ -237,6 +237,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
             early_spinner: style_export::leaf_chat_spinner_early().root,
             late_spinner: style_export::leaf_chat_spinner_late().root,
         });
+        inf.el().ref_classes(&[&style_export::class_page_chat().value]);
         inf.add_feed(ChatFeedId::Controls, FeedControls::new(mode.clone(), chat_state.clone()));
         *state().current_chat.borrow_mut() = Some(CurrentChat {
             source: CurrentChatSource::Group(m.id.clone()),

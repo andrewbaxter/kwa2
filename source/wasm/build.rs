@@ -104,6 +104,11 @@ fn main() {
             returns: vec![("value", &string_)],
         },
         Func {
+            name: "classStateSticky",
+            args: vec![],
+            returns: vec![("value", &string_)],
+        },
+        Func {
             name: "classCode",
             args: vec![],
             returns: vec![("value", &string_)],
@@ -241,9 +246,9 @@ fn main() {
         // /////////////////////////////////////////////////////////////////////////////
         // xx Components, styles: chat
         Func {
-            name: "contPageChat",
-            args: vec![("children", &arrel_)],
-            returns: vec![("root", &el_)],
+            name: "classPageChat",
+            args: vec![],
+            returns: vec![("value", &string_)],
         },
         Func {
             name: "leafChatSpinnerCenter",
@@ -276,6 +281,11 @@ fn main() {
             returns: vec![("root", &el_)],
         },
         // Entry - controls
+        Func {
+            name: "contChatEntry",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
         Func {
             name: "contChatEntryModeControls",
             args: vec![],

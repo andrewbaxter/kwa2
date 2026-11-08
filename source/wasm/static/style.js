@@ -316,6 +316,11 @@
     /** @type { Presentation["classStateHidden"]} */ () => ({
       value: classStateHidden,
     });
+  const classStateSticky = "sticky";
+  presentation.classStateSticky =
+    /** @type { Presentation["classStateSticky"]} */ () => ({
+      value: classStateSticky,
+    });
 
   // xx Text classes
 
@@ -1929,30 +1934,18 @@ svg.spinner4 path {
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: chat
 
-  presentation.contPageChat = /** @type { Presentation["contPageChat"] } */ (
-    args,
-  ) => {
-    return {
-      root: e(
-        "div",
-        {},
-        {
-          styles_: [
-            contVboxStyle,
-            s("cont_page_chat", {
-              "": (s) => {
-                s.backgroundColor = varCBackground;
-                s.flexGrow = "1";
-                s.position = "relative";
-                s.pointerEvents = "initial";
-              },
-            }),
-          ],
-          children_: args.children,
-        },
-      ),
-    };
-  };
+  const classPageChat = s("cont_page_chat", {
+    "": (s) => {
+      s.backgroundColor = varCBackground;
+      s.flexGrow = "1";
+      s.position = "relative";
+      s.pointerEvents = "initial";
+    },
+  });
+  presentation.classPageChat =
+    /** @type { Presentation["classPageChat"]} */ () => ({
+      value: classPageChat,
+    });
 
   const leafChatSpinner = () => {
     return e(
@@ -2231,6 +2224,7 @@ svg.spinner4 path {
   // Entry
   const chatEntryActionsSpecificStyle = "chat_entry_actions_specific";
   const chatEntryGlassSpecificStyle = "chat_entry_glass_specific";
+  const chatEntryBodySpecificStyle = "chat_entry_body_specific";
   const chatEntrySelectableStyle = s("chat_entry_selectable", {
     "": (s) => {
       s.pointerEvents = "initial";
@@ -2249,13 +2243,37 @@ svg.spinner4 path {
       s.display = "block";
     },
   });
+  presentation.contChatEntry =
+    /** @type { Presentation["contChatEntry"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              s("chat_entry", {
+                [`.${classStateSticky} > *`]: (s) => {
+                  s.maxHeight = "100cqh";
+                },
+                [`.${classStateSticky} .${chatEntryBodySpecificStyle}`]: (s) => {
+                  s.flexShrink = "1";
+                  s.minHeight = "0";
+                  s.overflowY = "auto";
+                  s.overscrollBehavior = "contain";
+                },
+              }),
+            ],
+          },
+        ),
+      };
+    };
   presentation.contChatEntryModeMessage =
     /** @type { Presentation["contChatEntryModeMessage"] } */ (args) => {
       const body = e(
         "div",
         {},
         {
-          styles_: [contVboxStyle, bubbleStyle],
+          styles_: [contVboxStyle, bubbleStyle, chatEntryBodySpecificStyle],
         },
       );
       const actions = e(

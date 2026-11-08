@@ -142,6 +142,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
             early_spinner: style_export::leaf_chat_spinner_early().root,
             late_spinner: style_export::leaf_chat_spinner_late().root,
         });
+        inf.el().ref_classes(&[&style_export::class_page_chat().value]);
         inf.add_feed(ChatFeedId::Controls, FeedControls::new(mode.clone(), chat_state.clone()));
         let f_c = ChannelFeed::new(chat_state.clone(), m.id.clone());
         inf.add_feed(ChatFeedId::Channel(m.id.clone()), f_c.clone());

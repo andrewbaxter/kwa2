@@ -36,7 +36,7 @@ use {
 };
 
 pub fn build_chat_entry_message(pc: &mut ProcessingContext, m: &ChatEntryMessage) -> El {
-    let out = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
+    let out = style_export::cont_chat_entry().root;
     let left = !localdata::get_stored_api_identities(None).into_iter().any(|x| x.res.id == m.sender);
     out.ref_own(
         |root| link!(
