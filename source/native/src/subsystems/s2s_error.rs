@@ -2,13 +2,8 @@ use {
     crate::{
         db,
         dbutil::tx,
-        interface::s2s::{
-            S2sErrorBody,
-            S2sErrorKind,
-        },
     },
     deadpool_sqlite::Pool,
-    http::StatusCode,
     loga::ResultContext,
     rusqlite::Transaction,
 };
@@ -65,43 +60,6 @@ pub enum S2sError {
 impl From<loga::Error> for S2sError {
     fn from(e: loga::Error) -> Self {
         return S2sError::Internal(e);
-    }
-}
-
-impl S2sError {
-    pub fn status(&self) -> StatusCode {
-        match self {
-            S2sError::BadRequest(_) => return StatusCode::BAD_REQUEST,
-            S2sError::Unauthorized(_) => return StatusCode::UNAUTHORIZED,
-            S2sError::Forbidden(_) => return StatusCode::FORBIDDEN,
-            S2sError::NotFound(_) => return StatusCode::NOT_FOUND,
-            S2sError::Internal(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-        }
-    }
-
-    pub fn body(&self) -> S2sErrorBody {
-        match self {
-            S2sError::BadRequest(m) => return S2sErrorBody {
-                kind: S2sErrorKind::BadRequest,
-                message: m.clone(),
-            },
-            S2sError::Unauthorized(m) => return S2sErrorBody {
-                kind: S2sErrorKind::Unauthorized,
-                message: m.clone(),
-            },
-            S2sError::Forbidden(m) => return S2sErrorBody {
-                kind: S2sErrorKind::Forbidden,
-                message: m.clone(),
-            },
-            S2sError::NotFound(m) => return S2sErrorBody {
-                kind: S2sErrorKind::NotFound,
-                message: m.clone(),
-            },
-            S2sError::Internal(_) => return S2sErrorBody {
-                kind: S2sErrorKind::Internal,
-                message: "Internal error".to_string(),
-            },
-        }
     }
 }
 

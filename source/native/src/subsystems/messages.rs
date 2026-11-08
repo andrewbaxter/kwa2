@@ -11,21 +11,8 @@ use {
             s2s::{
                 ChannelInfoRes,
                 GetActivity,
-                FileAuth,
                 GetChannelInfo,
-                GetFile,
-                GetJoinPreview,
-                GetMessageHistory,
-                GetSnapLookup,
-                JoinPreviewRes,
-                JoinPreviewTarget,
-                GetSnapPage,
-                GetSnapPageContainingTime,
-                Notify,
-                NotifyTimestamp,
-                PullOutbox,
                 PulledMessage,
-                PulledMessages,
                 SnapLookupBy,
                 SnapLookupRes,
             },
@@ -35,11 +22,7 @@ use {
             s2s_client::Signer,
             s2s_error::{
                 not_found,
-                s2s_tx,
-                CachePolicy,
-                Cached,
                 S2sError,
-                SNAP_PAGE_MAX_AGE_SECS,
             },
         },
         State,
@@ -59,7 +42,10 @@ use {
             QualifiedChannelId,
         },
         wire::{
-            c2s::ActivityOffset,
+            c2s::{
+                ActivityOffset,
+                ChannelRetention,
+            },
             s2c::{
                 Notification,
                 WsEvent,
@@ -75,7 +61,6 @@ use {
         LocalIdentitySigner,
     },
     std::{
-        collections::HashMap,
         sync::{
             Arc,
             Mutex,
@@ -85,8 +70,6 @@ use {
 };
 
 pub const PULL_BATCH_LIMIT: u32 = 100;
-pub const BACKFILL_INTERVAL: Duration = Duration::from_secs(2);
-pub const RETENTION_CLEANUP_INTERVAL: Duration = Duration::from_secs(3600);
 
 pub struct RelCols {
     pub rel_type: Option<String>,
@@ -131,17 +114,46 @@ pub fn u64_to_i64(v: u64) -> i64 {
     return i64::from_ne_bytes(v.to_ne_bytes());
 }
 
-pub fn retention_cutoff(now: Timestamp, retention_secs: Option<i64>) -> Result<Option<Timestamp>, loga::Error> {
-    let Some(secs) = retention_secs else {
+pub const SECS_PER_DAY: i64 = 24 * 60 * 60;
+
+pub fn retention_cutoff(now: Timestamp, retention: ChannelRetention) -> Result<Option<Timestamp>, loga::Error> {
+    let ChannelRetention::Days(days) = retention else {
         return Ok(None);
     };
+    let secs = retention_days_to_secs(days)?;
     return Ok(
         Some(
             now
-                .checked_sub(Duration::from_secs(secs.max(0) as u64))
+                .checked_sub(Duration::from_secs(secs as u64))
                 .context_with("Retention cutoff out of range", ea!(retention_secs = secs))?,
         ),
     );
+}
+
+pub fn retention_days_to_secs(days: u64) -> Result<i64, loga::Error> {
+    return Ok(
+        i64::try_from(days)
+            .ok()
+            .and_then(|d| d.checked_mul(SECS_PER_DAY))
+            .context_with("Retention days out of range", ea!(days = days))?,
+    );
+}
+
+pub const RETENTION_MODE_NOTHING: &str = "nothing";
+pub const RETENTION_MODE_VIEWED: &str = "viewed";
+pub const RETENTION_MODE_ALL: &str = "all";
+pub const RETENTION_MODE_DAYS: &str = "days";
+
+pub fn retention_from_db(mode: &str, secs: Option<i64>) -> ChannelRetention {
+    match mode {
+        RETENTION_MODE_NOTHING => return ChannelRetention::Nothing,
+        RETENTION_MODE_VIEWED => return ChannelRetention::Viewed,
+        RETENTION_MODE_ALL => return ChannelRetention::All,
+        RETENTION_MODE_DAYS => return ChannelRetention::Days(
+            (secs.expect("Days retention mode stored without retention_secs") / SECS_PER_DAY) as u64,
+        ),
+        _ => panic!("Unknown retention mode stored in db: {}", mode),
+    }
 }
 
 #[derive(Clone)]
@@ -151,7 +163,7 @@ pub struct LocalChannel {
     pub authenticated: bool,
     pub public_read: bool,
     pub public_post: bool,
-    pub retention_secs: Option<i64>,
+    pub retention: ChannelRetention,
     pub latest_seq: Option<i64>,
     pub latest_snap_offset: Option<i64>,
     pub floor_snap_offset: Option<i64>,
@@ -172,7 +184,7 @@ pub fn local_channel_get(
 ) -> Result<Option<LocalChannel>, loga::Error> {
     let row = good_ormning::sqlite::good_query_opt!(
         db,
-        r#"select local_identity, page_size, authenticated, public_read, public_post, retention_secs, latest_seq, latest_snap_offset, floor_snap_offset, backfill_done from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
+        r#"select local_identity, page_size, authenticated, public_read, public_post, retention_secs, retention_mode, latest_seq, latest_snap_offset, floor_snap_offset, backfill_done from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?;
     return Ok(row.map(|r| LocalChannel {
@@ -181,7 +193,7 @@ pub fn local_channel_get(
         authenticated: r.authenticated,
         public_read: r.public_read,
         public_post: r.public_post,
-        retention_secs: r.retention_secs,
+        retention: retention_from_db(&r.retention_mode, r.retention_secs),
         latest_seq: r.latest_seq,
         latest_snap_offset: r.latest_snap_offset,
         floor_snap_offset: r.floor_snap_offset,
@@ -217,20 +229,6 @@ pub fn owner_channel_get(
     return Ok(Some((account, local)));
 }
 
-pub fn is_channel_member(
-    db_tx: &mut db::Db<Transaction<'_>>,
-    account: DbAccountId,
-    owner: DbIdentity,
-    channel: &DbChannelId,
-    member: DbIdentity,
-) -> Result<bool, loga::Error> {
-    return Ok(good_ormning::sqlite::good_query_opt!(
-        db,
-        r#"select 1 as x from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and member = ${identity_id_t = &member}"#;
-        db_tx
-    ).map_err(|e| loga::err(e.0))?.is_some());
-}
-
 pub fn member_can_post(
     db_tx: &mut db::Db<Transaction<'_>>,
     account: DbAccountId,
@@ -258,19 +256,6 @@ pub fn channel_members(
     ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| r.0).collect());
 }
 
-pub fn posting_members(
-    db_tx: &mut db::Db<Transaction<'_>>,
-    account: DbAccountId,
-    owner: DbIdentity,
-    channel: &DbChannelId,
-) -> Result<Vec<Identity>, loga::Error> {
-    return Ok(good_ormning::sqlite::good_query_many!(
-        db,
-        r#"select member from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and can_post = ${bool = true}"#;
-        db_tx
-    ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| r.0).collect());
-}
-
 pub fn check_read_access(
     db_tx: &mut db::Db<Transaction<'_>>,
     account: DbAccountId,
@@ -285,7 +270,18 @@ pub fn check_read_access(
     let Some(caller) = caller else {
         return Err(S2sError::Unauthorized("Channel requires authentication for reads".to_string()));
     };
-    if caller == owner.0 || is_channel_member(db_tx, account, owner, channel, DbIdentity(caller))? {
+    if caller == owner.0 || {
+        (|| -> Result<bool, loga::Error> {
+            let (db_tx, account, owner, channel, member):
+                (&mut db::Db<Transaction<'_>>, DbAccountId, DbIdentity, &DbChannelId, DbIdentity) =
+                (db_tx, account, owner, channel, DbIdentity(caller));
+            return Ok(good_ormning::sqlite::good_query_opt!(
+                db,
+                r#"select 1 as x from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and member = ${identity_id_t = &member}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?.is_some());
+        })()
+    }? {
         return Ok(());
     }
     return Err(S2sError::Forbidden("Caller is not a member of this channel".to_string()));
@@ -439,21 +435,6 @@ pub fn message_history_rows(
         });
     }
     return Ok(Some(out));
-}
-
-pub fn activity_rows(
-    db_tx: &mut db::Db<Transaction<'_>>,
-    account: DbAccountId,
-    owner: DbIdentity,
-    channel: &DbChannelId,
-    start: i64,
-    end: i64,
-) -> Result<Vec<(i64, String)>, loga::Error> {
-    return Ok(good_ormning::sqlite::good_query_many!(
-        db,
-        r#"select seq, raw from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and seq >= ${i64 = start} and seq < ${i64 = end} order by seq"#;
-        db_tx
-    ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| (r.seq, r.raw)).collect());
 }
 
 pub struct SnapPosition {
@@ -612,7 +593,6 @@ pub fn store_remote_message(
     account: DbAccountId,
     owner: DbIdentity,
     channel: &DbChannelId,
-    local_identity: Identity,
     v: &Verified,
     cutoff: Option<Timestamp>,
 ) -> Result<bool, loga::Error> {
@@ -632,15 +612,7 @@ pub fn store_remote_message(
         r#"insert into message (account_id, identity, channel, sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique) values (${account_id_t = &account}, ${identity_id_t = &owner}, ${channel_id_t = channel}, ${identity_id_t = &sender}, ${i64 = sender_unique}, ${i64 = seq}, ${opt i64 = snap_offset}, ${time_ms_t = &crate::interface::db::DbTimeMs(v.receive_time)}, ${opt string = client_id.as_deref()}, ${string = v.raw.as_str()}, ${string = v.body.body.as_str()}, ${opt string = rel.rel_type.as_deref()}, ${opt identity_id_t = rel.rel_target_sender.as_ref()}, ${opt i64 = rel.rel_target_unique}) on conflict do nothing"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?;
-    let inserted = db_tx.0.changes() > 0;
-    if v.body.id.identity == local_identity {
-        good_ormning::sqlite::good_query!(
-            db,
-            r#"delete from outbox where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &sender} and sender_unique = ${i64 = sender_unique}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
-    }
-    return Ok(inserted);
+    return Ok(db_tx.0.changes() > 0);
 }
 
 pub fn load_signer_tx(
@@ -703,7 +675,226 @@ pub async fn publish_local_notification(
         let state = state.clone();
         tokio::spawn(async move {
             let payload = serde_json::to_vec(&notification).unwrap();
-            if let Err(e) = crate::subsystems::push::send_push_to_account(&state, account_id, &payload).await {
+            if let Err(e) = {
+                use {
+                    crate::{
+                        db,
+                        dbutil::tx,
+                        State,
+                    },
+                    http::{
+                        header::HOST,
+                        Method,
+                        Request,
+                        StatusCode,
+                        Uri,
+                    },
+                    htwrap::htreq::{
+                        self,
+                    },
+                    loga::{
+                        ea,
+                        ErrContext,
+                        ResultContext,
+                    },
+                    shared::interface::shared::AccountId,
+                    std::{
+                        collections::HashMap,
+                        str::FromStr,
+                        sync::Arc,
+                    },
+                    web_push::{
+                        ContentEncoding,
+                        SubscriptionInfo,
+                        VapidSignatureBuilder,
+                        WebPushMessageBuilder,
+                    },
+                };
+                use crate::subsystems::push::*;
+
+                let ret: Result<(), loga::Error> = async {
+                    let (state, account_id, payload): (&Arc<State>, AccountId, &[u8]) =
+                        (&state, account_id, &payload);
+                    let account_id_i64 = i64::from_ne_bytes(account_id.0.to_ne_bytes());
+                    let subs = tx(&state.db, move |db_tx| {
+                        return good_ormning::sqlite::good_query_many!(
+                            db,
+                            r#"select data from push_subscription where account_id = ${i64 = account_id_i64}"#;
+                            db_tx
+                        ).map_err(|e| loga::err(e.0));
+                    }).await.context("Error listing push subscriptions")?;
+                    if subs.is_empty() {
+                        return Ok(());
+                    }
+                    let vapid = &state.vapid_keys;
+                    let mut expired_endpoints: Vec<String> = Vec::new();
+                    for data_json in subs {
+                        let info: SubscriptionInfo = match serde_json::from_str(&data_json) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                state
+                                    .log
+                                    .log_err(
+                                        loga::WARN,
+                                        loga::err(
+                                            e.to_string(),
+                                        ).context("Skipping malformed push subscription record"),
+                                    );
+                                continue;
+                            },
+                        };
+                        let endpoint = info.endpoint.clone();
+                        let res = async {
+                            flowcontrol::ta_return!((), PushSendError);
+                            let vapid_sig =
+                                VapidSignatureBuilder::from_base64_no_sub(&vapid.private_b64url)
+                                    .map_err(
+                                        |e| PushSendError::Other(
+                                            loga::err(e.to_string()).context("VAPID key parse failed"),
+                                        ),
+                                    )?
+                                    .add_sub_info(&info)
+                                    .build()
+                                    .map_err(
+                                        |e| PushSendError::Other(
+                                            loga::err(e.to_string()).context("VAPID signature build failed"),
+                                        ),
+                                    )?;
+                            let mut builder = WebPushMessageBuilder::new(&info);
+                            builder.set_payload(ContentEncoding::Aes128Gcm, payload);
+                            builder.set_vapid_signature(vapid_sig);
+                            let msg =
+                                builder
+                                    .build()
+                                    .map_err(
+                                        |e| PushSendError::Other(
+                                            loga::err(e.to_string()).context("Failed to build web-push message"),
+                                        ),
+                                    )?;
+                            let mut headers = HashMap::new();
+                            headers.insert("TTL".to_string(), msg.ttl.to_string());
+                            if let Some(u) = msg.urgency {
+                                headers.insert("Urgency".to_string(), u.to_string());
+                            }
+                            if let Some(t) = msg.topic {
+                                headers.insert("Topic".to_string(), t);
+                            }
+                            let body = if let Some(p) = msg.payload {
+                                headers.insert(
+                                    "Content-Encoding".to_string(),
+                                    p.content_encoding.to_str().to_string(),
+                                );
+                                headers.insert("Content-Type".to_string(), "application/octet-stream".to_string());
+                                headers.insert("Content-Length".to_string(), p.content.len().to_string());
+                                for (k, v) in p.crypto_headers {
+                                    headers.insert(k.to_string(), v);
+                                }
+                                p.content
+                            } else {
+                                Vec::new()
+                            };
+                            let endpoint_uri: Uri =
+                                Uri::from_str(
+                                    &msg.endpoint.to_string(),
+                                ).map_err(
+                                    |e| PushSendError::Other(
+                                        loga::err(e.to_string()).context("Invalid push endpoint URL"),
+                                    ),
+                                )?;
+                            let authority =
+                                endpoint_uri
+                                    .authority()
+                                    .ok_or_else(
+                                        || PushSendError::Other(loga::err("Push endpoint URL has no authority")),
+                                    )?
+                                    .to_string();
+                            let mut conn: htreq::Conn =
+                                htreq::connect(PUSH_LIMITS, &endpoint_uri)
+                                    .await
+                                    .map_err(
+                                        |e| PushSendError::Other(e.context("Failed to connect to push endpoint")),
+                                    )?;
+                            let mut req =
+                                Request::builder()
+                                    .method(Method::POST)
+                                    .uri(endpoint_uri.clone())
+                                    .header(HOST, authority);
+                            for (k, v) in headers {
+                                req = req.header(k, v);
+                            }
+                            let req =
+                                req
+                                    .body(http_body_util::Full::new(hyper::body::Bytes::from(body)))
+                                    .map_err(
+                                        |e| PushSendError::Other(
+                                            loga::err(e.to_string()).context("Error building push request"),
+                                        ),
+                                    )?;
+                            let (status, _, continue_) =
+                                htreq::send(&state.log, PUSH_LIMITS, &mut conn, req)
+                                    .await
+                                    .map_err(|e| PushSendError::Other(e.context("Push endpoint POST failed")))?;
+                            if status == StatusCode::NOT_FOUND || status == StatusCode::GONE {
+                                return Err(PushSendError::Gone);
+                            }
+                            if !status.is_success() {
+                                let err =
+                                    loga::err_with("Push endpoint returned error status", ea!(status = status));
+                                match htreq::receive(PUSH_LIMITS, continue_).await {
+                                    Ok(body) => {
+                                        return Err(
+                                            PushSendError::Other(
+                                                err.context_with(
+                                                    "Error response body",
+                                                    ea!(body = String::from_utf8_lossy(&body)),
+                                                ),
+                                            ),
+                                        );
+                                    },
+                                    Err(e) => {
+                                        return Err(
+                                            PushSendError::Other(
+                                                err.also(e.context("Error reading error response body")),
+                                            ),
+                                        );
+                                    },
+                                }
+                            }
+                            return Ok(());
+                        }.await;
+                        match res {
+                            Ok(()) => { },
+                            Err(PushSendError::Gone) => {
+                                expired_endpoints.push(endpoint);
+                            },
+                            Err(PushSendError::Other(e)) => {
+                                state
+                                    .log
+                                    .log_err(
+                                        loga::WARN,
+                                        e.context_with("Push delivery failed", ea!(endpoint = endpoint)),
+                                    );
+                            },
+                        }
+                    }
+                    if !expired_endpoints.is_empty() {
+                        let expired = expired_endpoints;
+                        tx(&state.db, move |db_tx| {
+                            for e in &expired {
+                                let e = e.clone();
+                                good_ormning::sqlite::good_query!(
+                                    db,
+                                    r#"delete from push_subscription where account_id = ${i64 = account_id_i64} and endpoint = ${string = e.as_str()}"#;
+                                    db_tx
+                                ).map_err(|err| loga::err(err.0))?;
+                            }
+                            return Ok(());
+                        }).await.context("Error pruning expired push subscriptions")?;
+                    }
+                    return Ok(());
+                }.await;
+                ret
+            } {
                 state.log.log_err(loga::WARN, e.context("Push delivery failed"));
             }
         });
@@ -736,7 +927,47 @@ pub async fn notify_remotes(
         let channel = channel.clone();
         let log = state.log.clone();
         tokio::spawn(async move {
-            if let Err(e) = client.notify(recipient, &signer, channel.identity, channel.channel).await {
+            if let Err(e) = {
+                use {
+                    crate::interface::s2s::{
+                        s2sv1,
+                        s2sv1t::NotifyTimestamp,
+                        Notify,
+                    },
+                    spaghettinuum::{
+                        byteszb32::BytesZb32,
+                        interface::identity::Identity,
+                        jsonsig::JsonSignature,
+                        sigdomain::SigDomained,
+                    },
+                    std::collections::HashMap,
+                };
+                use crate::subsystems::s2s_client::*;
+
+                let ret: Result<(), loga::Error> = async {
+                    let (s2s_client, target, signer, owner, channel):
+                        (&S2sClient, Identity, &Signer, Identity, shared::interface::shared::ChannelId) =
+                        (&(client), recipient, &signer, channel.identity, channel.channel);
+                    let ts = NotifyTimestamp {
+                        owner: owner,
+                        channel: channel,
+                        timestamp: jiff::Timestamp::now(),
+                    };
+                    let message = serde_json::to_string(&ts).unwrap();
+                    let (_root, _chain, sig) =
+                        signer.lock().unwrap().sign(NotifyTimestamp::DOMAIN, message.as_bytes())?;
+                    let signed = JsonSignature {
+                        message: message,
+                        signature: BytesZb32(sig),
+                        _p: Default::default(),
+                    };
+                    return s2s_client.post(target, &HashMap::new(), &s2sv1::Req::Notify(Notify {
+                        signer: signer_identity(signer)?,
+                        signed: signed,
+                    })).await;
+                }.await;
+                ret
+            } {
                 log.log_err(loga::WARN, e.context_with("Failed to send s2s notify", ea!(recipient = recipient)));
             }
         });
@@ -824,18 +1055,6 @@ pub async fn verify_pulled(
                 );
             continue;
         }
-        if let MessageRel::EditOf(target) = &body.rel {
-            if target.identity != sender {
-                state
-                    .log
-                    .log_with(
-                        loga::WARN,
-                        "Skipping pulled edit: target has a different sender",
-                        ea!(sender = sender),
-                    );
-                continue;
-            }
-        }
         out.push(Verified {
             raw: serde_json::to_string(&m).unwrap(),
             body: body,
@@ -847,109 +1066,30 @@ pub async fn verify_pulled(
     return Ok(out);
 }
 
-async fn resolve_caller(state: &Arc<State>, token: &str) -> Result<Option<Identity>, S2sError> {
+pub async fn resolve_caller(state: &Arc<State>, token: &str) -> Result<Option<Identity>, S2sError> {
     if token.is_empty() {
         return Ok(None);
     }
-    match state.s2s_state.resolve_token(token).await {
+    match {
+        use spaghettinuum::interface::identity::Identity;
+        use crate::subsystems::s2s::*;
+
+        let ret: Option<Identity> = async {
+            let (s2s_state, token): (&S2sState, &str) = (&(state.s2s_state), token);
+            return s2s_state.tokens.get(token).await;
+        }.await;
+        ret
+    } {
         Some(identity) => return Ok(Some(identity)),
         None => return Err(S2sError::Unauthorized("Request token is invalid or expired".to_string())),
     }
 }
 
-async fn require_caller(state: &Arc<State>, token: &str) -> Result<Identity, S2sError> {
+pub async fn require_caller(state: &Arc<State>, token: &str) -> Result<Identity, S2sError> {
     match resolve_caller(state, token).await? {
         Some(identity) => return Ok(identity),
         None => return Err(S2sError::Unauthorized("Request requires authentication".to_string())),
     }
-}
-
-pub async fn handle_notify(state: &Arc<State>, req: Notify) -> Result<(), S2sError> {
-    let signer = req.signer;
-    let unverified = match serde_json::from_str::<NotifyTimestamp>(&req.signed.message) {
-        Ok(v) => v,
-        Err(e) => return Err(S2sError::BadRequest(format!("Notify body is not valid JSON: {}", e))),
-    };
-    let owner = unverified.owner;
-    let channel_id = unverified.channel.clone();
-    let local_rows = s2s_tx(&state.db, "looking up local channel for notify", {
-        let db_owner = DbIdentity(owner);
-        let db_channel_id = DbChannelId(channel_id.clone());
-        move |db_tx| {
-            return Ok(good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select account_id, local_identity, public_post from channel where identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id} and deleted is null"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?);
-        }
-    }).await?;
-    if local_rows.is_empty() {
-        return Ok(());
-    }
-    let Some(announcement) =
-        state
-            .s2s_state
-            .resolver()
-            .get(&signer, vec![])
-            .await
-            .context("Error resolving notify signer announcement")?
-            .map(|kvs| kvs.announcement) else {
-            return Err(S2sError::BadRequest("Notify signer has no announcement".to_string()));
-        };
-    let ts_body = match req.signed.verify(&signer, &announcement.public_key_root, &announcement.public_key_chain) {
-        Ok(v) => v,
-        Err(e) => return Err(S2sError::Unauthorized(format!("Notify signature verification failed: {}", e))),
-    };
-    let now = Timestamp::now();
-    let age = now.as_second() - ts_body.timestamp.as_second();
-    if age > crate::interface::s2s::NOTIFY_MAX_AGE_SECS || age < -crate::interface::s2s::NOTIFY_MAX_AGE_SECS {
-        return Err(S2sError::BadRequest(format!("Notify timestamp is outside the freshness window ({}s)", age)));
-    }
-    if ts_body.owner != owner || ts_body.channel != channel_id {
-        return Err(S2sError::BadRequest("Verified notify body doesn't match parsed body".to_string()));
-    }
-    let (scheduled, one_shot) = s2s_tx(&state.db, "checking notify signer access", {
-        let channel_id = channel_id.clone();
-        move |db_tx| {
-            let db_owner = DbIdentity(owner);
-            let db_channel_id = DbChannelId(channel_id.clone());
-            let mut scheduled = vec![];
-            let mut one_shot = vec![];
-            for row in local_rows {
-                let key = PullKey {
-                    account_id: row.account_id.0,
-                    owner: owner,
-                    channel: channel_id.clone(),
-                    source: signer,
-                };
-                if row.local_identity.0 == owner {
-                    if member_can_post(db_tx, row.account_id, db_owner, &db_channel_id, DbIdentity(signer))? {
-                        scheduled.push(key);
-                    } else if row.public_post {
-                        one_shot.push(key);
-                    }
-                } else if signer == owner {
-                    scheduled.push(key);
-                }
-            }
-            return Ok((scheduled, one_shot));
-        }
-    }).await?;
-    if scheduled.is_empty() && one_shot.is_empty() {
-        return Err(S2sError::Forbidden("Notify signer is not a participant of the referenced channel".to_string()));
-    }
-    for key in scheduled {
-        state.pull_scheduler.trigger_immediate(key).await;
-    }
-    for key in one_shot {
-        let state = state.clone();
-        tokio::spawn(async move {
-            if let Err(e) = pull_and_store(&state, &key).await {
-                state.log.log_err(loga::WARN, e.context("Error pulling from public poster"));
-            }
-        });
-    }
-    return Ok(());
 }
 
 pub fn channel_info_res(
@@ -967,230 +1107,21 @@ pub fn channel_info_res(
     });
 }
 
-pub async fn handle_channel_info(
-    state: &Arc<State>,
-    token: &str,
-    req: GetChannelInfo,
-) -> Result<Cached<ChannelInfoRes>, S2sError> {
-    let caller = resolve_caller(state, token).await?;
-    let db_owner = DbIdentity(req.channel.identity);
-    let db_channel_id = DbChannelId(req.channel.channel);
-    return s2s_tx(&state.db, "reading channel info", move |db_tx| {
-        let (account, local) =
-            not_found(owner_channel_get(db_tx, db_owner, &db_channel_id)?, "Channel not found on this server")?;
-        check_read_access(db_tx, account, db_owner, &db_channel_id, &local, caller)?;
-        return Ok(Cached::no_store(channel_info_res(db_tx, account, db_owner, &db_channel_id, &local)?));
-    }).await;
-}
-
-pub async fn handle_get_activity(
-    state: &Arc<State>,
-    token: &str,
-    req: GetActivity,
-) -> Result<Cached<PulledMessages>, S2sError> {
-    let caller = resolve_caller(state, token).await?;
-    let db_owner = DbIdentity(req.channel.identity);
-    let db_channel_id = DbChannelId(req.channel.channel);
-    let start = u64_to_i64(req.start);
-    let limit = req.limit.min(PULL_BATCH_LIMIT);
-    return s2s_tx(&state.db, "querying activity", move |db_tx| {
-        let (account, local) =
-            not_found(owner_channel_get(db_tx, db_owner, &db_channel_id)?, "Channel not found on this server")?;
-        check_read_access(db_tx, account, db_owner, &db_channel_id, &local, caller)?;
-        let rows = good_ormning::sqlite::good_query_many!(
-            db,
-            r#"select seq, snap_offset, receive_time, raw from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and seq >= ${i64 = start} order by seq limit ${i64 = limit as i64}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
-        let mut messages = Vec::with_capacity(rows.len());
-        for r in rows {
-            messages.push(PulledMessage {
-                seq: i64_to_u64(r.seq),
-                snap_offset: r.snap_offset.map(i64_to_u64),
-                receive_time: r.receive_time.0,
-                message: serde_json::from_str(&r.raw).context("Stored message was not valid JSON")?,
-            });
-        }
-        let full = messages.len() as u32 == limit && limit > 0;
-        return Ok(Cached {
-            value: PulledMessages { messages: messages },
-            policy: CachePolicy::Immutable.only_if(local.public_read && full),
-        });
-    }).await;
-}
-
-pub async fn handle_pull_outbox(
-    state: &Arc<State>,
-    token: &str,
-    req: PullOutbox,
-) -> Result<PulledMessages, S2sError> {
-    let caller = require_caller(state, token).await?;
-    let owner = req.channel.identity;
-    let host = req.host;
-    let db_owner = DbIdentity(owner);
-    let db_host = DbIdentity(host);
-    let db_channel_id = DbChannelId(req.channel.channel.clone());
-    let after = req.after.map(u64_to_i64).unwrap_or(-1);
-    let limit = req.limit.min(PULL_BATCH_LIMIT) as i64;
-    if caller != owner {
-        return Err(S2sError::Forbidden("Only the channel owner can pull a member's outbox".to_string()));
-    }
-    return s2s_tx(&state.db, "querying outbox for pull", move |db_tx| {
-        let host_account =
-            not_found(hosted_identity_account(db_tx, db_host)?, "Pull host identity is not hosted on this server")?;
-        let local =
-            not_found(
-                local_channel_get(db_tx, host_account, db_owner, &db_channel_id)?,
-                "Channel not found on this server",
-            )?;
-        if local.local_identity != host {
-            return Err(
-                S2sError::BadRequest(
-                    "Pull host doesn't participate in the channel as the requested identity".to_string(),
-                ),
-            );
-        }
-        let rows = good_ormning::sqlite::good_query_many!(
-            db,
-            r#"select sender_unique, created, raw from outbox where account_id = ${account_id_t = &host_account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_host} and sender_unique > ${i64 = after} order by sender_unique limit ${i64 = limit}"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?;
-        let mut messages = Vec::with_capacity(rows.len());
-        for r in rows {
-            messages.push(PulledMessage {
-                seq: i64_to_u64(r.sender_unique),
-                snap_offset: None,
-                receive_time: r.created.0,
-                message: serde_json::from_str(&r.raw).context("Stored outbox message was not valid JSON")?,
-            });
-        }
-        return Ok(PulledMessages { messages: messages });
-    }).await;
-}
-
-pub async fn handle_get_snap_page(
-    state: &Arc<State>,
-    token: &str,
-    req: GetSnapPage,
-) -> Result<Cached<Option<PulledMessages>>, S2sError> {
-    let caller = resolve_caller(state, token).await?;
-    let db_owner = DbIdentity(req.channel.identity);
-    let db_channel_id = DbChannelId(req.channel.channel);
-    let page = req.page;
-    return s2s_tx(&state.db, "reading snap page", move |db_tx| {
-        let (account, local) =
-            not_found(owner_channel_get(db_tx, db_owner, &db_channel_id)?, "Channel not found on this server")?;
-        check_read_access(db_tx, account, db_owner, &db_channel_id, &local, caller)?;
-        let (originals, edits) = snap_page_rows(db_tx, account, db_owner, &db_channel_id, local.page_size, page)?;
-        if originals.is_empty() && page > 0 {
-            return Ok(Cached::no_store(None));
-        }
-        let mut messages = Vec::with_capacity(originals.len() + edits.len());
-        for r in originals.iter().chain(edits.iter()) {
-            messages.push(r.to_pulled()?);
-        }
-        return Ok(Cached {
-            value: Some(PulledMessages { messages: messages }),
-            policy: CachePolicy::MaxAge(SNAP_PAGE_MAX_AGE_SECS).only_if(local.public_read),
-        });
-    }).await;
-}
-
-pub async fn handle_snap_page_containing_time(
-    state: &Arc<State>,
-    token: &str,
-    req: GetSnapPageContainingTime,
-) -> Result<Cached<Option<u64>>, S2sError> {
-    let caller = resolve_caller(state, token).await?;
-    let db_owner = DbIdentity(req.channel.identity);
-    let db_channel_id = DbChannelId(req.channel.channel);
-    let time = req.time;
-    return s2s_tx(&state.db, "finding snap page for time", move |db_tx| {
-        let (account, local) =
-            not_found(owner_channel_get(db_tx, db_owner, &db_channel_id)?, "Channel not found on this server")?;
-        check_read_access(db_tx, account, db_owner, &db_channel_id, &local, caller)?;
-        let Some(offset) = snap_offset_containing_time(db_tx, account, db_owner, &db_channel_id, time)? else {
-            return Ok(Cached::no_store(None));
-        };
-        return Ok(Cached::no_store(Some(i64_to_u64(offset) / local.page_size as u64)));
-    }).await;
-}
-
-pub async fn handle_snap_lookup(
-    state: &Arc<State>,
-    token: &str,
-    req: GetSnapLookup,
-) -> Result<Cached<Option<SnapLookupRes>>, S2sError> {
-    let caller = resolve_caller(state, token).await?;
-    let db_owner = DbIdentity(req.channel.identity);
-    let db_channel_id = DbChannelId(req.channel.channel);
-    let by = req.by;
-    return s2s_tx(&state.db, "looking up snap position", move |db_tx| {
-        let (account, local) =
-            not_found(owner_channel_get(db_tx, db_owner, &db_channel_id)?, "Channel not found on this server")?;
-        check_read_access(db_tx, account, db_owner, &db_channel_id, &local, caller)?;
-        let pos = match by {
-            SnapLookupBy::Id(id) => snap_position_by_id(db_tx, account, db_owner, &db_channel_id, &id)?,
-            SnapLookupBy::ClientId(sender, client_id) => snap_position_by_client_id(
-                db_tx,
-                account,
-                db_owner,
-                &db_channel_id,
-                sender,
-                &client_id.0,
-            )?,
-        };
-        let found = pos.is_some();
-        return Ok(Cached {
-            value: pos.map(|p| SnapLookupRes {
-                original_id: p.original_id,
-                snap_offset: i64_to_u64(p.snap_offset),
-                receive_time: p.receive_time,
-            }),
-            policy: CachePolicy::Immutable.only_if(local.public_read && found),
-        });
-    }).await;
-}
-
-pub async fn handle_get_message_history(
-    state: &Arc<State>,
-    token: &str,
-    req: GetMessageHistory,
-) -> Result<Cached<Option<PulledMessages>>, S2sError> {
-    let caller = resolve_caller(state, token).await?;
-    let db_owner = DbIdentity(req.channel.identity);
-    let db_channel_id = DbChannelId(req.channel.channel);
-    let id = req.id;
-    return s2s_tx(&state.db, "reading message history", move |db_tx| {
-        let (account, local) =
-            not_found(owner_channel_get(db_tx, db_owner, &db_channel_id)?, "Channel not found on this server")?;
-        check_read_access(db_tx, account, db_owner, &db_channel_id, &local, caller)?;
-        let Some(rows) = message_history_rows(db_tx, account, db_owner, &db_channel_id, &id)? else {
-            return Ok(Cached::no_store(None));
-        };
-        let mut messages = Vec::with_capacity(rows.len());
-        for r in &rows {
-            messages.push(r.to_pulled()?);
-        }
-        return Ok(Cached::no_store(Some(PulledMessages { messages: messages })));
-    }).await;
-}
-
 pub enum PullOutcome {
     New,
     NoNew,
     Gone,
 }
 
-enum PullMode {
+pub enum PullMode {
     OwnerPullsMember,
     MemberPullsOwner,
 }
 
-struct PullContext {
-    local: LocalChannel,
-    mode: PullMode,
-    cursor: Option<u64>,
+pub struct PullContext {
+    pub local: LocalChannel,
+    pub mode: PullMode,
+    pub cursor: Option<u64>,
 }
 
 pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOutcome, loga::Error> {
@@ -1241,6 +1172,7 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
     };
     let local = context.local;
     let local_identity = local.local_identity;
+    let retention = local.retention;
     let mut cursor = context.cursor;
     let signer = match context.mode {
         PullMode::OwnerPullsMember => Some(load_signer(state, key.account_id, local_identity).await?),
@@ -1254,12 +1186,29 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
     let mut had_new = false;
     loop {
         let res = match context.mode {
-            PullMode::OwnerPullsMember => state.s2s_client.pull_outbox(source, signer.as_ref().unwrap(), PullOutbox {
-                channel: qualified_channel.clone(),
-                host: source,
-                after: cursor,
-                limit: PULL_BATCH_LIMIT,
-            }).await?,
+            PullMode::OwnerPullsMember => {
+                use {
+                    crate::interface::s2s::{
+                        s2sv1,
+                        PullOutbox,
+                        PulledMessages,
+                    },
+                    spaghettinuum::interface::identity::Identity,
+                };
+                use crate::subsystems::s2s_client::*;
+
+                let ret: Result<PulledMessages, loga::Error> = async {
+                    let (s2s_client, target, signer, req): (&S2sClient, Identity, &Signer, PullOutbox) =
+                        (&(state.s2s_client), source, signer.as_ref().unwrap(), PullOutbox {
+                            channel: qualified_channel.clone(),
+                            host: source,
+                            after: cursor,
+                            limit: PULL_BATCH_LIMIT,
+                        });
+                    return s2s_client.post_authed(target, signer, &s2sv1::Req::PullOutbox(req)).await;
+                }.await;
+                ret
+            }?,
             PullMode::MemberPullsOwner => state.s2s_client.get_activity(source, signer.as_ref(), GetActivity {
                 channel: qualified_channel.clone(),
                 start: cursor.map(|c| c + 1).unwrap_or(0),
@@ -1270,12 +1219,31 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
             break;
         };
         let batch_len = res.messages.len();
-        let verified = verify_pulled(state, &qualified_channel, res.messages, only_sender).await?;
+        let is_owner_mode = matches!(context.mode, PullMode::OwnerPullsMember);
+        let mut verified = verify_pulled(state, &qualified_channel, res.messages, only_sender).await?;
+        if is_owner_mode {
+            verified.retain(|v| {
+                let own = match &v.body.rel {
+                    MessageRel::EditOf(target) => target.identity == v.body.id.identity,
+                    MessageRel::None | MessageRel::ReplyTo(_) => true,
+                };
+                if own {
+                    return true;
+                }
+                state
+                    .log
+                    .log_with(
+                        loga::WARN,
+                        "Refusing pulled edit: target has a different sender",
+                        ea!(sender = v.body.id.identity),
+                    );
+                return false;
+            });
+        }
         let batch_snap_max = verified.iter().filter_map(|v| v.snap_offset).max().map(u64_to_i64);
         if let Some(s) = batch_snap_max {
             latest_snap_offset = Some(latest_snap_offset.map(|l| l.max(s)).unwrap_or(s));
         }
-        let is_owner_mode = matches!(context.mode, PullMode::OwnerPullsMember);
         let ingested = tx(&state.db, {
             let db_channel_id = db_channel_id.clone();
             let cursor_seq = u64_to_i64(batch_max_seq);
@@ -1295,7 +1263,13 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
                     ).map_err(|e| loga::err(e.0))?;
                 } else {
                     for v in &verified {
-                        if store_remote_message(db_tx, account, db_owner, &db_channel_id, local_identity, v, None)? {
+                        let new = match retention {
+                            ChannelRetention::Nothing => true,
+                            ChannelRetention::Viewed | ChannelRetention::All | ChannelRetention::Days(_) => {
+                                store_remote_message(db_tx, account, db_owner, &db_channel_id, v, None)?
+                            },
+                        };
+                        if new {
                             ingested.push((v.seq, v.body.body.clone()));
                         }
                     }
@@ -1347,66 +1321,31 @@ pub async fn member_fetch_snap_page(
     page: u64,
 ) -> Result<Option<Vec<Verified>>, loga::Error> {
     let signer = channel_signer(state, account_id, local).await?;
-    let Some(res) = state.s2s_client.get_snap_page(channel.identity, signer.as_ref(), GetSnapPage {
-        channel: channel.clone(),
-        page: page,
-    }).await.context("Error fetching snap page from channel owner")? else {
+    let Some(res) = {
+        use {
+            crate::interface::s2s::{
+                GetSnapPage,
+                PulledMessages,
+            },
+            spaghettinuum::interface::identity::Identity,
+        };
+        use crate::subsystems::s2s_client::*;
+
+        let ret: Result<Option<PulledMessages>, loga::Error> = async {
+            let (s2s_client, target, signer, req): (&S2sClient, Identity, Option<&Signer>, GetSnapPage) =
+                (&(state.s2s_client), channel.identity, signer.as_ref(), GetSnapPage {
+                    channel: channel.clone(),
+                    page: page,
+                });
+            return s2s_client.get_opt_authed(target, signer, &req).await;
+        }.await;
+        ret
+    }.context("Error fetching snap page from channel owner")? else {
         return Ok(None);
     };
     let verified = verify_pulled(state, channel, res.messages, None).await?;
     store_fetched(state, account_id, channel, local, &verified).await?;
     return Ok(Some(verified));
-}
-
-pub async fn member_fetch_activity_range(
-    state: &Arc<State>,
-    account_id: AccountId,
-    channel: &QualifiedChannelId,
-    local: &LocalChannel,
-    start: u64,
-    end: u64,
-) -> Result<Vec<Verified>, loga::Error> {
-    let signer = channel_signer(state, account_id, local).await?;
-    let mut next = start;
-    let mut messages = vec![];
-    loop {
-        let limit = u32::try_from(end - next).unwrap_or(u32::MAX).min(PULL_BATCH_LIMIT);
-        let res = state.s2s_client.get_activity(channel.identity, signer.as_ref(), GetActivity {
-            channel: channel.clone(),
-            start: next,
-            limit: limit,
-        }).await.context("Error fetching activity range from channel owner")?;
-        let batch_len = res.messages.len();
-        let Some(batch_max) = res.messages.iter().map(|m| m.seq).max() else {
-            break;
-        };
-        messages.extend(res.messages.into_iter().filter(|m| m.seq < end));
-        if batch_max + 1 >= end || (batch_len as u32) < limit {
-            break;
-        }
-        next = batch_max + 1;
-    }
-    let verified = verify_pulled(state, channel, messages, None).await?;
-    store_fetched(state, account_id, channel, local, &verified).await?;
-    return Ok(verified);
-}
-
-pub async fn member_fetch_snap_page_containing_time(
-    state: &Arc<State>,
-    account_id: AccountId,
-    channel: &QualifiedChannelId,
-    local: &LocalChannel,
-    time: Timestamp,
-) -> Result<Option<u64>, loga::Error> {
-    let signer = channel_signer(state, account_id, local).await?;
-    return state
-        .s2s_client
-        .get_snap_page_containing_time(channel.identity, signer.as_ref(), GetSnapPageContainingTime {
-            channel: channel.clone(),
-            time: time,
-        })
-        .await
-        .context("Error looking up snap page by time from channel owner");
 }
 
 pub async fn member_fetch_snap_lookup(
@@ -1417,29 +1356,26 @@ pub async fn member_fetch_snap_lookup(
     by: SnapLookupBy,
 ) -> Result<Option<SnapLookupRes>, loga::Error> {
     let signer = channel_signer(state, account_id, local).await?;
-    return state.s2s_client.get_snap_lookup(channel.identity, signer.as_ref(), GetSnapLookup {
-        channel: channel.clone(),
-        by: by,
-    }).await.context("Error looking up snap position from channel owner");
-}
+    return {
+        use {
+            crate::interface::s2s::{
+                GetSnapLookup,
+                SnapLookupRes,
+            },
+            spaghettinuum::interface::identity::Identity,
+        };
+        use crate::subsystems::s2s_client::*;
 
-pub async fn member_fetch_message_history(
-    state: &Arc<State>,
-    account_id: AccountId,
-    channel: &QualifiedChannelId,
-    local: &LocalChannel,
-    id: &MessageId,
-) -> Result<Option<Vec<Verified>>, loga::Error> {
-    let signer = channel_signer(state, account_id, local).await?;
-    let Some(res) = state.s2s_client.get_message_history(channel.identity, signer.as_ref(), GetMessageHistory {
-        channel: channel.clone(),
-        id: id.clone(),
-    }).await.context("Error fetching message history from channel owner")? else {
-        return Ok(None);
-    };
-    let verified = verify_pulled(state, channel, res.messages, None).await?;
-    store_fetched(state, account_id, channel, local, &verified).await?;
-    return Ok(Some(verified));
+        let ret: Result<Option<SnapLookupRes>, loga::Error> = async {
+            let (s2s_client, target, signer, req): (&S2sClient, Identity, Option<&Signer>, GetSnapLookup) =
+                (&(state.s2s_client), channel.identity, signer.as_ref(), GetSnapLookup {
+                    channel: channel.clone(),
+                    by: by,
+                });
+            return s2s_client.get_opt_authed(target, signer, &req).await;
+        }.await;
+        ret
+    }.context("Error looking up snap position from channel owner");
 }
 
 pub fn store_channel_info(
@@ -1496,38 +1432,41 @@ pub async fn member_refresh_info(
     return Ok(info);
 }
 
-async fn store_fetched(
+pub async fn store_fetched(
     state: &Arc<State>,
     account_id: AccountId,
     channel: &QualifiedChannelId,
     local: &LocalChannel,
     verified: &Vec<Verified>,
 ) -> Result<(), loga::Error> {
-    let cutoff = retention_cutoff(Timestamp::now(), local.retention_secs)?;
-    let local_identity = local.local_identity;
+    match local.retention {
+        ChannelRetention::Nothing => return Ok(()),
+        ChannelRetention::Viewed | ChannelRetention::All | ChannelRetention::Days(_) => { },
+    }
+    let cutoff = retention_cutoff(Timestamp::now(), local.retention)?;
     let rows = verified.clone();
     let account = DbAccountId(account_id);
     let db_owner = DbIdentity(channel.identity);
     let db_channel_id = DbChannelId(channel.channel.clone());
     tx(&state.db, move |db_tx| {
         for v in &rows {
-            store_remote_message(db_tx, account, db_owner, &db_channel_id, local_identity, v, cutoff)?;
+            store_remote_message(db_tx, account, db_owner, &db_channel_id, v, cutoff)?;
         }
         return Ok(());
     }).await.context("Error caching fetched messages")?;
     return Ok(());
 }
 
-struct ChannelInviteLookup {
-    account_id: DbAccountId,
-    owner: DbIdentity,
-    can_post: bool,
-    used_count: i64,
-    shown_name: Option<String>,
-    shown_description: Option<String>,
+pub struct ChannelInviteLookup {
+    pub account_id: DbAccountId,
+    pub owner: DbIdentity,
+    pub can_post: bool,
+    pub used_count: i64,
+    pub shown_name: Option<String>,
+    pub shown_description: Option<String>,
 }
 
-fn lookup_channel_invite(
+pub fn lookup_channel_invite(
     db_tx: &mut db::Db<Transaction<'_>>,
     channel: &DbChannelId,
     token: &str,
@@ -1555,16 +1494,16 @@ fn lookup_channel_invite(
     });
 }
 
-struct IdentityInviteLookup {
-    account_id: DbAccountId,
-    used_count: i64,
-    name: String,
-    description: String,
-    shown_name: Option<String>,
-    shown_description: Option<String>,
+pub struct IdentityInviteLookup {
+    pub account_id: DbAccountId,
+    pub used_count: i64,
+    pub name: String,
+    pub description: String,
+    pub shown_name: Option<String>,
+    pub shown_description: Option<String>,
 }
 
-fn lookup_identity_invite(
+pub fn lookup_identity_invite(
     db_tx: &mut db::Db<Transaction<'_>>,
     identity: DbIdentity,
     token: &str,
@@ -1600,15 +1539,15 @@ fn lookup_identity_invite(
     });
 }
 
-struct OwnerChannelMeta {
-    name: String,
-    description: String,
-    shown_name: Option<String>,
-    shown_description: Option<String>,
-    portrait: Option<String>,
+pub struct OwnerChannelMeta {
+    pub name: String,
+    pub description: String,
+    pub shown_name: Option<String>,
+    pub shown_description: Option<String>,
+    pub portrait: Option<String>,
 }
 
-fn owner_channel_meta(
+pub fn owner_channel_meta(
     db_tx: &mut db::Db<Transaction<'_>>,
     account_id: DbAccountId,
     owner: DbIdentity,
@@ -1628,15 +1567,15 @@ fn owner_channel_meta(
     });
 }
 
-struct OwnerIdentityMeta {
-    name: String,
-    description: String,
-    shown_name: Option<String>,
-    shown_description: Option<String>,
-    portrait: Option<String>,
+pub struct OwnerIdentityMeta {
+    pub name: String,
+    pub description: String,
+    pub shown_name: Option<String>,
+    pub shown_description: Option<String>,
+    pub portrait: Option<String>,
 }
 
-fn owner_identity_meta(
+pub fn owner_identity_meta(
     db_tx: &mut db::Db<Transaction<'_>>,
     account_id: DbAccountId,
     identity: DbIdentity,
@@ -1655,281 +1594,12 @@ fn owner_identity_meta(
     });
 }
 
-pub async fn handle_get_file(
-    state: &Arc<State>,
-    token: &str,
-    req: GetFile,
-) -> Result<(String, Vec<u8>), S2sError> {
-    let hash = req.hash.clone();
-    let account = match req.auth {
-        FileAuth::IdentityInvite { identity, code } => {
-            let db_identity = DbIdentity(identity);
-            s2s_tx(&state.db, "checking invited identity file access", move |db_tx| {
-                let invite = lookup_identity_invite(db_tx, db_identity, &code)?;
-                let meta = owner_identity_meta(db_tx, invite.account_id, db_identity)?;
-                if meta.portrait.as_deref() != Some(hash.0.as_str()) {
-                    return Err(S2sError::Forbidden("File is not part of this invitation".to_string()));
-                }
-                return Ok(invite.account_id);
-            }).await?
-        },
-        FileAuth::ChannelInvite { channel, code } => {
-            let db_owner = DbIdentity(channel.identity);
-            let db_channel_id = DbChannelId(channel.channel);
-            s2s_tx(&state.db, "checking invited channel file access", move |db_tx| {
-                let invite = lookup_channel_invite(db_tx, &db_channel_id, &code)?;
-                if invite.owner.0 != channel.identity {
-                    return Err(S2sError::NotFound("Invitation not recognized".to_string()));
-                }
-                let meta = owner_channel_meta(db_tx, invite.account_id, db_owner, &db_channel_id)?;
-                if meta.portrait.as_deref() != Some(hash.0.as_str()) {
-                    return Err(S2sError::Forbidden("File is not part of this invitation".to_string()));
-                }
-                return Ok(invite.account_id);
-            }).await?
-        },
-        FileAuth::Caller => {
-            let caller = resolve_caller(state, token).await?;
-            s2s_tx(&state.db, "checking file access", move |db_tx| {
-                let identities = good_ormning::sqlite::good_query_many!(
-                    db,
-                    r#"select account_id, id from identity where portrait = ${string = hash.0.as_str()} and soft_deleted_at is null"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
-                if let Some(caller) = caller {
-                    let db_caller = DbIdentity(caller);
-                    for i in identities {
-                        let identity_owns = good_ormning::sqlite::good_query_opt!(
-                            db,
-                            r#"select 1 as x from channel_member where account_id = ${account_id_t = &i.account_id} and identity = ${identity_id_t = &i.id} and member = ${identity_id_t = &db_caller}"#;
-                            db_tx
-                        ).map_err(|e| loga::err(e.0))?;
-                        if identity_owns.is_some() {
-                            return Ok(i.account_id);
-                        }
-                        let caller_owns = good_ormning::sqlite::good_query_opt!(
-                            db,
-                            r#"select 1 as x from channel where account_id = ${account_id_t = &i.account_id} and identity = ${identity_id_t = &db_caller} and local_identity = ${identity_id_t = &i.id} and deleted is null"#;
-                            db_tx
-                        ).map_err(|e| loga::err(e.0))?;
-                        if caller_owns.is_some() {
-                            return Ok(i.account_id);
-                        }
-                    }
-                }
-                let channels = good_ormning::sqlite::good_query_many!(
-                    db,
-                    r#"select account_id, identity, id, local_identity from channel where portrait = ${string = hash.0.as_str()} and deleted is null"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
-                for c in channels {
-                    if c.identity.0 != c.local_identity.0 {
-                        continue;
-                    }
-                    let Some(local) = local_channel_get(db_tx, c.account_id, c.identity, &c.id)? else {
-                        continue;
-                    };
-                    if check_read_access(db_tx, c.account_id, c.identity, &c.id, &local, caller).is_ok() {
-                        return Ok(c.account_id);
-                    }
-                }
-                if caller.is_some() {
-                    return Err(S2sError::Forbidden("Caller has no access to this file".to_string()));
-                } else {
-                    return Err(S2sError::Unauthorized("File requires authentication".to_string()));
-                }
-            }).await?
-        },
-    };
-    return Ok(not_found(crate::subsystems::files::read_file(state, account, &req.hash).await?, "File not found")?);
+pub struct BackfillCandidate {
+    pub account_id: AccountId,
+    pub channel: QualifiedChannelId,
 }
 
-pub async fn handle_join_preview(
-    state: &Arc<State>,
-    token: &str,
-    req: GetJoinPreview,
-) -> Result<Cached<JoinPreviewRes>, S2sError> {
-    let caller = resolve_caller(state, token).await?;
-    return s2s_tx(&state.db, "reading join preview", move |db_tx| {
-        match req.target {
-            JoinPreviewTarget::IdentityInvite { identity, code } => {
-                let db_identity = DbIdentity(identity);
-                let invite = lookup_identity_invite(db_tx, db_identity, &code)?;
-                let meta = owner_identity_meta(db_tx, invite.account_id, db_identity)?;
-                return Ok(Cached::no_store(JoinPreviewRes {
-                    name: invite.shown_name.or(meta.shown_name).unwrap_or(meta.name),
-                    description: invite.shown_description.or(meta.shown_description).unwrap_or(meta.description),
-                    portrait: crate::subsystems::files::file_ref(db_tx, invite.account_id, meta.portrait)?,
-                }));
-            },
-            JoinPreviewTarget::ChannelInvite { channel, code } => {
-                let db_owner = DbIdentity(channel.identity);
-                let db_channel_id = DbChannelId(channel.channel);
-                let invite = lookup_channel_invite(db_tx, &db_channel_id, &code)?;
-                if invite.owner.0 != channel.identity {
-                    return Err(S2sError::NotFound("Invitation not recognized".to_string()));
-                }
-                let meta = owner_channel_meta(db_tx, invite.account_id, db_owner, &db_channel_id)?;
-                return Ok(Cached::no_store(JoinPreviewRes {
-                    name: invite.shown_name.or(meta.shown_name).unwrap_or(meta.name),
-                    description: invite.shown_description.or(meta.shown_description).unwrap_or(meta.description),
-                    portrait: crate::subsystems::files::file_ref(db_tx, invite.account_id, meta.portrait)?,
-                }));
-            },
-            JoinPreviewTarget::Channel(channel) => {
-                let db_owner = DbIdentity(channel.identity);
-                let db_channel_id = DbChannelId(channel.channel);
-                let (account, local) =
-                    not_found(
-                        owner_channel_get(db_tx, db_owner, &db_channel_id)?,
-                        "Channel not found on this server",
-                    )?;
-                check_read_access(db_tx, account, db_owner, &db_channel_id, &local, caller)?;
-                let meta = owner_channel_meta(db_tx, account, db_owner, &db_channel_id)?;
-                return Ok(Cached::no_store(JoinPreviewRes {
-                    name: meta.shown_name.unwrap_or(meta.name),
-                    description: meta.shown_description.unwrap_or(meta.description),
-                    portrait: crate::subsystems::files::file_ref(db_tx, account, meta.portrait)?,
-                }));
-            },
-        }
-    }).await;
-}
-
-pub async fn handle_join(
-    state: &Arc<State>,
-    token: &str,
-    req: crate::interface::s2s::Join,
-) -> Result<crate::interface::s2s::JoinRes, S2sError> {
-    use crate::interface::s2s::{
-        ChannelOrIdentity,
-        InvitationToken,
-    };
-
-    let caller = require_caller(state, token).await?;
-    match (req.target, req.invitation) {
-        (ChannelOrIdentity::Channel(channel_id), InvitationToken::Channel(invite)) => {
-            let db_channel_id = DbChannelId(channel_id.clone());
-            let db_caller = DbIdentity(caller);
-            let invite_str = invite.0.clone();
-            let (account_id, owner, info) = s2s_tx(&state.db, "redeeming channel invitation", move |db_tx| {
-                let invite_row = lookup_channel_invite(db_tx, &db_channel_id, &invite_str)?;
-                let account_id = invite_row.account_id;
-                let owner = invite_row.owner;
-                let local =
-                    not_found(
-                        local_channel_get(db_tx, account_id, owner, &db_channel_id)?,
-                        "Invited channel no longer exists",
-                    )?;
-                if !local.is_owner(owner.0) {
-                    return Err(
-                        S2sError::NotFound("Invited channel isn't owned by the inviting identity".to_string()),
-                    );
-                }
-                if caller == owner.0 {
-                    return Err(S2sError::BadRequest("Channel owner can't join their own channel".to_string()));
-                }
-                good_ormning::sqlite::good_query!(
-                    db,
-                    r#"insert into channel_member (account_id, identity, channel, member, confirmed, can_post, memo_short, memo_long) values (${account_id_t = &account_id}, ${identity_id_t = &owner}, ${channel_id_t = &db_channel_id}, ${identity_id_t = &db_caller}, ${bool = true}, ${bool = invite_row.can_post}, ${string = ""}, ${string = ""}) on conflict (account_id, identity, channel, member) do update set confirmed = true"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
-                let new_count = invite_row.used_count + 1;
-                good_ormning::sqlite::good_query!(
-                    db,
-                    r#"update channel_invite set used_count = ${i64 = new_count} where channel = ${channel_id_t = &db_channel_id} and token = ${string = invite_str.as_str()}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
-                let info = channel_info_res(db_tx, account_id, owner, &db_channel_id, &local)?;
-                return Ok((account_id.0, owner.0, info));
-            }).await?;
-            state.pull_scheduler.add_or_reset(PullKey {
-                account_id: account_id,
-                owner: owner,
-                channel: channel_id.clone(),
-                source: caller,
-            }).await;
-            return Ok(crate::interface::s2s::JoinRes {
-                channel: channel_id,
-                info: info,
-            });
-        },
-        (ChannelOrIdentity::Identity(identity), InvitationToken::Identity(invite)) => {
-            let db_identity = DbIdentity(identity);
-            let db_caller = DbIdentity(caller);
-            let invite_str = invite.0.clone();
-            let dm_channel_id = crate::subsystems::c2s::random_channel_id();
-            let db_dm_channel_id = DbChannelId(dm_channel_id.clone());
-            let page_size = state.default_page_size;
-            let page_size_i64 = page_size as i64;
-            if caller == identity {
-                return Err(S2sError::BadRequest("Can't redeem your own identity invitation".to_string()));
-            }
-            let account_id = s2s_tx(&state.db, "redeeming identity invitation", move |db_tx| {
-                let invite_row = lookup_identity_invite(db_tx, db_identity, &invite_str)?;
-                let account_id = invite_row.account_id;
-                good_ormning::sqlite::good_query!(
-                    db,
-                    r#"insert into contact (account_id, id, name, description) values (${account_id_t = &account_id}, ${identity_id_t = &db_caller}, ${string = ""}, ${string = ""}) on conflict do nothing"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
-                let dm_idem = format!("dm:{}:{}", caller, dm_channel_id.0);
-                let new_count = invite_row.used_count + 1;
-                let dm_name = format!("{} - {}", invite_row.name, new_count);
-                crate::subsystems::c2s::insert_channel_row(
-                    db_tx,
-                    account_id,
-                    db_identity,
-                    &db_dm_channel_id,
-                    db_identity,
-                    &dm_idem,
-                    None,
-                    &dm_name,
-                    &invite_row.description,
-                    None,
-                    None,
-                    None,
-                    page_size_i64,
-                    true,
-                )?;
-                good_ormning::sqlite::good_query!(
-                    db,
-                    r#"insert into channel_member (account_id, identity, channel, member, confirmed, can_post, memo_short, memo_long) values (${account_id_t = &account_id}, ${identity_id_t = &db_identity}, ${channel_id_t = &db_dm_channel_id}, ${identity_id_t = &db_caller}, ${bool = true}, ${bool = true}, ${string = ""}, ${string = ""})"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
-                good_ormning::sqlite::good_query!(
-                    db,
-                    r#"update identity_invite set used_count = ${i64 = new_count} where identity = ${identity_id_t = &db_identity} and token = ${string = invite_str.as_str()}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
-                return Ok(account_id.0);
-            }).await?;
-            state.pull_scheduler.add_or_reset(PullKey {
-                account_id: account_id,
-                owner: identity,
-                channel: dm_channel_id.clone(),
-                source: caller,
-            }).await;
-            return Ok(crate::interface::s2s::JoinRes {
-                channel: dm_channel_id,
-                info: ChannelInfoRes {
-                    page_size: u32::try_from(page_size).unwrap_or(u32::MAX),
-                    latest_seq: None,
-                    latest_snap_offset: None,
-                    earliest_snap_offset: None,
-                },
-            });
-        },
-        _ => return Err(S2sError::BadRequest("Target/invitation type mismatch".to_string())),
-    }
-}
-
-struct BackfillCandidate {
-    account_id: AccountId,
-    channel: QualifiedChannelId,
-}
-
-async fn mark_backfill_done(state: &Arc<State>, c: &BackfillCandidate) -> Result<(), loga::Error> {
+pub async fn mark_backfill_done(state: &Arc<State>, c: &BackfillCandidate) -> Result<(), loga::Error> {
     let account = DbAccountId(c.account_id);
     let db_owner = DbIdentity(c.channel.identity);
     let db_channel_id = DbChannelId(c.channel.channel.clone());
@@ -1942,170 +1612,4 @@ async fn mark_backfill_done(state: &Arc<State>, c: &BackfillCandidate) -> Result
         return Ok(());
     }).await.context("Error marking backfill done")?;
     return Ok(());
-}
-
-pub async fn run_backfill(state: Arc<State>) -> Result<(), loga::Error> {
-    let mut tick: usize = 0;
-    loop {
-        tokio::time::sleep(BACKFILL_INTERVAL).await;
-        let candidates = match tx(&state.db, move |db_tx| {
-            return Ok(good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select account_id, identity, id from channel where deleted is null and backfill_done = ${bool = false}"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| BackfillCandidate {
-                account_id: r.account_id.0,
-                channel: QualifiedChannelId {
-                    identity: r.identity.0,
-                    channel: r.id.0,
-                },
-            }).collect::<Vec<_>>());
-        }).await {
-            Ok(c) => c,
-            Err(e) => {
-                state.log.log_err(loga::WARN, e.context("Error listing backfill candidates"));
-                continue;
-            },
-        };
-        if candidates.is_empty() {
-            continue;
-        }
-        let c = &candidates[tick % candidates.len()];
-        tick = tick.wrapping_add(1);
-        if let Err(e) = async {
-            flowcontrol::ta_return!((), loga::Error);
-            let state = &state;
-            let account = DbAccountId(c.account_id);
-            let db_owner = DbIdentity(c.channel.identity);
-            let db_channel_id = DbChannelId(c.channel.channel.clone());
-            let now = Timestamp::now();
-            let Some((local, lowest)) = tx(&state.db, {
-                let db_channel_id = db_channel_id.clone();
-                move |db_tx| {
-                    let Some(local) = local_channel_get(db_tx, account, db_owner, &db_channel_id)? else {
-                        return Ok(None);
-                    };
-                    let lowest = good_ormning::sqlite::good_query_opt!(
-                        db,
-                        r#"select snap_offset, receive_time from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and snap_offset is not null order by snap_offset asc limit ${i64 = 1}"#;
-                        db_tx
-                    ).map_err(|e| loga::err(e.0))?;
-                    return Ok(Some((local, lowest)));
-                }
-            }).await.context("Error reading backfill state")? else {
-                return Ok(());
-            };
-            let cutoff = retention_cutoff(now, local.retention_secs)?;
-            let page_size = local.page_size as u64;
-            let target_page = match lowest {
-                Some(row) => {
-                    let offset = i64_to_u64(row.snap_offset.context("Lowest snap row has no snap offset")?);
-                    if let Some(cutoff) = cutoff {
-                        if row.receive_time.0 < cutoff {
-                            mark_backfill_done(state, c).await?;
-                            return Ok(());
-                        }
-                    }
-                    if let Some(floor) = local.floor_snap_offset {
-                        if offset <= i64_to_u64(floor) {
-                            mark_backfill_done(state, c).await?;
-                            return Ok(());
-                        }
-                    }
-                    let page = offset / page_size;
-                    if offset % page_size == 0 {
-                        if page == 0 {
-                            mark_backfill_done(state, c).await?;
-                            return Ok(());
-                        }
-                        page - 1
-                    } else {
-                        page
-                    }
-                },
-                None => {
-                    let info = member_refresh_info(state, c.account_id, &c.channel, &local).await?;
-                    let Some(latest) = info.latest_snap_offset else {
-                        return Ok(());
-                    };
-                    latest / page_size
-                },
-            };
-            let Some(fetched) =
-                member_fetch_snap_page(state, c.account_id, &c.channel, &local, target_page).await? else {
-                    mark_backfill_done(state, c).await?;
-                    return Ok(());
-                };
-            let originals: Vec<&Verified> = fetched.iter().filter(|v| v.snap_offset.is_some()).collect();
-            if target_page == 0 || originals.is_empty() {
-                mark_backfill_done(state, c).await?;
-                return Ok(());
-            }
-            if let Some(cutoff) = cutoff {
-                if originals.iter().any(|v| v.receive_time < cutoff) {
-                    mark_backfill_done(state, c).await?;
-                }
-            }
-            return Ok(());
-        }.await {
-            state
-                .log
-                .log_err(
-                    loga::WARN,
-                    e.context_with(
-                        "Error backfilling channel",
-                        ea!(owner = c.channel.identity, channel = c.channel.channel.0),
-                    ),
-                );
-        }
-    }
-}
-
-pub async fn run_retention_cleanup(state: Arc<State>) -> Result<(), loga::Error> {
-    loop {
-        let now = Timestamp::now();
-        if let Err(e) = tx(&state.db, move |db_tx| {
-            let channels = good_ormning::sqlite::good_query_many!(
-                db,
-                r#"select account_id, identity, id, retention_secs from channel where deleted is null and retention_secs is not null"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
-            for c in channels {
-                let Some(cutoff) = retention_cutoff(now, c.retention_secs)? else {
-                    continue;
-                };
-                good_ormning::sqlite::good_query!(
-                    db,
-                    r#"delete from message where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and receive_time < ${time_ms_t = &crate::interface::db::DbTimeMs(cutoff)}"#;
-                    db_tx
-                ).map_err(|e| loga::err(e.0))?;
-            }
-            return Ok(());
-        }).await {
-            state.log.log_err(loga::WARN, e.context("Error running retention cleanup"));
-        }
-        tokio::time::sleep(RETENTION_CLEANUP_INTERVAL).await;
-    }
-}
-
-pub fn latest_activity_map(
-    db_tx: &mut db::Db<Transaction<'_>>,
-    account: DbAccountId,
-) -> Result<HashMap<QualifiedChannelId, u64>, loga::Error> {
-    let rows = good_ormning::sqlite::good_query_many!(
-        db,
-        r#"select identity, id, latest_seq from channel where account_id = ${account_id_t = &account} and deleted is null and latest_seq is not null"#;
-        db_tx
-    ).map_err(|e| loga::err(e.0))?;
-    let mut out = HashMap::new();
-    for r in rows {
-        let Some(seq) = r.latest_seq else {
-            continue;
-        };
-        out.insert(QualifiedChannelId {
-            identity: r.identity.0,
-            channel: r.id.0,
-        }, i64_to_u64(seq));
-    }
-    return Ok(out);
 }

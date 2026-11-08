@@ -100,7 +100,10 @@ use {
             QualifiedMessageId,
         },
         wire::{
-            c2s::ActivityOffset,
+            c2s::{
+                ActivityOffset,
+                ChannelRetention,
+            },
             kwaurl::KwaUrl,
         },
     },
@@ -327,7 +330,7 @@ pub struct LocalChannel1 {
     pub shown_description: HistPrim<Option<String>>,
     pub portrait: HistPrim<Option<FileRef>>,
     pub group: HistPrim<Option<ChannelGroupId>>,
-    pub retention_days: HistPrim<Option<u64>>,
+    pub retention: HistPrim<ChannelRetention>,
     pub public_read: HistPrim<bool>,
     pub public_post: HistPrim<bool>,
     pub own_identity: Identity,
@@ -635,7 +638,7 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
                 existing_c.shown_description.set(pc, received_c.res.shown_description.clone());
                 existing_c.portrait.set(pc, received_c.res.portrait.clone());
                 existing_c.group.set(pc, received_c.res.group);
-                existing_c.retention_days.set(pc, received_c.res.retention_days);
+                existing_c.retention.set(pc, received_c.res.retention);
                 existing_c.public_read.set(pc, received_c.res.public_read);
                 existing_c.public_post.set(pc, received_c.res.public_post);
                 existing_c
@@ -653,7 +656,7 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
                     shown_description: HistPrim::new(pc, received_c.res.shown_description.clone()),
                     portrait: HistPrim::new(pc, received_c.res.portrait.clone()),
                     group: HistPrim::new(pc, received_c.res.group.clone()),
-                    retention_days: HistPrim::new(pc, received_c.res.retention_days),
+                    retention: HistPrim::new(pc, received_c.res.retention),
                     public_read: HistPrim::new(pc, received_c.res.public_read),
                     public_post: HistPrim::new(pc, received_c.res.public_post),
                 })

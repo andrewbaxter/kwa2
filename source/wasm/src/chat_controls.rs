@@ -12,7 +12,6 @@ use {
         },
         chat_entry::{
             ChatEntryControls,
-            ChatEntryMessageInternal,
         },
         js::{
             ElExt,
@@ -353,7 +352,7 @@ pub fn build_controls(
                                     let own_identity = edit.own_identity.clone();
                                     let message = OutboxMessage {
                                         rel: OutboxMessageRel::EditOf(edit.target.clone()),
-                                        client_id: client_id,
+                                        client_id: client_id.clone(),
                                         body: body.clone(),
                                     };
                                     async move {
@@ -367,19 +366,8 @@ pub fn build_controls(
                                         return Ok(());
                                     }
                                 });
-                                let entry =
-                                    chat_state
-                                        .entry_channel_lookup
-                                        .borrow()
-                                        .get(&edit.target)
-                                        .and_then(|e| e.upgrade());
                                 eg.event(|pc| {
-                                    if let Some(entry) = entry {
-                                        if let ChatEntryMessageInternal::Message(m) =
-                                            &*entry.message().internal.borrow() {
-                                            m.body.set(pc, body.clone());
-                                        }
-                                    }
+                                    chat_state.apply_edit_overlay(pc, edit.target.clone(), &client_id, body.clone());
                                     chat_state.mode.set(pc, reply_mode);
                                 }).unwrap();
                             }

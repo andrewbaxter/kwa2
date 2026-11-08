@@ -206,6 +206,15 @@ pub struct ChannelCreate {
     pub shown_description: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChannelRetention {
+    Nothing,
+    Viewed,
+    All,
+    Days(u64),
+}
+
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelRes {
@@ -218,7 +227,7 @@ pub struct ChannelRes {
     pub shown_name: Option<String>,
     pub shown_description: Option<String>,
     pub portrait: Option<crate::interface::shared::FileRef>,
-    pub retention_days: Option<u64>,
+    pub retention: ChannelRetention,
     pub public_read: bool,
     pub public_post: bool,
 }
@@ -242,7 +251,7 @@ pub struct ChannelModify {
     #[serde(default)]
     pub shown_description: Option<ModifyOption<String>>,
     #[serde(default)]
-    pub retention_days: Option<ModifyOption<u64>>,
+    pub retention: Option<ChannelRetention>,
     #[serde(default)]
     pub public_read: Option<bool>,
     #[serde(default)]

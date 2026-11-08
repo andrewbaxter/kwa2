@@ -3,11 +3,6 @@ use {
         db,
         dbutil::tx,
         interface::{
-            config::{
-                FdapConfig,
-                MaybeFdap,
-                UsersConfig,
-            },
             db::{
                 DbAccountId,
                 DbChannelId,
@@ -23,15 +18,11 @@ use {
             },
             oidc::{
                 get_req_session,
-                session_lookup,
             },
         },
         State,
     },
-    http::{
-        HeaderMap,
-        Uri,
-    },
+    http::HeaderMap,
     loga::{
         ea,
         ResultContext,
@@ -39,14 +30,10 @@ use {
     moka::future::Cache,
     shared::interface::shared::AccountId,
     spaghettinuum_native::utils::identity_secret::new_local_identity_secret,
-    std::{
-        collections::HashSet,
-        str::FromStr,
-        time::Duration,
-    },
+    std::collections::HashSet,
 };
 
-const DEFAULT_IDENTITY_NAME: &str = "Default";
+pub const DEFAULT_IDENTITY_NAME: &str = "Default";
 
 pub enum UsersState {
     Fdap {
@@ -59,32 +46,7 @@ pub enum UsersState {
     },
 }
 
-pub fn build_users_state(
-    users: &MaybeFdap<UsersConfig>,
-    fdap: &Option<FdapConfig>,
-) -> Result<UsersState, loga::Error> {
-    match users {
-        MaybeFdap::Fdap(subpath) => {
-            let Some(fdap) = fdap else {
-                return Err(loga::err("User config set to use FDAP but no FDAP configured at config root"));
-            };
-            return Ok(UsersState::Fdap {
-                client: fdap::Client::builder()
-                    .with_base_url(Uri::from_str(&fdap.url).context("Invalid fdap url")?)
-                    .build()
-                    .map_err(|e| loga::err(e.0))
-                    .context("Error setting up fdap client")?,
-                subpath: subpath.clone(),
-                cache: Cache::builder().time_to_live(Duration::from_secs(10)).build(),
-            });
-        },
-        MaybeFdap::Local(users) => {
-            return Ok(UsersState::Local { users: users.users.keys().cloned().collect() });
-        },
-    }
-}
-
-fn rowid_to_account(rowid: i64) -> AccountId {
+pub fn rowid_to_account(rowid: i64) -> AccountId {
     return AccountId(u64::from_ne_bytes(rowid.to_ne_bytes()));
 }
 
@@ -92,7 +54,56 @@ pub async fn identify_c2s(state: &State, headers: &HeaderMap) -> Result<Option<A
     let Some(session) = get_req_session(&state.log, headers) else {
         return Ok(None);
     };
-    let Some(user) = session_lookup(&state.db, session).await? else {
+    let Some(user) = {
+        use {
+            crate::{
+                db,
+                dbutil::tx,
+                interface::AccountExternalId,
+            },
+            deadpool_sqlite::Pool,
+            loga::{
+                ResultContext,
+            },
+        };
+
+        let ret: Result<Option<AccountExternalId>, loga::Error> = async {
+            let (db, session): (&Pool, String) = (&state.db, session);
+            let now = jiff::Timestamp::now();
+            let idle_cutoff =
+                now
+                    .checked_sub(jiff::SignedDuration::from_hours(24 * 7))
+                    .context("Session idle cutoff out of range")?;
+            let touch_cutoff =
+                now.checked_sub(jiff::SignedDuration::from_hours(1)).context("Session touch cutoff out of range")?;
+            return Ok(tx(db, move |db_tx| {
+                let Some(row) = good_ormning::sqlite::good_query_opt!(
+                    db,
+                    r#"select external_id, last_used from session where id = ${string = session.as_str()}"#;
+                    db_tx
+                ).map_err(|e| loga::err(e.0))? else {
+                    return Ok(None);
+                };
+                if row.last_used.0 < idle_cutoff {
+                    good_ormning::sqlite::good_query!(
+                        db,
+                        r#"delete from session where id = ${string = session.as_str()}"#;
+                        db_tx
+                    ).map_err(|e| loga::err(e.0))?;
+                    return Ok(None);
+                }
+                if row.last_used.0 < touch_cutoff {
+                    good_ormning::sqlite::good_query!(
+                        db,
+                        r#"update session set last_used = ${time_ms_t = &crate::interface::db::DbTimeMs(now)} where id = ${string = session.as_str()}"#;
+                        db_tx
+                    ).map_err(|e| loga::err(e.0))?;
+                }
+                return Ok(Some(AccountExternalId(row.external_id)));
+            }).await.context("Error looking up session")?);
+        }.await;
+        ret
+    }? else {
         return Ok(None);
     };
     let allowed = match &state.users_state {

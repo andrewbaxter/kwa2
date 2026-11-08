@@ -218,10 +218,14 @@ impl ChannelFeed {
                                 let entries = self1.0.chat_state.entry_channel_lookup.borrow();
                                 match entry1.rel {
                                     MessageRel::EditOf(target) => {
-                                        let Some(e) = entries.get(&QualifiedMessageId {
+                                        let target = QualifiedMessageId {
                                             channel: self1.0.id.clone(),
                                             message: target,
-                                        }).and_then(|e| e.upgrade()) else {
+                                        };
+                                        if self1.0.chat_state.edit_overlays.borrow().contains_key(&target) {
+                                            continue;
+                                        }
+                                        let Some(e) = entries.get(&target).and_then(|e| e.upgrade()) else {
                                             continue;
                                         };
                                         let e_int = e.message().internal.borrow();
@@ -286,6 +290,7 @@ async fn create_entries(
                 offset_pos: e.offset_pos,
             }),
         };
+        let body = chat_state.overlay_body(&e.original_id, e.message.body);
         match e.client_id {
             Some(client_id) => {
                 out.push(
@@ -295,7 +300,7 @@ async fn create_entries(
                         (e.original_id.channel.clone(), e.original_id.message.identity.clone(), client_id.clone()),
                         Some(e.original_id.clone()),
                         time,
-                        e.message.body,
+                        body,
                     ),
                 );
                 arrived.push((client_id, e.original_id));
@@ -307,7 +312,7 @@ async fn create_entries(
                         e.original_id.message.identity.clone(),
                         Some(e.original_id.clone()),
                         time,
-                        Prim::new(e.message.body),
+                        Prim::new(body),
                         false,
                         None,
                         scope_any(defer({

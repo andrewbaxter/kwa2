@@ -22,6 +22,8 @@ use {
         QualifiedChannelId,
         QualifiedMessageId,
     },
+    jiff::Timestamp,
+    lunk::ProcessingContext,
     spaghettinuum::interface::identity::Identity,
     std::{
         cell::RefCell,
@@ -31,9 +33,15 @@ use {
             Rc,
             Weak,
         },
+        str::FromStr,
     },
     wasm_bindgen_futures::spawn_local,
 };
+
+pub struct EditOverlay {
+    pub stamp: Timestamp,
+    pub body: String,
+}
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub struct ChatModeTopMessage {
@@ -120,6 +128,7 @@ pub struct ChatState {
     pub entry_channel_lookup_by_client_id: RefCell<HashMap<ClientIdKey, Weak<ChatEntry>>>,
     pub entry_server_outbox_lookup: RefCell<HashMap<ClientIdKey, Weak<ChatEntry>>>,
     pub entry_outbox_lookup: RefCell<HashMap<ClientIdKey, Weak<ChatEntry>>>,
+    pub edit_overlays: RefCell<HashMap<QualifiedMessageId, EditOverlay>>,
     pub mode: HistPrim<ChatMode>,
 }
 
@@ -138,8 +147,43 @@ impl ChatState {
             entry_channel_lookup_by_client_id: Default::default(),
             entry_server_outbox_lookup: Default::default(),
             entry_outbox_lookup: Default::default(),
+            edit_overlays: Default::default(),
             mode: mode,
         };
+    }
+
+    pub fn overlay_body(&self, id: &QualifiedMessageId, body: String) -> String {
+        match self.edit_overlays.borrow().get(id) {
+            Some(o) => return o.body.clone(),
+            None => return body,
+        }
+    }
+
+    pub fn apply_edit_overlay(
+        &self,
+        pc: &mut ProcessingContext,
+        target: QualifiedMessageId,
+        client_id: &MessageClientId,
+        body: String,
+    ) {
+        let stamp = Timestamp::from_str(&client_id.0).unwrap();
+        {
+            let mut overlays = self.edit_overlays.borrow_mut();
+            if overlays.get(&target).map(|o| o.stamp >= stamp).unwrap_or(false) {
+                return;
+            }
+            overlays.insert(target.clone(), EditOverlay {
+                stamp: stamp,
+                body: body.clone(),
+            });
+        }
+        let Some(e) = self.entry_channel_lookup.borrow().get(&target).and_then(|e| e.upgrade()) else {
+            return;
+        };
+        let internal = e.message().internal.borrow();
+        if let ChatEntryMessageInternal::Message(m) = &*internal {
+            m.body.set(pc, body);
+        }
     }
 
     fn stage_lookup(&self, stage: CopyStage) -> &RefCell<HashMap<ClientIdKey, Weak<ChatEntry>>> {

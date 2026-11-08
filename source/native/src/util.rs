@@ -1,5 +1,3 @@
-use {};
-
 /// Explicitly capturing async closure - clones elements in the second parens into
 /// the closure. Anything else will be moved.
 #[macro_export]

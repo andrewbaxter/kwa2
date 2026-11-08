@@ -2,7 +2,9 @@ use {
     crate::{
         api::req_post_json,
         pageutil::{
+            FormMemberRetention,
             FormOptChannelGroup,
+            FormOwnerRetention,
             FormPortrait,
             build_nol_form,
             req_form_portrait,
@@ -24,6 +26,7 @@ use {
         shared::ChannelGroupId,
         wire::c2s::{
             self,
+            ChannelRetention,
         },
     },
     std::rc::Rc,
@@ -39,8 +42,8 @@ struct MemberForm_ {
     portrait: FormPortrait,
     #[title("Group")]
     group: FormOptChannelGroup,
-    #[title("Keep history (days, empty for all)")]
-    retention_days: Option<u64>,
+    #[title("Keep history")]
+    retention: FormMemberRetention,
 }
 
 #[derive(rooting_forms::Form)]
@@ -57,8 +60,8 @@ struct OwnerForm_ {
     portrait: FormPortrait,
     #[title("Group")]
     group: FormOptChannelGroup,
-    #[title("Keep history (days, empty for all)")]
-    retention_days: Option<u64>,
+    #[title("Keep history")]
+    retention: FormOwnerRetention,
     #[title("Public: anyone can read")]
     public_read: bool,
 }
@@ -69,7 +72,7 @@ struct Values {
     shown: Option<(Option<String>, Option<String>)>,
     portrait: FormPortrait,
     group: Option<ChannelGroupId>,
-    retention_days: Option<u64>,
+    retention: ChannelRetention,
     public_read: Option<bool>,
 }
 
@@ -94,7 +97,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                             shown_description: local.shown_description.get(),
                             portrait: portrait.clone(),
                             group: FormOptChannelGroup(local.group.get()),
-                            retention_days: local.retention_days.get(),
+                            retention: FormOwnerRetention(local.retention.get()),
                             public_read: local.public_read.get(),
                         }));
                         (form_els.error, form_els.elements, Rc::new(move || {
@@ -105,7 +108,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                                 shown: Some((v.shown_name, v.shown_description)),
                                 portrait: v.portrait,
                                 group: v.group.0,
-                                retention_days: v.retention_days,
+                                retention: v.retention.0,
                                 public_read: Some(v.public_read),
                             });
                         }))
@@ -115,7 +118,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                             description: local.description.get(),
                             portrait: portrait.clone(),
                             group: FormOptChannelGroup(local.group.get()),
-                            retention_days: local.retention_days.get(),
+                            retention: FormMemberRetention(local.retention.get()),
                         }));
                         (form_els.error, form_els.elements, Rc::new(move || {
                             let v = form_state.parse()?;
@@ -125,7 +128,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                                 shown: None,
                                 portrait: v.portrait,
                                 group: v.group.0,
-                                retention_days: v.retention_days,
+                                retention: v.retention.0,
                                 public_read: None,
                             });
                         }))
@@ -166,10 +169,10 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                         } else {
                             Some(c2s::ModifyOption { value: new_values.group })
                         },
-                        retention_days: if new_values.retention_days == *local.retention_days.borrow() {
+                        retention: if new_values.retention == local.retention.get() {
                             None
                         } else {
-                            Some(c2s::ModifyOption { value: new_values.retention_days })
+                            Some(new_values.retention)
                         },
                         public_read: match new_values.public_read {
                             Some(read) if read != local.public_read.get() => Some(read),

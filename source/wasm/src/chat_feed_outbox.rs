@@ -43,7 +43,6 @@ use {
         rc::Rc,
         str::FromStr,
     },
-    web_sys::FileSystemDirectoryHandle,
 };
 
 struct OutboxFeed_ {
@@ -104,35 +103,46 @@ impl OutboxFeed {
         );
     }
 
-    async fn load_sources(&self) -> BTreeMap<Timestamp, FileSystemDirectoryHandle> {
-        return opfs_channel_dir_entries(&opfs_outbox_channel_dir(&self.0.sender, &self.0.id).await).await;
-    }
-
-    async fn create_entries<
-        'a,
-    >(
-        &self,
-        sources: impl Iterator<Item = (&'a Timestamp, &'a FileSystemDirectoryHandle)>,
-        limit: usize,
-    ) -> Vec<Rc<ChatEntry>> {
-        let mut out = vec![];
-        for (k, v) in sources {
-            if out.len() >= limit {
-                break;
-            }
-            match opfs_read_json::<OutboxMessage>(v, OPFS_FILENAME_MAIN).await {
-                Ok(main) => {
-                    if let OutboxMessageRel::EditOf(_) = main.rel {
-                        continue;
-                    }
-                    out.push(self.create_entry(k, main.client_id, main.body));
+    async fn load_sources(&self) -> BTreeMap<Timestamp, OutboxMessage> {
+        let entries = opfs_channel_dir_entries(&opfs_outbox_channel_dir(&self.0.sender, &self.0.id).await).await;
+        let mut out = BTreeMap::new();
+        let mut edits = vec![];
+        for (k, v) in entries {
+            match opfs_read_json::<OutboxMessage>(&v, OPFS_FILENAME_MAIN).await {
+                Ok(main) => match &main.rel {
+                    OutboxMessageRel::EditOf(target) => {
+                        edits.push((target.clone(), main.client_id, main.body));
+                    },
+                    OutboxMessageRel::None | OutboxMessageRel::ReplyTo(_) => {
+                        out.insert(k, main);
+                    },
                 },
                 Err(e) => {
                     state().log.log(&format!("Error processing outbox entry, skipping: {}", e));
                 },
             }
         }
+        if !edits.is_empty() {
+            self.0.chat_state.eg.event(|pc| {
+                for (target, client_id, body) in edits {
+                    self.0.chat_state.apply_edit_overlay(pc, target, &client_id, body);
+                }
+            }).unwrap();
+        }
         return out;
+    }
+
+    fn create_entries<
+        'a,
+    >(
+        &self,
+        sources: impl Iterator<Item = (&'a Timestamp, &'a OutboxMessage)>,
+        limit: usize,
+    ) -> Vec<Rc<ChatEntry>> {
+        return sources
+            .take(limit)
+            .map(|(k, m)| self.create_entry(k, m.client_id.clone(), m.body.clone()))
+            .collect();
     }
 }
 
@@ -151,16 +161,15 @@ impl Feed<ChatEntry> for OutboxFeed {
             async move {
                 let sources = self1.load_sources().await;
                 let mut early_entries =
-                    self1
-                        .create_entries(
-                            sources.range((Bound::Unbounded, Bound::Included(time.stamp))).rev(),
-                            WANT_COUNT,
-                        )
-                        .await;
+                    self1.create_entries(
+                        sources.range((Bound::Unbounded, Bound::Included(time.stamp))).rev(),
+                        WANT_COUNT,
+                    );
                 let late_entries =
-                    self1
-                        .create_entries(sources.range((Bound::Excluded(time.stamp), Bound::Unbounded)), WANT_COUNT)
-                        .await;
+                    self1.create_entries(
+                        sources.range((Bound::Excluded(time.stamp), Bound::Unbounded)),
+                        WANT_COUNT,
+                    );
                 let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                     return Ok(());
                 };
@@ -180,12 +189,10 @@ impl Feed<ChatEntry> for OutboxFeed {
             async move {
                 let sources = self1.load_sources().await;
                 let entries =
-                    self1
-                        .create_entries(
-                            sources.range((Bound::Unbounded, Bound::Excluded(time.stamp))).rev(),
-                            WANT_COUNT,
-                        )
-                        .await;
+                    self1.create_entries(
+                        sources.range((Bound::Unbounded, Bound::Excluded(time.stamp))).rev(),
+                        WANT_COUNT,
+                    );
                 let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                     return Ok(());
                 };
@@ -202,9 +209,10 @@ impl Feed<ChatEntry> for OutboxFeed {
             async move {
                 let sources = self1.load_sources().await;
                 let entries =
-                    self1
-                        .create_entries(sources.range((Bound::Excluded(time.stamp), Bound::Unbounded)), WANT_COUNT)
-                        .await;
+                    self1.create_entries(
+                        sources.range((Bound::Excluded(time.stamp), Bound::Unbounded)),
+                        WANT_COUNT,
+                    );
                 let Some(parent) = self1.0.parent.borrow().as_ref().and_then(|p| p.upgrade()) else {
                     return Ok(());
                 };

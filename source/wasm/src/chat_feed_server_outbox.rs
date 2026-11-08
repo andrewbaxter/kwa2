@@ -25,6 +25,7 @@ use {
         shared::{
             MessageRel,
             QualifiedChannelId,
+            QualifiedMessageId,
         },
         wire::c2s::{
             self,
@@ -82,17 +83,32 @@ impl ServerOutboxFeed {
 
     async fn load_sources(&self) -> Result<BTreeMap<ChatTime, OutboxEntry>, String> {
         let mut out = BTreeMap::new();
+        let mut edits = vec![];
         for e in req_get_retry(c2s::OutboxList { channel: self.0.id.clone() }).await? {
             if e.sender != self.0.sender {
                 continue;
             }
-            if let MessageRel::EditOf(_) = e.rel {
+            if let MessageRel::EditOf(target) = &e.rel {
+                edits.push((QualifiedMessageId {
+                    channel: self.0.id.clone(),
+                    message: target.clone(),
+                }, e.client_id, e.body));
                 continue;
             }
             out.insert(ChatTime {
                 stamp: e.created,
                 id: ChatTimeId::ServerOutbox(e.id.unique),
             }, e);
+        }
+        if !edits.is_empty() {
+            self.0.chat_state.eg.event(|pc| {
+                for (target, client_id, body) in &edits {
+                    self.0.chat_state.apply_edit_overlay(pc, target.clone(), client_id, body.clone());
+                }
+            }).unwrap();
+            for (_, client_id, _) in &edits {
+                opfs_delete_outbox_message(&self.0.sender, &self.0.id, client_id).await;
+            }
         }
         return Ok(out);
     }

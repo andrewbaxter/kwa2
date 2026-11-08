@@ -4,10 +4,7 @@ use {
         dbutil::tx,
         interface::{
             db::DbIdentity,
-            s2s::{
-                SpaghRecord,
-                SPAGH_RECORD_KEY,
-            },
+            s2s::SPAGH_RECORD_KEY,
         },
         subsystems::messages::local_signer,
         State,
@@ -52,10 +49,7 @@ use {
                 generate_publish_announce,
                 PublishArgs,
             },
-            tls_util::{
-                extract_expiry,
-                load_certified_key,
-            },
+            tls_util::load_certified_key,
         },
     },
     std::{
@@ -66,18 +60,14 @@ use {
             Mutex,
             RwLock,
         },
-        time::{
-            Duration,
-            SystemTime,
-        },
+        time::Duration,
     },
 };
 
-const RECORD_TTL: Duration = Duration::from_secs(60 * 60);
-const CERT_SWAP_BUFFER: Duration = Duration::from_secs(60 * 60 * 24 * 7);
-pub const CERT_REFRESH_PERIOD: Duration = Duration::from_secs(60 * 60);
+pub const RECORD_TTL: Duration = Duration::from_secs(60 * 60);
+pub const CERT_SWAP_BUFFER: Duration = Duration::from_secs(60 * 60 * 24 * 7);
 
-pub struct IdentityCerts(RwLock<HashMap<Identity, Arc<CertifiedKey>>>);
+pub struct IdentityCerts(pub RwLock<HashMap<Identity, Arc<CertifiedKey>>>);
 
 impl std::fmt::Debug for IdentityCerts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -99,25 +89,16 @@ pub struct SpaghPublishState {
     pub certs: Arc<IdentityCerts>,
 }
 
-impl SpaghPublishState {
-    pub fn new(publisher: Arc<Publisher>, publisher_info: InfoResponse, record: SpaghRecord) -> Self {
-        return Self {
-            publisher: publisher,
-            publisher_info: publisher_info,
-            record: serde_json::to_value(&record).unwrap(),
-            certs: Arc::new(IdentityCerts(RwLock::new(HashMap::new()))),
-        };
-    }
-}
+impl SpaghPublishState { }
 
-fn cert_options() -> RequestCertOptions {
+pub fn cert_options() -> RequestCertOptions {
     return RequestCertOptions {
         certifier: None,
         signature: true,
     };
 }
 
-async fn store_tls_state(
+pub async fn store_tls_state(
     state: &State,
     identity: Identity,
     tls_state: stored_self_tls::latest::RefreshTlsState,
@@ -135,7 +116,7 @@ async fn store_tls_state(
     return Ok(());
 }
 
-async fn set_values(
+pub async fn set_values(
     state: &State,
     identity: Identity,
     tls_state: &stored_self_tls::latest::RefreshTlsState,
@@ -202,72 +183,5 @@ pub async fn publish_identity(state: &State, identity: Identity) -> Result<(), l
         .announce(&identity, announcement)
         .await
         .context_with("Error announcing identity", ea!(identity = identity))?;
-    return Ok(());
-}
-
-pub async fn unpublish_identity(state: &State, identity: Identity) -> Result<(), loga::Error> {
-    state.spagh_publish.certs.0.write().unwrap().remove(&identity);
-    state
-        .spagh_publish
-        .publisher
-        .clear_identity(&identity)
-        .await
-        .context_with("Error clearing published identity", ea!(identity = identity))?;
-    return Ok(());
-}
-
-pub async fn publish_all(state: &State) -> Result<(), loga::Error> {
-    let identities = tx(&state.db, move |db_tx| {
-        return Ok(good_ormning::sqlite::good_query_many!(
-            db,
-            r#"select id from identity where soft_deleted_at is null"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?);
-    }).await?;
-    for identity in identities {
-        publish_identity(state, identity.0).await?;
-    }
-    return Ok(());
-}
-
-pub async fn refresh_certs(state: &State) -> Result<(), loga::Error> {
-    let rows = tx(&state.db, move |db_tx| {
-        return Ok(good_ormning::sqlite::good_query_many!(
-            db,
-            r#"select id, secret, tls_state from identity where soft_deleted_at is null and tls_state is not null"#;
-            db_tx
-        ).map_err(|e| loga::err(e.0))?);
-    }).await?;
-    for row in rows {
-        let identity = row.id.0;
-        let RefreshTlsState::V1(mut tls_state) = row.tls_state.unwrap();
-        let expiry = extract_expiry(tls_state.current.pub_pem.as_bytes())?;
-        let now = SystemTime::now();
-        let changed = match tls_state.pending.take() {
-            Some(pending) => {
-                if now >= expiry - CERT_SWAP_BUFFER {
-                    tls_state.current = pending;
-                    true
-                } else {
-                    tls_state.pending = Some(pending);
-                    false
-                }
-            },
-            None => {
-                if now >= expiry - CERT_SWAP_BUFFER - RECORD_TTL * 2 {
-                    let signer =
-                        Arc::new(Mutex::new(local_signer(row.secret.0)?)) as Arc<Mutex<dyn IdentitySigner>>;
-                    tls_state.pending = Some(request_cert(&state.log, signer, cert_options()).await?);
-                    true
-                } else {
-                    false
-                }
-            },
-        };
-        if changed {
-            store_tls_state(state, identity, tls_state.clone()).await?;
-            set_values(state, identity, &tls_state).await?;
-        }
-    }
     return Ok(());
 }

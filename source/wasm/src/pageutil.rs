@@ -48,7 +48,10 @@ use {
             Portrait,
         },
         wire::{
-            c2s::ModifyOption,
+            c2s::{
+                ChannelRetention,
+                ModifyOption,
+            },
             kwaurl::KwaUrl,
         },
     },
@@ -63,7 +66,10 @@ use {
         render::svg,
     },
     wasm_bindgen::JsCast,
-    web_sys::HtmlSelectElement,
+    web_sys::{
+        HtmlInputElement,
+        HtmlSelectElement,
+    },
 };
 
 #[derive(Clone)]
@@ -233,12 +239,11 @@ impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormOptChannelGroup {
                     cgs.sort_by_cached_key(|x| (x.last_used, x.res.id.clone()));
                     for i in cgs {
                         let value = serde_json::to_string(&i.res.id).unwrap();
-                        out.ref_push(el("option").attr("value", &value).text(&i.res.name));
-                        if let Some(s) = &from {
-                            if *s == Some(i.res.id) {
-                                out.ref_attr("value", &value);
-                            }
+                        let option_el = el("option").attr("value", &value).text(&i.res.name);
+                        if from == Some(Some(i.res.id)) {
+                            option_el.ref_attr("selected", "");
                         }
+                        out.ref_push(option_el);
                     }
                     return Ok(vec![out]);
                 }
@@ -247,6 +252,148 @@ impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormOptChannelGroup {
             err_el: err_el,
             select_el: select_el,
         }))
+    }
+}
+
+const RETENTION_KIND_NOTHING: &str = "nothing";
+const RETENTION_KIND_VIEWED: &str = "viewed";
+const RETENTION_KIND_ALL: &str = "all";
+const RETENTION_KIND_DAYS: &str = "days";
+
+struct FormRetentionState {
+    err_el: El,
+    select_el: El,
+    days_el: El,
+}
+
+impl FormRetentionState {
+    fn parse(&self) -> Result<ChannelRetention, ()> {
+        self.err_el.ref_clear();
+        let kind = self.select_el.raw().dyn_into::<HtmlSelectElement>().unwrap().value();
+        match kind.as_str() {
+            RETENTION_KIND_NOTHING => return Ok(ChannelRetention::Nothing),
+            RETENTION_KIND_VIEWED => return Ok(ChannelRetention::Viewed),
+            RETENTION_KIND_ALL => return Ok(ChannelRetention::All),
+            RETENTION_KIND_DAYS => {
+                let raw = self.days_el.raw().dyn_into::<HtmlInputElement>().unwrap().value();
+                match raw.trim().parse::<u64>() {
+                    Ok(days) if days > 0 => return Ok(ChannelRetention::Days(days)),
+                    _ => {
+                        self.err_el.ref_text("Enter a whole number of days greater than zero");
+                        return Err(());
+                    },
+                }
+            },
+            other => {
+                self.err_el.ref_text(&format!("Unknown retention kind [{}]", other));
+                return Err(());
+            },
+        }
+    }
+}
+
+fn new_form_retention(
+    options: &[(&'static str, &'static str)],
+    from: ChannelRetention,
+) -> (rooting_forms::FormElements, FormRetentionState) {
+    let err_el = err_el();
+    let select_el = el("select");
+    let days_el = el("input").attr("type", "number").attr("min", "1").attr("placeholder", "Days");
+    let (current_kind, current_days) = match from {
+        ChannelRetention::Nothing => (RETENTION_KIND_NOTHING, None),
+        ChannelRetention::Viewed => (RETENTION_KIND_VIEWED, None),
+        ChannelRetention::All => (RETENTION_KIND_ALL, None),
+        ChannelRetention::Days(d) => (RETENTION_KIND_DAYS, Some(d)),
+    };
+    for (kind, label) in options {
+        let option_el = el("option").attr("value", kind).text(label);
+        if *kind == current_kind {
+            option_el.ref_attr("selected", "");
+        }
+        select_el.ref_push(option_el);
+    }
+    if let Some(d) = current_days {
+        days_el.ref_attr("value", &d.to_string());
+    } else {
+        days_el.ref_attr("hidden", "");
+    }
+    select_el.ref_on("change", {
+        let select_el = select_el.weak();
+        let days_el = days_el.weak();
+        move |_| {
+            let (Some(select_el), Some(days_el)) = (select_el.upgrade(), days_el.upgrade()) else {
+                return;
+            };
+            let kind = select_el.raw().dyn_into::<HtmlSelectElement>().unwrap().value();
+            if kind == RETENTION_KIND_DAYS {
+                days_el.ref_remove_attr("hidden");
+            } else {
+                days_el.ref_attr("hidden", "");
+            }
+        }
+    });
+    return (rooting_forms::FormElements {
+        error: Some(err_el.clone()),
+        elements: vec![select_el.clone(), days_el.clone()],
+    }, FormRetentionState {
+        err_el: err_el,
+        select_el: select_el,
+        days_el: days_el,
+    });
+}
+
+#[derive(Clone)]
+pub struct FormMemberRetention(pub ChannelRetention);
+
+impl rooting_forms::FormState<FormMemberRetention> for FormRetentionState {
+    fn parse(&self) -> Result<FormMemberRetention, ()> {
+        return Ok(FormMemberRetention(FormRetentionState::parse(self)?));
+    }
+}
+
+impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormMemberRetention {
+    fn new_form_with_(
+        _context: &C,
+        _field: &str,
+        from: Option<&Self>,
+        _depth: usize,
+    ) -> (rooting_forms::FormElements, Box<dyn rooting_forms::FormState<Self>>) {
+        let (els, state) =
+            new_form_retention(
+                &[
+                    (RETENTION_KIND_NOTHING, "Nothing, just browse"),
+                    (RETENTION_KIND_VIEWED, "Only what's been viewed"),
+                    (RETENTION_KIND_ALL, "Everything"),
+                    (RETENTION_KIND_DAYS, "A number of days"),
+                ],
+                from.map(|x| x.0).unwrap_or(ChannelRetention::All),
+            );
+        return (els, Box::new(state));
+    }
+}
+
+#[derive(Clone)]
+pub struct FormOwnerRetention(pub ChannelRetention);
+
+impl rooting_forms::FormState<FormOwnerRetention> for FormRetentionState {
+    fn parse(&self) -> Result<FormOwnerRetention, ()> {
+        return Ok(FormOwnerRetention(FormRetentionState::parse(self)?));
+    }
+}
+
+impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormOwnerRetention {
+    fn new_form_with_(
+        _context: &C,
+        _field: &str,
+        from: Option<&Self>,
+        _depth: usize,
+    ) -> (rooting_forms::FormElements, Box<dyn rooting_forms::FormState<Self>>) {
+        let (els, state) =
+            new_form_retention(
+                &[(RETENTION_KIND_ALL, "Everything"), (RETENTION_KIND_DAYS, "A number of days")],
+                from.map(|x| x.0).unwrap_or(ChannelRetention::All),
+            );
+        return (els, Box::new(state));
     }
 }
 

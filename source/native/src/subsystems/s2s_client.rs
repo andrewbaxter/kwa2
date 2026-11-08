@@ -1,27 +1,18 @@
 use {
     crate::interface::s2s::{
         s2sv1,
-        s2sv1t::NotifyTimestamp,
         ChannelInfoRes,
         GetActivity,
         GetChannelInfo,
-        GetFile,
         GetJoinPreview,
-        GetMessageHistory,
         JoinPreviewRes,
-        GetSnapLookup,
-        GetSnapPage,
-        GetSnapPageContainingTime,
         Identify,
         IdentifyChallenge,
         IdentifyRes,
-        Notify,
-        PullOutbox,
         PulledMessages,
         S2sErrorBody,
         SpaghRecord,
         SPAGH_RECORD_KEY,
-        SnapLookupRes,
         StartIdentify,
         StartIdentifyRes,
     },
@@ -78,7 +69,6 @@ use {
             Arc,
             Mutex,
         },
-        time::Duration,
     },
 };
 
@@ -86,37 +76,25 @@ pub const S2SV1_PATH: &str = "/s/1";
 pub type Signer = Arc<Mutex<dyn IdentitySigner>>;
 
 pub struct S2sClient {
-    log: Log,
-    resolver: Resolver,
-    limits: Limits,
-    tokens: Cache<(Identity, Identity), String>,
+    pub log: Log,
+    pub resolver: Resolver,
+    pub limits: Limits,
+    pub tokens: Cache<(Identity, Identity), String>,
 }
 
-fn auth_headers(token: &str) -> HashMap<String, String> {
+pub fn auth_headers(token: &str) -> HashMap<String, String> {
     let mut h = HashMap::new();
     h.insert("Authorization".to_string(), format!("Bearer {}", token));
     return h;
 }
 
-fn signer_identity(signer: &Signer) -> Result<Identity, loga::Error> {
+pub fn signer_identity(signer: &Signer) -> Result<Identity, loga::Error> {
     let mut s = signer.lock().unwrap();
     return Ok(s.public_key_root()?.identity());
 }
 
 impl S2sClient {
-    pub fn new(log: Log, resolver: Resolver) -> Self {
-        return Self {
-            log: log,
-            resolver: resolver,
-            limits: Limits {
-                read_body_size: 16 * 1024 * 1024,
-                ..Default::default()
-            },
-            tokens: Cache::builder().time_to_live(Duration::from_secs(240)).build(),
-        };
-    }
-
-    async fn request<
+    pub async fn request<
         T: DeserializeOwned,
     >(
         &self,
@@ -134,7 +112,7 @@ impl S2sClient {
         );
     }
 
-    async fn request_raw(
+    pub async fn request_raw(
         &self,
         target: Identity,
         method: Method,
@@ -236,19 +214,19 @@ impl S2sClient {
         return Ok((content_type, body, url));
     }
 
-    async fn post<
+    pub async fn post<
         T: DeserializeOwned,
     >(&self, target: Identity, headers: &HashMap<String, String>, req: &s2sv1::Req) -> Result<T, loga::Error> {
         return self.request(target, Method::POST, "", headers, serde_json::to_vec(req).unwrap()).await;
     }
 
-    async fn get<
+    pub async fn get<
         R: PathReqTrait,
     >(&self, target: Identity, headers: &HashMap<String, String>, req: &R) -> Result<R::Resp, loga::Error> {
         return self.request(target, Method::GET, &format!("/{}", req.serialize_path()), headers, vec![]).await;
     }
 
-    async fn authenticate(&self, target: Identity, signer: &Signer) -> Result<String, loga::Error> {
+    pub async fn authenticate(&self, target: Identity, signer: &Signer) -> Result<String, loga::Error> {
         let identity = signer_identity(signer)?;
         if let Some(token) = self.tokens.get(&(target, identity)).await {
             return Ok(token);
@@ -275,7 +253,7 @@ impl S2sClient {
         return Ok(identify.token);
     }
 
-    async fn post_authed<
+    pub async fn post_authed<
         T: DeserializeOwned,
     >(&self, target: Identity, signer: &Signer, req: &s2sv1::Req) -> Result<T, loga::Error> {
         let identity = signer_identity(signer)?;
@@ -287,7 +265,7 @@ impl S2sClient {
         return res;
     }
 
-    async fn get_opt_authed<
+    pub async fn get_opt_authed<
         R: PathReqTrait,
     >(&self, target: Identity, signer: Option<&Signer>, req: &R) -> Result<R::Resp, loga::Error> {
         let Some(signer) = signer else {
@@ -302,31 +280,6 @@ impl S2sClient {
         return res;
     }
 
-    pub async fn notify(
-        &self,
-        target: Identity,
-        signer: &Signer,
-        owner: Identity,
-        channel: shared::interface::shared::ChannelId,
-    ) -> Result<(), loga::Error> {
-        let ts = NotifyTimestamp {
-            owner: owner,
-            channel: channel,
-            timestamp: jiff::Timestamp::now(),
-        };
-        let message = serde_json::to_string(&ts).unwrap();
-        let (_root, _chain, sig) = signer.lock().unwrap().sign(NotifyTimestamp::DOMAIN, message.as_bytes())?;
-        let signed = JsonSignature {
-            message: message,
-            signature: BytesZb32(sig),
-            _p: Default::default(),
-        };
-        return self.post(target, &HashMap::new(), &s2sv1::Req::Notify(Notify {
-            signer: signer_identity(signer)?,
-            signed: signed,
-        })).await;
-    }
-
     pub async fn join(
         &self,
         target: Identity,
@@ -334,36 +287,6 @@ impl S2sClient {
         req: crate::interface::s2s::Join,
     ) -> Result<crate::interface::s2s::JoinRes, loga::Error> {
         return self.post_authed(target, signer, &s2sv1::Req::Join(req)).await;
-    }
-
-    pub async fn pull_outbox(
-        &self,
-        target: Identity,
-        signer: &Signer,
-        req: PullOutbox,
-    ) -> Result<PulledMessages, loga::Error> {
-        return self.post_authed(target, signer, &s2sv1::Req::PullOutbox(req)).await;
-    }
-
-    pub async fn get_file(
-        &self,
-        target: Identity,
-        signer: Option<&Signer>,
-        req: GetFile,
-    ) -> Result<(String, Vec<u8>), loga::Error> {
-        let path = format!("/{}", req.serialize_path());
-        let Some(signer) = signer else {
-            let (mime, body, _) = self.request_raw(target, Method::GET, &path, &HashMap::new(), vec![]).await?;
-            return Ok((mime, body));
-        };
-        let identity = signer_identity(signer)?;
-        let token = self.authenticate(target, signer).await?;
-        let res = self.request_raw(target, Method::GET, &path, &auth_headers(&token), vec![]).await;
-        if res.is_err() {
-            self.tokens.invalidate(&(target, identity)).await;
-        }
-        let (mime, body, _) = res?;
-        return Ok((mime, body));
     }
 
     pub async fn get_join_preview(
@@ -389,42 +312,6 @@ impl S2sClient {
         signer: Option<&Signer>,
         req: GetActivity,
     ) -> Result<PulledMessages, loga::Error> {
-        return self.get_opt_authed(target, signer, &req).await;
-    }
-
-    pub async fn get_snap_page(
-        &self,
-        target: Identity,
-        signer: Option<&Signer>,
-        req: GetSnapPage,
-    ) -> Result<Option<PulledMessages>, loga::Error> {
-        return self.get_opt_authed(target, signer, &req).await;
-    }
-
-    pub async fn get_snap_page_containing_time(
-        &self,
-        target: Identity,
-        signer: Option<&Signer>,
-        req: GetSnapPageContainingTime,
-    ) -> Result<Option<u64>, loga::Error> {
-        return self.get_opt_authed(target, signer, &req).await;
-    }
-
-    pub async fn get_snap_lookup(
-        &self,
-        target: Identity,
-        signer: Option<&Signer>,
-        req: GetSnapLookup,
-    ) -> Result<Option<SnapLookupRes>, loga::Error> {
-        return self.get_opt_authed(target, signer, &req).await;
-    }
-
-    pub async fn get_message_history(
-        &self,
-        target: Identity,
-        signer: Option<&Signer>,
-        req: GetMessageHistory,
-    ) -> Result<Option<PulledMessages>, loga::Error> {
         return self.get_opt_authed(target, signer, &req).await;
     }
 }
