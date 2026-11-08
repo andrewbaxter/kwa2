@@ -167,6 +167,7 @@ struct EntryState<E: Entry> {
     entry_el: El,
     _entry_el_observe: ObserveHandle,
     sticky: Cell<bool>,
+    sticky_scroll_top: Rc<Cell<f64>>,
 }
 
 impl<E: Entry> EntryState<E> {
@@ -181,12 +182,26 @@ impl<E: Entry> EntryState<E> {
             s.set_property("top", "0px").unwrap();
             s.set_property("bottom", "0px").unwrap();
             s.set_property("z-index", "1").unwrap();
+            s.set_property("max-height", "100cqh").unwrap();
+            s.set_property("overflow-y", "auto").unwrap();
+            s.set_property("overscroll-behavior", "contain").unwrap();
         } else {
             s.remove_property("position").unwrap();
             s.remove_property("top").unwrap();
             s.remove_property("bottom").unwrap();
             s.remove_property("z-index").unwrap();
+            s.remove_property("max-height").unwrap();
+            s.remove_property("overflow-y").unwrap();
+            s.remove_property("overscroll-behavior").unwrap();
+            self.sticky_scroll_top.set(0.);
         }
+    }
+
+    fn restore_sticky_scroll(&self) {
+        if !self.sticky.get() {
+            return;
+        }
+        self.entry_el.raw().set_scroll_top(self.sticky_scroll_top.get());
     }
 
     fn top(&self) -> f64 {
@@ -309,12 +324,24 @@ impl<E: Entry> Infiniscroll_<E> {
     fn realize_entry(&self, pc: &mut ProcessingContext, feed_id: &E::FeedId, entry: Rc<E>) -> EntryState<E> {
         let entry_el = entry.create_el(pc);
         let sticky = self.want_sticky.borrow().iter().any(|s| s == &entry.time());
+        let sticky_scroll_top = Rc::new(Cell::new(0.));
+        entry_el.ref_on("scroll", {
+            let sticky_scroll_top = sticky_scroll_top.clone();
+            let entry_el = entry_el.weak();
+            move |_| {
+                let Some(entry_el) = entry_el.upgrade() else {
+                    return;
+                };
+                sticky_scroll_top.set(entry_el.raw().scroll_top());
+            }
+        });
         let out = EntryState {
             feed_id: feed_id.clone(),
             entry: entry,
             entry_el: entry_el.clone(),
             _entry_el_observe: self.entry_resize_observer.borrow().as_ref().unwrap().observe(&entry_el.raw()),
             sticky: Cell::new(false),
+            sticky_scroll_top: sticky_scroll_top,
         };
         out.set_sticky(sticky);
         return out;
@@ -510,6 +537,7 @@ impl<E: 'static + Entry> Infinite<E> {
             s.set_property("scrollbar-width", "none").unwrap();
             s.set_property("max-height", "100%").unwrap();
             s.set_property("pointer-events", "initial").unwrap();
+            s.set_property("container-type", "size").unwrap();
             //. s.set_property("transition", "padding-top 0.2s ease-out, padding-bottom 0.2s ease-out").unwrap();
         }
 
@@ -1025,6 +1053,7 @@ impl<E: 'static + Entry> Infinite<E> {
                 feed.early_reserve.push_front(evicted_e_state.entry.clone());
                 if self.0.want_sticky.borrow().iter().any(|s| s == &evicted_e_state.entry.time()) {
                     self.0.early_sticky.ref_push(evicted_e_state.el().clone());
+                    evicted_e_state.restore_sticky_scroll();
                     *self.0.reserve_sticky_entry.borrow_mut() = Some(evicted_e_state);
                 }
             }
@@ -1042,8 +1071,12 @@ impl<E: 'static + Entry> Infinite<E> {
                 feed.late_reserve.push_front(evicted_e_state.entry.clone());
                 if self.0.want_sticky.borrow().iter().any(|s| s == &evicted_e_state.entry.time()) {
                     self.0.late_sticky.ref_push(evicted_e_state.el().clone());
+                    evicted_e_state.restore_sticky_scroll();
                     *self.0.reserve_sticky_entry.borrow_mut() = Some(evicted_e_state);
                 }
+            }
+            for e in self.0.real.borrow().iter() {
+                e.restore_sticky_scroll();
             }
 
             // # Prune reserve and unset stop status
