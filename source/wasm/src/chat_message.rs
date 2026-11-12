@@ -2,9 +2,11 @@ use {
     crate::{
         api::identity_image,
         blocks::{
+            ViewBlock,
             format_size,
             order_blocks,
         },
+        event_editor::event_timeline_text,
         media_viewer::open_media_viewer,
         chat::{
             ChatMode,
@@ -173,68 +175,7 @@ pub fn build_chat_entry_message(pc: &mut ProcessingContext, m: &ChatEntryMessage
                                         msg_root.ref_modify_classes(
                                             &[(&style_export::class_state_hidden().value, blocks.borrow().is_empty())],
                                         );
-                                        body_el.ref_clear();
-                                        let ordered = order_blocks(&*blocks.borrow());
-                                        for text in &ordered.texts {
-                                            body_el.ref_push(
-                                                style_export::leaf_chat_entry_message_text(
-                                                    style_export::LeafChatEntryMessageTextArgs {
-                                                        content: malarkdowney::build_readonly(text),
-                                                    },
-                                                ).root,
-                                            );
-                                        }
-                                        if !ordered.media.is_empty() {
-                                            let mut squares = vec![];
-                                            for (i, file) in ordered.media.iter().enumerate() {
-                                                let square =
-                                                    style_export::leaf_chat_entry_message_media_square(
-                                                        style_export::LeafChatEntryMessageMediaSquareArgs {
-                                                            content: style_export::leaf_media_thumb(
-                                                                style_export::LeafMediaThumbArgs {
-                                                                    src: file.url(true),
-                                                                    video: file.is_video(),
-                                                                    src_is_video: file.thumbnail_is_video(),
-                                                                },
-                                                            ).root,
-                                                        },
-                                                    ).root;
-                                                square.ref_on("click", {
-                                                    let media = ordered.media.clone();
-                                                    move |ev| {
-                                                        ev.stop_propagation();
-                                                        open_media_viewer(media.clone(), i);
-                                                    }
-                                                });
-                                                squares.push(square);
-                                            }
-                                            body_el.ref_push(
-                                                style_export::cont_chat_entry_message_media(
-                                                    style_export::ContChatEntryMessageMediaArgs { children: squares },
-                                                ).root,
-                                            );
-                                        }
-                                        for file in &ordered.files {
-                                            body_el.ref_push(
-                                                style_export::leaf_chat_entry_message_file(
-                                                    style_export::LeafChatEntryMessageFileArgs {
-                                                        name: file.download_name(),
-                                                        size: format_size(file.size),
-                                                        link: file.url(false),
-                                                    },
-                                                ).root.on("click", |ev| ev.stop_propagation()),
-                                            );
-                                        }
-                                        for extension in &ordered.extensions {
-                                            body_el.ref_push(
-                                                style_export::leaf_chat_entry_message_extension(
-                                                    style_export::LeafChatEntryMessageExtensionArgs {
-                                                        key: extension.key.clone(),
-                                                        json: serde_json::to_string_pretty(&extension.data).unwrap(),
-                                                    },
-                                                ).root.on("click", |ev| ev.stop_propagation()),
-                                            );
-                                        }
+                                        build_message_body(&body_el, &*blocks.borrow());
                                     }
                                 ),
                             );
@@ -335,4 +276,69 @@ pub fn build_chat_entry_message(pc: &mut ProcessingContext, m: &ChatEntryMessage
         ),
     );
     return out;
+}
+
+pub fn build_message_body(body_el: &El, blocks: &[ViewBlock]) {
+    body_el.ref_clear();
+    let ordered = order_blocks(blocks);
+    for text in &ordered.texts {
+        body_el.ref_push(
+            style_export::leaf_chat_entry_message_text(
+                style_export::LeafChatEntryMessageTextArgs { content: malarkdowney::build_readonly(text) },
+            ).root,
+        );
+    }
+    for event in &ordered.events {
+        let timeline = match event_timeline_text(event) {
+            Ok(t) => t,
+            Err(e) => format!("Invalid event time: {}", e),
+        };
+        body_el.ref_push(style_export::leaf_chat_entry_message_event(style_export::LeafChatEntryMessageEventArgs {
+            timeline: timeline,
+            content: malarkdowney::build_readonly(&event.text),
+        }).root);
+    }
+    if !ordered.media.is_empty() {
+        let mut squares = vec![];
+        for (i, file) in ordered.media.iter().enumerate() {
+            let square =
+                style_export::leaf_chat_entry_message_media_square(
+                    style_export::LeafChatEntryMessageMediaSquareArgs {
+                        content: style_export::leaf_media_thumb(style_export::LeafMediaThumbArgs {
+                            src: file.url(true),
+                            video: file.is_video(),
+                            src_is_video: file.thumbnail_is_video(),
+                        }).root,
+                    },
+                ).root;
+            square.ref_on("click", {
+                let media = ordered.media.clone();
+                move |ev| {
+                    ev.stop_propagation();
+                    open_media_viewer(media.clone(), i);
+                }
+            });
+            squares.push(square);
+        }
+        body_el.ref_push(
+            style_export::cont_chat_entry_message_media(
+                style_export::ContChatEntryMessageMediaArgs { children: squares },
+            ).root,
+        );
+    }
+    for file in &ordered.files {
+        body_el.ref_push(style_export::leaf_chat_entry_message_file(style_export::LeafChatEntryMessageFileArgs {
+            name: file.download_name(),
+            size: format_size(file.size),
+            link: file.url(false),
+        }).root.on("click", |ev| ev.stop_propagation()));
+    }
+    for extension in &ordered.extensions {
+        body_el.ref_push(
+            style_export::leaf_chat_entry_message_extension(style_export::LeafChatEntryMessageExtensionArgs {
+                key: extension.key.clone(),
+                json: serde_json::to_string_pretty(&extension.data).unwrap(),
+            }).root.on("click", |ev| ev.stop_propagation()),
+        );
+    }
 }

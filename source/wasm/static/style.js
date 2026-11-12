@@ -278,6 +278,7 @@
   const varSMenuIcon = "1cm";
   const varSTopButtonIcon = "0.7cm";
   const varSFormButtonIcon = "0.47cm";
+  const varSUnread = "0.3cm";
 
   const varPPage = "0.3cm";
   const varPSmall = "0.2cm";
@@ -758,8 +759,8 @@ svg.spinner4 path {
       s.backgroundBlendMode = "multiply";
       s.color = varCNotifyForeground;
       s.borderRadius = "999cm";
-      s.width = "0.3cm";
-      s.height = "0.3cm";
+      s.width = varSUnread;
+      s.height = varSUnread;
       s.margin = "0.2cm";
     },
     [`.${classStateHidden}`]: (s) => {
@@ -1285,6 +1286,10 @@ svg.spinner4 path {
   presentation.contNonchatHeadBar =
     /** @type { Presentation["contNonchatHeadBar"] } */ (args) => {
       const backUnread = e("div", {}, { styles_: backUnreadStyles });
+      const back = headIconButton({
+        svg: svgIconBack,
+        link: args.backLink,
+      });
       const children = [];
       children.push(
         e(
@@ -1303,13 +1308,7 @@ svg.spinner4 path {
                 },
               }),
             ],
-            children_: [
-              headIconButton({
-                svg: svgIconBack,
-                link: args.backLink,
-              }),
-              backUnread,
-            ],
+            children_: [back, backUnread],
           },
         ),
       );
@@ -1371,6 +1370,7 @@ svg.spinner4 path {
           ],
           children_: children,
         }),
+        back: back,
         backUnread: backUnread,
       };
     };
@@ -1678,6 +1678,10 @@ svg.spinner4 path {
       <path d="M 5.9,2.7 7.3,4.1" /> `;
   const svgIconHistory = `<circle cx="5" cy="5" r="3.6" />
       <path d="M 5,2.9 V 5 L 6.5,6" /> `;
+  const svgIconCalendar = `<rect x="1.5" y="2.5" width="7" height="6" rx="0.8" />
+      <path d="M 1.5,4.5 H 8.5" />
+      <path d="M 3.5,1.5 V 3.2" />
+      <path d="M 6.5,1.5 V 3.2" /> `;
   const svgIconCheck = `<path d="M 1.8,5.2 4,7.4 8.4,2.6" /> `;
   const svgIconTrash = `<path d="M 2,3 H 8" />
       <path d="M 4,3 V 1.8 H 6 V 3" />
@@ -1898,6 +1902,56 @@ svg.spinner4 path {
               s.border = `${varLThin} solid ${varCBackgroundGlass}`;
               s.borderRadius = varRInput;
               s.padding = varPSmall;
+            },
+            " input[type=checkbox]": (s) => {
+              s.appearance = "none";
+              s.minWidth = varSMenuIcon;
+              s.minHeight = varSMenuIcon;
+              s.padding = "0";
+              s.verticalAlign = "middle";
+              s.cursor = "pointer";
+            },
+            " input[type=checkbox]:hover": (s) => {
+              s.backgroundColor = varCBackgroundDark;
+            },
+            " input[type=checkbox]:checked": (s) => {
+              s.backgroundColor = varCBackgroundDark;
+            },
+            " input[type=checkbox]:checked:hover": (s) => {
+              s.backgroundColor = `color-mix(in srgb, ${varCBackgroundDark} 50%, transparent)`;
+            },
+            " div.rf_input_small:has(> label > input[type=checkbox])": (s) => {
+              s.display = "flex";
+              s.flexWrap = "wrap";
+              s.gap = varPSmall;
+            },
+            " label:has(> input[type=checkbox])": (s) => {
+              s.display = "inline-grid";
+              s.justifyItems = "center";
+              s.alignItems = "center";
+              s.minWidth = varSMenuIcon;
+              s.minHeight = varSMenuIcon;
+              s.borderRadius = varRInput;
+              s.cursor = "pointer";
+              s.pointerEvents = "initial";
+            },
+            " label:has(> input[type=checkbox]):hover": (s) => {
+              s.backgroundColor = varCBackgroundDark;
+            },
+            " label:has(> input[type=checkbox]:checked)": (s) => {
+              s.backgroundColor = varCBackgroundDark;
+            },
+            " label:has(> input[type=checkbox]:checked):hover": (s) => {
+              s.backgroundColor = `color-mix(in srgb, ${varCBackgroundDark} 50%, transparent)`;
+            },
+            " label > input[type=checkbox]": (s) => {
+              s.position = "absolute";
+              s.opacity = "0";
+              s.width = "0";
+              s.height = "0";
+              s.minWidth = "0";
+              s.minHeight = "0";
+              s.border = "none";
             },
             " .rf_error": (s) => {
               s.display = "block";
@@ -2181,6 +2235,7 @@ svg.spinner4 path {
                   },
                 }),
               ],
+              children_: [args.right],
             },
           ),
         );
@@ -3633,6 +3688,428 @@ svg.spinner4 path {
     };
 
   ///////////////////////////////////////////////////////////////////////////////
+  // xx Components, styles: events
+
+  presentation.leafChatHeadBarRightCalendar =
+    /** @type { Presentation["leafChatHeadBarRightCalendar"] } */ (args) => {
+      return { root: headIconButton({ link: args.link, svg: svgIconCalendar }) };
+    };
+
+  presentation.leafChatHeadBarRightMessages =
+    /** @type { Presentation["leafChatHeadBarRightMessages"] } */ (args) => {
+      return { root: headIconButton({ link: args.link, svg: svgIconMessage }) };
+    };
+
+  const eventTimelineStyle = s("event_timeline", {
+    "": (s) => {
+      s.display = "flex";
+      s.flexDirection = "row";
+      s.alignItems = "center";
+      s.gap = varPSmall;
+      s.minWidth = "0";
+      s.alignSelf = "stretch";
+      s.color = varCForegroundLight;
+    },
+    ">span": (s) => {
+      s.minWidth = "0";
+      s.flexShrink = "1";
+    },
+    ">svg": (s) => {
+      s.color = varCForegroundVeryLight;
+    },
+  });
+  const eventTimelineChildren = /** @type { (text: string) => HTMLElement[] } */ (
+    text,
+  ) => {
+    return [
+      leafSvg({ text: svgIconCalendar, width: varSChatControlsButton }),
+      e("span", { textContent: text }, {}),
+    ];
+  };
+
+  presentation.leafChatEntryMessageEvent =
+    /** @type { Presentation["leafChatEntryMessageEvent"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              contVboxStyle,
+              s("leaf_chat_entry_message_event", {
+                "": (s) => {
+                  s.gap = "0.1cm";
+                  s.minWidth = "0";
+                  s.alignSelf = "stretch";
+                  s.pointerEvents = "initial";
+                },
+              }),
+            ],
+            children_: [
+              e("div", {}, {
+                styles_: [eventTimelineStyle],
+                children_: eventTimelineChildren(args.timeline),
+              }),
+              args.content,
+            ],
+          },
+        ),
+      };
+    };
+
+  presentation.leafChatEditorToolboxButtonEvent =
+    /** @type { Presentation["leafChatEditorToolboxButtonEvent"] } */ (args) => {
+      return { root: chatControlsIconButton(svgIconCalendar, "Add event") };
+    };
+
+  presentation.leafChatEditorEvent =
+    /** @type { Presentation["leafChatEditorEvent"] } */ (args) => {
+      const timeline = e(
+        "div",
+        { title: "Edit event time", tabIndex: 0, role: "button" },
+        {
+          styles_: [eventTimelineStyle, onwhiteSelectableStyle],
+          children_: eventTimelineChildren(args.timeline),
+        },
+      );
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              contVboxStyle,
+              s("leaf_chat_editor_event", {
+                "": (s) => {
+                  s.gap = "0.1cm";
+                  s.minWidth = "0";
+                },
+              }),
+            ],
+            children_: [
+              timeline,
+              e("div", {}, { styles_: [chatEditorTextStyle], children_: [args.editor] }),
+            ],
+          },
+        ),
+        timeline: timeline,
+      };
+    };
+
+  ///////////////////////////////////////////////////////////////////////////////
+  // xx Components, styles: calendar
+
+  const varSCalendar = "10cm";
+  const varSCalendarMark = `calc(${varSUnread} * 2 / 3)`;
+  const varSCalendarWidth = `min(100cqw - 2 * ${varPPage}, ${varSCalendar})`;
+  const varSCalendarCellHeight = `calc((${varSCalendarWidth} - 6 * ${varPSmall}) / 7 * 4 / 3)`;
+
+  presentation.contCalendarMonth =
+    /** @type { Presentation["contCalendarMonth"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              s("cont_calendar_month", {
+                "": (s) => {
+                  s.display = "grid";
+                  s.gridTemplateColumns = "repeat(7, minmax(0, 1fr))";
+                  s.gap = varPSmall;
+                  s.width = varSCalendarWidth;
+                  s.marginLeft = "auto";
+                  s.marginRight = "auto";
+                  s.pointerEvents = "none";
+                  s.position = "relative";
+                },
+              }),
+              args.overlapNext
+                ? s("cont_calendar_month_overlap", {
+                    "": (s) => {
+                      s.marginBottom = `calc(-0.5 * ${varSCalendarCellHeight})`;
+                    },
+                  })
+                : s("cont_calendar_month_no_overlap", {
+                    "": (s) => {
+                      s.marginBottom = `calc(0.5 * ${varSCalendarCellHeight})`;
+                    },
+                  }),
+            ],
+            children_: args.children,
+          },
+        ),
+      };
+    };
+
+  presentation.leafCalendarDay =
+    /** @type { Presentation["leafCalendarDay"] } */ (args) => {
+      const styles = [
+        s("leaf_calendar_day", {
+          "": (s) => {
+            s.position = "relative";
+            s.aspectRatio = "3 / 4";
+            s.border = `${varLVeryThin} solid ${varCForegroundUltraLight}`;
+            s.overflow = "hidden";
+            s.display = "grid";
+            s.justifyItems = "center";
+            s.alignItems = "center";
+            s.fontSize = varFMenu;
+            s.fontWeight = varWHead;
+            s.color = varCForegroundUltraLight;
+            s.pointerEvents = "initial";
+            s.cursor = "pointer";
+          },
+          ":hover": (s) => {
+            s.outline = `${varLThin} solid ${varCNotifyBright}`;
+            s.zIndex = "1";
+          },
+        }),
+      ];
+      if (!args.past) {
+        styles.push(
+          s("leaf_calendar_day_future", {
+            "": (s) => {
+              s.backgroundColor = "white";
+            },
+          }),
+        );
+      }
+      if (args.first) {
+        styles.push(
+          s("leaf_calendar_day_first", {
+            "": (s) => {
+              s.borderTopLeftRadius = varRBubble;
+            },
+          }),
+        );
+      }
+      if (args.last) {
+        styles.push(
+          s("leaf_calendar_day_last", {
+            "": (s) => {
+              s.borderBottomRightRadius = varRBubble;
+            },
+          }),
+        );
+      }
+      const children = [];
+      if (args.bar) {
+        children.push(
+          e(
+            "div",
+            {},
+            {
+              styles_: [
+                s("leaf_calendar_day_bar", {
+                  "": (s) => {
+                    s.position = "absolute";
+                    s.left = "0";
+                    s.top = "0";
+                    s.bottom = "0";
+                    s.width = `calc(${varSCalendarMark} / 2)`;
+                    s.backgroundColor = varCNotifyBright;
+                  },
+                }),
+              ],
+            },
+          ),
+        );
+      }
+      if (args.dot) {
+        children.push(
+          e(
+            "div",
+            {},
+            {
+              styles_: [
+                s("leaf_calendar_day_dot", {
+                  "": (s) => {
+                    s.position = "absolute";
+                    s.right = varPIconButton;
+                    s.top = varPIconButton;
+                    s.width = varSCalendarMark;
+                    s.height = varSCalendarMark;
+                    s.borderRadius = "999cm";
+                    s.backgroundColor = varCNotifyBright;
+                  },
+                }),
+              ],
+            },
+          ),
+        );
+      }
+      children.push(e("span", { textContent: args.day }, {}));
+      const out = e("div", {}, { styles_: styles, children_: children });
+      if (args.column != null) {
+        out.style.gridColumnStart = args.column;
+      }
+      return { root: out };
+    };
+
+  const calendarStackStyle = s("cont_calendar_stack", {
+    "": (s) => {
+      s.display = "grid";
+      s.gridTemplateColumns = "minmax(0, 1fr)";
+      s.gridTemplateRows = "minmax(0, 1fr)";
+      s.flexGrow = "1";
+      s.minHeight = "0";
+      s.maxHeight = "100%";
+    },
+    ">*": (s) => {
+      s.gridColumn = "1";
+      s.gridRow = "1";
+      s.minHeight = "0";
+      s.minWidth = "0";
+    },
+    ">*:not(:last-child)": (s) => {
+      s.display = "none";
+    },
+  });
+  presentation.contCalendarStack =
+    /** @type { Presentation["contCalendarStack"] } */ (args) => {
+      return { root: e("div", {}, { styles_: [calendarStackStyle] }) };
+    };
+
+  presentation.contCalendarModal =
+    /** @type { Presentation["contCalendarModal"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              calendarStackStyle,
+              s("cont_calendar_modal", {
+                "": (s) => {
+                  s.backgroundColor = varCBackground;
+                  s.pointerEvents = "initial";
+                  s.position = "absolute";
+                  s.inset = "0";
+                  s.zIndex = "1000";
+                  s.overflowY = "auto";
+                },
+              }),
+            ],
+          },
+        ),
+      };
+    };
+
+  presentation.leafCalendarHeadBarButtonSelectCalendar =
+    /** @type { Presentation["leafCalendarHeadBarButtonSelectCalendar"] } */ (
+      args,
+    ) => {
+      return {
+        root: e(
+          "button",
+          { title: "Select calendar" },
+          {
+            styles_: [...onBlueIconButtonStyles],
+            children_: [
+              leafSvg({
+                text: svgIconCalendar,
+                width: varSHeadButton,
+                extraStyles: [
+                  s("head_icon_button", {
+                    "": (s) => {
+                      s.color = varCForegroundVeryLight;
+                    },
+                  }),
+                ],
+              }),
+            ],
+          },
+        ),
+      };
+    };
+
+  presentation.contCalendarPage =
+    /** @type { Presentation["contCalendarPage"] } */ (args) => {
+      const children = [args.headBar, args.body];
+      if (args.controls != null) {
+        children.push(args.controls);
+      }
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              contVboxStyle,
+              classPageChat,
+              s("cont_calendar_page", {
+                "": (s) => {
+                  s.minHeight = "0";
+                  s.maxHeight = "100%";
+                  s.overflow = "hidden";
+                },
+                ">*:nth-child(2)": (s) => {
+                  s.flexGrow = "1";
+                  s.flexBasis = "0";
+                  s.minHeight = "0";
+                },
+              }),
+            ],
+            children_: children,
+          },
+        ),
+      };
+    };
+
+  presentation.contCalendarDayList =
+    /** @type { Presentation["contCalendarDayList"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              contVboxStyle,
+              s("cont_calendar_day_list", {
+                "": (s) => {
+                  s.overflowY = "auto";
+                },
+              }),
+            ],
+            children_: args.children,
+          },
+        ),
+      };
+    };
+
+  presentation.leafCalendarDayEmpty =
+    /** @type { Presentation["leafCalendarDayEmpty"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          { textContent: "No events" },
+          {
+            styles_: [
+              s("leaf_calendar_day_empty", {
+                "": (s) => {
+                  s.alignSelf = "center";
+                  s.color = varCForegroundVeryLight;
+                  s.padding = varPPage;
+                },
+              }),
+            ],
+          },
+        ),
+      };
+    };
+
+  presentation.leafCalendarDayButtonGoTo =
+    /** @type { Presentation["leafCalendarDayButtonGoTo"] } */ (args) => {
+      return { root: chatControlsIconButton(svgIconForward, "Go to message") };
+    };
+
+  presentation.leafCalendarDayButtonSelect =
+    /** @type { Presentation["leafCalendarDayButtonSelect"] } */ (args) => {
+      return { root: chatControlsIconButton(svgIconCheck, "Select day") };
+    };
+
+  ///////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: modals
 
   globalStyle.insertRule(`.${classStateHidden} { display: none !important; }`, 0);
@@ -3652,7 +4129,22 @@ svg.spinner4 path {
   presentation.contModalRoot = /** @type { Presentation["contModalRoot"] } */ (
     args,
   ) => {
-    return { root: e("div", {}, { styles_: [contGroupStyle] }) };
+    return {
+      root: e(
+        "div",
+        {},
+        {
+          styles_: [
+            contGroupStyle,
+            s("cont_modal_root", {
+              ">*:not(:last-child)": (s) => {
+                s.display = "none";
+              },
+            }),
+          ],
+        },
+      ),
+    };
   };
 
   const modalOverlayStyle = s("modal_overlay", {

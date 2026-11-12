@@ -95,7 +95,7 @@
       );
       return page.root;
     };
-    const buildRoot = /** @type {( e?: HTMLElement)=>void} */ (e) => {
+    const buildRoot = /** @type {( e?: HTMLElement)=>HTMLElement} */ (e) => {
       const root = presentation.contRoot({
         menu: buildTop(),
       });
@@ -103,6 +103,7 @@
         root.page.appendChild(e);
       }
       document.body.appendChild(root.root);
+      return root.page;
     };
     const buildMenu = /** @type {(_:{link: Boolean}) => HTMLElement} */ (
       args,
@@ -431,13 +432,13 @@
         "This is an error. Panic panic panic",
       );
     };
-    const buildChat =
-      /** @type {(_:{controls: boolean, stickyHolder?: boolean, blocks?: boolean, deleting?: boolean}) => HTMLElement} */ (
-        args,
+    const buildInfiniteShell =
+      /** @type {(pageClass: string) => {infinite: HTMLElement, paddingPre: HTMLElement, paddingPost: HTMLElement, earlySticky: HTMLElement, real: HTMLElement, lateSpinner: HTMLElement}} */ (
+        pageClass,
       ) => {
         const infinite = document.createElement("div");
         infinite.classList.add("infinite");
-        infinite.classList.add(presentation.classPageChat({}).value);
+        infinite.classList.add(pageClass);
         infinite.style.flexGrow = "1";
         infinite.style.display = "grid";
         infinite.style.gridTemplateRows = "1fr";
@@ -548,6 +549,26 @@
         new ResizeObserver(() => {
           scrollInner.style.height = `${contentLayout.offsetHeight}px`;
         }).observe(contentLayout);
+        return {
+          infinite: infinite,
+          paddingPre: paddingPre,
+          paddingPost: paddingPost,
+          earlySticky: earlySticky,
+          real: real,
+          lateSpinner: lateSpinner,
+        };
+      };
+    const buildChat =
+      /** @type {(_:{controls: boolean, stickyHolder?: boolean, blocks?: boolean, deleting?: boolean}) => HTMLElement} */ (
+        args,
+      ) => {
+        const shell = buildInfiniteShell(presentation.classPageChat({}).value);
+        const infinite = shell.infinite;
+        const paddingPre = shell.paddingPre;
+        const paddingPost = shell.paddingPost;
+        const earlySticky = shell.earlySticky;
+        const real = shell.real;
+        const lateSpinner = shell.lateSpinner;
 
         paddingPre.appendChild(
           presentation.contChatHeadBar({
@@ -556,7 +577,8 @@
               text: "Almonds",
               link: "abcd",
             }).root,
-            right: undefined,
+            right: presentation.leafChatHeadBarRightCalendar({ link: "abcd" })
+              .root,
           }).root,
         );
         if (args.controls) {
@@ -595,6 +617,7 @@
                   children: [
                     presentation.leafChatEditorToolboxButtonCamera({}).root,
                     presentation.leafChatEditorToolboxButtonFile({}).root,
+                    presentation.leafChatEditorToolboxButtonEvent({}).root,
                     presentation.leafChatEditorToolboxButtonDelete({}).root,
                   ],
                 }).root,
@@ -606,6 +629,24 @@
                 middle: presentation.leafChatEditorText({ editor: editor }).root,
               }).root,
             );
+            for (const [timeline, text] of [
+              ["Tue 3 Mar 2026 9:00 - 10:00, every week on Tue, Thu, until Tue 30 Jun 2026", "Standup in the **big** room"],
+              ["Sat 7 Mar 2026 - Mon 9 Mar 2026", ""],
+            ]) {
+              const eventEditor = document.createElement("div");
+              eventEditor.classList.add("malarkdowney");
+              eventEditor.contentEditable = "true";
+              eventEditor.textContent = text;
+              controls.rows.appendChild(
+                presentation.contChatEditorRow({
+                  left: [presentation.leafChatEditorButtonDelete({}).root],
+                  middle: presentation.leafChatEditorEvent({
+                    timeline: timeline,
+                    editor: eventEditor,
+                  }).root,
+                }).root,
+              );
+            }
             controls.rows.appendChild(
               presentation.contChatEditorRow({
                 left: [],
@@ -745,6 +786,7 @@
           );
           real.appendChild(entry(mediaMessage.root));
         }
+        real.appendChild(entry(buildEventMessage(true)));
         if (!args.stickyHolder) {
           real.appendChild(selectedEntry);
         }
@@ -780,6 +822,9 @@
     const showModal = /** @type {(e: HTMLElement) => void} */ (e) => {
       buildRoot(buildChat({ controls: false }));
       document.body.appendChild(e);
+    };
+    const showPageModal = /** @type {(e: HTMLElement) => void} */ (e) => {
+      buildRoot(buildChat({ controls: false })).appendChild(e);
     };
     const buildMediaViewer = /** @type {(video: boolean, hidden: boolean) => HTMLElement} */ (
       video,
@@ -855,6 +900,303 @@
       }).root;
     };
 
+    const buildEventMessage = /** @type {(left: boolean) => HTMLElement} */ (
+      left,
+    ) => {
+      const message = presentation.contChatEntryModeMessage({
+        left: left,
+        date: new Date().toISOString(),
+      });
+      message.portrait.appendChild(
+        presentation.leafChatEntryPortrait({ image: "testportrait.jpg" }).root,
+      );
+      const intro = document.createElement("div");
+      intro.classList.add("malarkdowney");
+      intro.textContent = "Two things coming up:";
+      message.body.appendChild(
+        presentation.leafChatEntryMessageText({ content: intro }).root,
+      );
+      for (const [timeline, text] of [
+        [
+          "Tue 3 Mar 2026 9:00 - 10:00, every 2 weeks on Tue, Thu, until Tue 30 Jun 2026",
+          "Standup in the big room. Bring the slides.",
+        ],
+        [
+          "Sat 7 Mar 2026 - Mon 9 Mar 2026, every year",
+          "Camping trip, a very long description that should wrap onto several lines without breaking the layout of the message bubble.",
+        ],
+        ["Fri 13 Mar 2026 22:00 - Sat 14 Mar 2026 2:00", ""],
+      ]) {
+        const content = document.createElement("div");
+        content.classList.add("malarkdowney");
+        content.textContent = text;
+        message.body.appendChild(
+          presentation.leafChatEntryMessageEvent({
+            timeline: timeline,
+            content: content,
+          }).root,
+        );
+      }
+      return message.root;
+    };
+
+    const buildCalendarMonth =
+      /** @type {(year: number, month0: number, weekStart: number, today: Date, marks: {[day: number]: [boolean, boolean]}) => HTMLElement} */ (
+        year,
+        month0,
+        weekStart,
+        today,
+        marks,
+      ) => {
+        const days = new Date(year, month0 + 1, 0).getDate();
+        const column = /** @type {(d: Date) => number} */ (d) =>
+          ((((d.getDay() + 6) % 7) - weekStart + 7) % 7) + 1;
+        const todayKey = new Date(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate(),
+        ).getTime();
+        const children = [];
+        for (let i = 1; i <= days; i += 1) {
+          const d = new Date(year, month0, i);
+          const [bar, dot] = marks[i] ?? [false, false];
+          children.push(
+            presentation.leafCalendarDay({
+              day: `${i}`,
+              column: i == 1 ? `${column(d)}` : undefined,
+              past: d.getTime() < todayKey,
+              today: d.getTime() == todayKey,
+              first: i == 1,
+              last: i == days,
+              bar: bar,
+              dot: dot,
+            }).root,
+          );
+        }
+        const out = document.createElement("div");
+        out.appendChild(
+          presentation.contCalendarMonth({
+            children: children,
+            overlapNext: column(new Date(year, month0, days)) != 7,
+          }).root,
+        );
+        return out;
+      };
+
+    const buildCalendar =
+      /** @type {(_: {weekStart: number, head: HTMLElement}) => HTMLElement} */ (
+        args,
+      ) => {
+        const shell = buildInfiniteShell(presentation.classPageChat({}).value);
+        shell.paddingPre.appendChild(args.head);
+        const today = new Date();
+        for (let offset = -3; offset <= 4; offset += 1) {
+          const first = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+          /** @type {{[day: number]: [boolean, boolean]}} */
+          const marks = {};
+          const seed = first.getFullYear() * 12 + first.getMonth();
+          for (let i = 0; i < 6; i += 1) {
+            const day = ((seed * 7 + i * 11) % 28) + 1;
+            marks[day] = [i % 3 == 0, i % 2 == 1];
+          }
+          for (let day = 10; day <= 13; day += 1) {
+            marks[day] = [true, (marks[day] ?? [false, false])[1]];
+          }
+          shell.real.appendChild(
+            buildCalendarMonth(
+              first.getFullYear(),
+              first.getMonth(),
+              args.weekStart,
+              today,
+              marks,
+            ),
+          );
+        }
+        shell.real.appendChild(shell.lateSpinner);
+        return shell.infinite;
+      };
+
+    const buildCalendarChannelHead = () =>
+      presentation.contChatHeadBar({
+        backLink: "abcd",
+        center: presentation.leafChatHeadBarCenter({
+          text: "Almonds",
+          link: "abcd",
+        }).root,
+        right: presentation.leafChatHeadBarRightMessages({ link: "abcd" }).root,
+      }).root;
+
+    const buildCalendarStack = /** @type {(layers: HTMLElement[]) => HTMLElement} */ (
+      layers,
+    ) => {
+      const stack = presentation.contCalendarStack({}).root;
+      for (const layer of layers) {
+        stack.appendChild(layer);
+      }
+      return stack;
+    };
+
+    const buildCalendarModal = /** @type {(layer: HTMLElement) => HTMLElement} */ (
+      layer,
+    ) => {
+      const modal = presentation.contCalendarModal({}).root;
+      modal.appendChild(layer);
+      return modal;
+    };
+
+    const buildModalHead = /** @type {(title: string, right?: HTMLElement) => HTMLElement} */ (
+      title,
+      right,
+    ) =>
+      presentation.contNonchatHeadBar({
+        backLink: "abcd",
+        center: presentation.leafNonchatHeadBarCenter({ text: title, link: undefined })
+          .root,
+        right: right,
+      }).root;
+
+    const buildCalendarDay =
+      /** @type {(_: {select: boolean, empty: boolean}) => HTMLElement} */ (
+        args,
+      ) => {
+        const children = [];
+        if (args.empty) {
+          children.push(presentation.leafCalendarDayEmpty({}).root);
+        } else {
+          children.push(buildEventMessage(true));
+          const selected = buildEventMessage(false);
+          selected.classList.add(presentation.classStateSelected({}).value);
+          children.push(selected);
+          children.push(buildEventMessage(true));
+        }
+        return presentation.contCalendarPage({
+          headBar: buildModalHead("Tuesday 10 March 2026"),
+          body: presentation.contCalendarDayList({ children: children }).root,
+          controls: presentation.contChatControlsBarModeMenu({
+            children: [
+              args.select
+                ? presentation.leafCalendarDayButtonSelect({}).root
+                : presentation.leafCalendarDayButtonGoTo({}).root,
+            ],
+          }).root,
+        }).root;
+      };
+
+    const buildCalendarChannels = () =>
+      presentation.contPageMenu({
+        headBar: buildModalHead("Select calendar"),
+        children: [
+          "Almonds",
+          "Family",
+          "A channel with a very long name that should be cut off somewhere",
+        ].map((t) => presentation.leafMenuButton({ text: t }).root),
+      }).root;
+
+    const buildEventEditor =
+      /** @type {(_: {allDay: boolean, repeat: "none"|"weeks"|"months", ends: "never"|"until"|"count"}) => HTMLElement} */ (
+        args,
+      ) => {
+        const date = /** @type {(label: string, value: string) => HTMLElement} */ (
+          label,
+          value,
+        ) =>
+          rf.el("input", { "aria-label": label, type: "text", readonly: "", value: value }, [
+            "rf_input_small",
+          ]);
+        const time = /** @type {(label: string, value: string) => HTMLElement} */ (
+          label,
+          value,
+        ) =>
+          rf.el("input", { "aria-label": label, type: "time", value: value }, [
+            "rf_input_small",
+          ]);
+        const rangeFields = args.allDay
+          ? [
+              rf.label("Start"),
+              date("Start", "Tue, Mar 3, 2026"),
+              rf.label("End"),
+              date("End", "Thu, Mar 5, 2026"),
+            ]
+          : [
+              rf.label("Start date"),
+              date("Start date", "Tue, Mar 3, 2026"),
+              rf.error(),
+              rf.label("Start time"),
+              time("Start time", "09:00"),
+              rf.label("End date"),
+              date("End date", "Tue, Mar 3, 2026"),
+              rf.error(),
+              rf.label("End time"),
+              time("End time", "10:00"),
+            ];
+        const children = [
+          rf.label("When"),
+          rf.select("When", ["At a time", "All day"], args.allDay ? 1 : 0),
+          rf.subform(1, rangeFields),
+          rf.label("Repeat"),
+          rf.select(
+            "Repeat",
+            ["Doesn't repeat", "Daily", "Weekly", "Monthly", "Yearly"],
+            { none: 0, weeks: 2, months: 3 }[args.repeat],
+          ),
+        ];
+        if (args.repeat == "none") {
+          children.push(rf.subform(1, []));
+        } else {
+          const endSub = {
+            never: [],
+            until: [date("On date", "Tue, Jun 30, 2026")],
+            count: [rf.error(), rf.text("After a number of times", "10")],
+          }[args.ends];
+          const repeatFields = [
+            rf.error(),
+            rf.label("Every"),
+            rf.text("Every", "2"),
+            rf.label("On"),
+          ];
+          if (args.repeat == "weeks") {
+            repeatFields.push(
+              rf.el(
+                "div",
+                {},
+                ["rf_input_small"],
+                ["M", "T", "W", "T", "F", "S", "S"].map((d, i) => {
+                  const box = rf.checkbox(d, i == 1 || i == 3);
+                  box.classList.remove("rf_input_small");
+                  const label = rf.el("label", {}, [], [box, rf.el("span", {}, [])]);
+                  /** @type {HTMLElement} */ (label.lastChild).textContent = d;
+                  return label;
+                }),
+              ),
+            );
+          } else {
+            repeatFields.push(
+              rf.select(
+                "On",
+                [
+                  "Same day of the month",
+                  "Same weekday and week of the month",
+                  "Last of that weekday in the month",
+                ],
+                1,
+              ),
+              rf.subform(2, []),
+            );
+          }
+          repeatFields.push(
+            rf.label("Ends"),
+            rf.select(
+              "Ends",
+              ["Never", "On date", "After a number of times"],
+              { never: 0, until: 1, count: 2 }[args.ends],
+            ),
+            rf.subform(2, endSub),
+          );
+          children.push(rf.subform(1, repeatFields));
+        }
+        return buildFormPage("Event", children);
+      };
+
     /** @type { {[hash: string]: () => Promise<void>} } */
     const tests = {
       "#top": async () => {
@@ -924,6 +1266,65 @@
       },
       "#chat_editor_modal_camera_preview_video": async () => {
         showModal(buildCameraPreview(true));
+      },
+      "#calendar": async () => {
+        buildRoot(
+          buildCalendarStack([
+            buildCalendar({ weekStart: 0, head: buildCalendarChannelHead() }),
+          ]),
+        );
+      },
+      "#calendar_week_sunday": async () => {
+        buildRoot(
+          buildCalendarStack([
+            buildCalendar({ weekStart: 6, head: buildCalendarChannelHead() }),
+          ]),
+        );
+      },
+      "#calendar_day": async () => {
+        buildRoot(
+          buildCalendarStack([
+            buildCalendar({ weekStart: 0, head: buildCalendarChannelHead() }),
+            buildCalendarDay({ select: false, empty: false }),
+          ]),
+        );
+      },
+      "#calendar_day_empty": async () => {
+        buildRoot(
+          buildCalendarStack([
+            buildCalendar({ weekStart: 0, head: buildCalendarChannelHead() }),
+            buildCalendarDay({ select: false, empty: true }),
+          ]),
+        );
+      },
+      "#event_editor_timed_weekly": async () => {
+        showPageModal(buildCalendarModal(buildEventEditor({ allDay: false, repeat: "weeks", ends: "until" })));
+      },
+      "#event_editor_all_day_monthly": async () => {
+        showPageModal(buildCalendarModal(buildEventEditor({ allDay: true, repeat: "months", ends: "count" })));
+      },
+      "#event_editor_no_repeat": async () => {
+        showPageModal(buildCalendarModal(buildEventEditor({ allDay: false, repeat: "none", ends: "never" })));
+      },
+      "#calendar_picker": async () => {
+        showPageModal(
+          buildCalendarModal(
+            presentation.contCalendarPage({
+              headBar: buildModalHead(
+                "Almonds",
+                presentation.leafCalendarHeadBarButtonSelectCalendar({}).root,
+              ),
+              body: buildCalendar({ weekStart: 0, head: document.createElement("div") }),
+              controls: undefined,
+            }).root,
+          ),
+        );
+      },
+      "#calendar_picker_day": async () => {
+        showPageModal(buildCalendarModal(buildCalendarDay({ select: true, empty: false })));
+      },
+      "#calendar_picker_channels": async () => {
+        showPageModal(buildCalendarModal(buildCalendarChannels()));
       },
     };
     addEventListener("hashchange", () => location.reload());

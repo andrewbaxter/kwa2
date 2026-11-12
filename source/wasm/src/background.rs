@@ -162,6 +162,9 @@ pub fn trigger_push() {
                                         for block in &message.blocks {
                                             match block {
                                                 OutboxBlock::Text(t) => blocks.push(MessageBlock::Text(t.clone())),
+                                                OutboxBlock::Event(e) => blocks.push(
+                                                    MessageBlock::Event(e.clone()),
+                                                ),
                                                 OutboxBlock::Extension(e) => blocks.push(
                                                     MessageBlock::Extension(e.clone()),
                                                 ),
@@ -280,6 +283,14 @@ pub fn handle_notification(eg: &EventGraph, notifications: Vec<(QualifiedChannel
             if let Some(f) = cf.get(channel) {
                 f.channel.notify(eg, *offset);
                 has_feed = true;
+            }
+        }
+    }
+    if matches!(&*state.ministate.borrow(), Ministate::ChannelCalendar(..) | Ministate::ChannelGroupCalendar(..)) {
+        if let Some(cal) = state.current_calendar.borrow().as_ref().and_then(|c| c.upgrade()) {
+            let cal = crate::calendar::Calendar(cal);
+            for (channel, offset) in &notifications {
+                cal.notify(channel, *offset);
             }
         }
     }

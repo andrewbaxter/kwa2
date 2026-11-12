@@ -13,6 +13,7 @@ use {
                 store_file,
             },
             messages::{
+                i64_to_u64,
                 retention_from_db,
                 RETENTION_MODE_ALL,
             },
@@ -266,6 +267,8 @@ pub struct ChannelRow {
     pub retention: ChannelRetention,
     pub public_read: bool,
     pub public_post: bool,
+    pub reminders: bool,
+    pub reminder_lead_minutes: i64,
 }
 
 impl ChannelRow {
@@ -286,6 +289,8 @@ impl ChannelRow {
             retention: self.retention,
             public_read: self.public_read,
             public_post: self.public_post,
+            reminders: self.reminders,
+            reminder_lead_minutes: i64_to_u64(self.reminder_lead_minutes),
         };
     }
 }
@@ -309,7 +314,7 @@ pub fn insert_channel_row(
     let is_owner = local_identity.0 == owner.0;
     good_ormning::sqlite::good_query!(
         db,
-        r#"insert into channel (account_id, identity, id, local_identity, idem, channel_group, name, description, portrait, page_size, authenticated, public_read, public_post, retention_mode, backfill_done, next_sender_unique) values (${account_id_t = &account}, ${identity_id_t = &owner}, ${channel_id_t = channel}, ${identity_id_t = &local_identity}, ${string = idem}, ${opt channelgroup_id_t = group.as_ref()}, ${string = name}, ${string = description}, ${opt string = portrait}, ${i64 = page_size}, ${bool = authenticated}, ${bool = false}, ${bool = false}, ${string = RETENTION_MODE_ALL}, ${bool = is_owner}, ${i64 = 0})"#;
+        r#"insert into channel (account_id, identity, id, local_identity, idem, channel_group, name, description, portrait, page_size, authenticated, public_read, public_post, retention_mode, backfill_done, next_sender_unique, reminders, reminder_lead_minutes) values (${account_id_t = &account}, ${identity_id_t = &owner}, ${channel_id_t = channel}, ${identity_id_t = &local_identity}, ${string = idem}, ${opt channelgroup_id_t = group.as_ref()}, ${string = name}, ${string = description}, ${opt string = portrait}, ${i64 = page_size}, ${bool = authenticated}, ${bool = false}, ${bool = false}, ${string = RETENTION_MODE_ALL}, ${bool = is_owner}, ${i64 = 0}, false, 15)"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?;
     if shown_name.is_some() || shown_description.is_some() {
@@ -330,7 +335,7 @@ pub fn channel_row_get(
 ) -> Result<Option<ChannelRow>, loga::Error> {
     let row = good_ormning::sqlite::good_query_opt!(
         db,
-        r#"select identity, id, local_identity, idem, channel_group, name, description, shown_name, shown_description, portrait, retention_secs, retention_mode, public_read, public_post from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
+        r#"select identity, id, local_identity, idem, channel_group, name, description, shown_name, shown_description, portrait, retention_secs, retention_mode, public_read, public_post, reminders, reminder_lead_minutes from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?;
     let Some(r) = row else {
@@ -350,6 +355,8 @@ pub fn channel_row_get(
         retention: retention_from_db(&r.retention_mode, r.retention_secs),
         public_read: r.public_read,
         public_post: r.public_post,
+        reminders: r.reminders,
+        reminder_lead_minutes: r.reminder_lead_minutes,
     }));
 }
 

@@ -13,7 +13,7 @@ ts-rs = { version = "12", features = ["serde-json-impl"] }
 glove = "0.5"
 spaghettinuum = { path = "../spaghettinuum/source/shared" }
 serde_urlencoded = "0.7"
-jiff = { version = "0.2", features = ["serde"] }
+jiff = { version = "0.2", features = ["serde", "tzdb-bundle-always"] }
 urlencoding = "2"
 
 [lints.clippy]

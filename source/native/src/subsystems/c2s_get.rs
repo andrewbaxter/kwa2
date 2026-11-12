@@ -42,6 +42,10 @@ use {
             QualifiedChannelId,
         },
         wire::c2s::{
+            ActivityOffset,
+            ActivityOffsetPos,
+            ActivityPage,
+            ActivityPageOffsetPos,
             GetResp,
             MessageRevision,
             PagePosition,
@@ -106,6 +110,17 @@ pub fn page_position(offset: usize, page_size: usize, floor: Option<usize>) -> P
         return PagePosition::Last;
     }
     return PagePosition::Middle;
+}
+
+pub fn activity_page_offset_pos(seq: u64, page_size: usize) -> ActivityPageOffsetPos {
+    let offset = seq as usize;
+    return ActivityPageOffsetPos {
+        page: ActivityPage(offset / page_size),
+        offset_pos: ActivityOffsetPos {
+            offset: ActivityOffset(offset),
+            pos: page_position(offset, page_size, None),
+        },
+    };
 }
 
 pub fn range_complete(count: usize, start: i64, page_size: usize, latest: Option<i64>, floor: Option<i64>) -> bool {

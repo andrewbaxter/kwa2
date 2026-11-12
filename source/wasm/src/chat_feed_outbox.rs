@@ -127,6 +127,7 @@ impl OutboxFeed {
                 for block in &main.blocks {
                     match block {
                         OutboxBlock::Text(t) => blocks.push(ViewBlock::Text(t.clone())),
+                        OutboxBlock::Event(e) => blocks.push(ViewBlock::Event(e.clone())),
                         OutboxBlock::Extension(e) => blocks.push(ViewBlock::Extension(e.clone())),
                         OutboxBlock::File(f) => blocks.push(ViewBlock::File(ViewFile {
                             source: match &f.file {

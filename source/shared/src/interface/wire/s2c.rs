@@ -1,6 +1,9 @@
 use {
     crate::interface::{
-        shared::QualifiedChannelId,
+        shared::{
+            QualifiedChannelId,
+            QualifiedMessageId,
+        },
         wire::c2s::ActivityOffset,
     },
     schemars::JsonSchema,
@@ -18,6 +21,7 @@ pub struct Notification {
     pub offset: ActivityOffset,
     pub text: String,
     pub files: usize,
+    pub events: usize,
     pub extensions: usize,
     pub deleted: bool,
 }
@@ -34,4 +38,19 @@ pub struct OutboxChange {
 pub enum WsEvent {
     Activity(Notification),
     Outbox(OutboxChange),
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ReminderNotification {
+    pub message: QualifiedMessageId,
+    pub text: String,
+    pub start: jiff::Timestamp,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum PushPayload {
+    Activity(Notification),
+    Reminder(ReminderNotification),
 }

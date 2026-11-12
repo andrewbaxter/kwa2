@@ -460,7 +460,13 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
 
         // Head bar
         let nol_channelgroup = get_or_req_channelgroup(&pc.eg(), &m.id, true);
-        let head_bar = build_nol_chat_bar(pc, &Ministate::Top, nol_channelgroup.clone(), {
+        let calendar_link =
+            style_export::leaf_chat_head_bar_right_calendar(
+                style_export::LeafChatHeadBarRightCalendarArgs {
+                    link: ministate_octothorpe(&Ministate::ChannelGroupCalendar(m.id)),
+                }
+            ).root;
+        let head_bar = build_nol_chat_bar(pc, &Ministate::Top, nol_channelgroup.clone(), calendar_link, {
             let id = m.id.clone();
             move |pc, local_channelgroup| {
                 let center = style_export::leaf_chat_head_bar_center(style_export::LeafChatHeadBarCenterArgs {

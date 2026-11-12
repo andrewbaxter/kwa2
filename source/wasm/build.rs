@@ -222,7 +222,7 @@ fn main() {
         Func {
             name: "contNonchatHeadBar",
             args: vec![("backLink", &string_), ("center", &el_), ("right", &optel_)],
-            returns: vec![("root", &el_), ("backUnread", &el_)],
+            returns: vec![("root", &el_), ("back", &el_), ("backUnread", &el_)],
         },
         Func {
             name: "leafNonchatHeadBarCenterPlaceholder",
@@ -560,6 +560,90 @@ fn main() {
         Func {
             name: "leafMessageHistoryDiffText",
             args: vec![("text", &string_), ("changed", &bool_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatHeadBarRightCalendar",
+            args: vec![("link", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatHeadBarRightMessages",
+            args: vec![("link", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEntryMessageEvent",
+            args: vec![("timeline", &string_), ("content", &el_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorToolboxButtonEvent",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorEvent",
+            args: vec![("timeline", &string_), ("editor", &el_)],
+            returns: vec![("root", &el_), ("timeline", &el_)],
+        },
+        Func {
+            name: "contCalendarMonth",
+            args: vec![("children", &arrel_), ("overlapNext", &bool_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafCalendarDay",
+            args: vec![
+                ("day", &string_),
+                ("column", &optstring_),
+                ("past", &bool_),
+                ("today", &bool_),
+                ("first", &bool_),
+                ("last", &bool_),
+                ("bar", &bool_),
+                ("dot", &bool_),
+            ],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contCalendarStack",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contCalendarModal",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafCalendarHeadBarButtonSelectCalendar",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contCalendarPage",
+            args: vec![("headBar", &el_), ("body", &el_), ("controls", &optel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contCalendarDayList",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafCalendarDayEmpty",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafCalendarDayButtonGoTo",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafCalendarDayButtonSelect",
+            args: vec![],
             returns: vec![("root", &el_)],
         },
     ] {

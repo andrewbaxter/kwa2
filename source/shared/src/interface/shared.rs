@@ -158,9 +158,85 @@ pub struct MessageBlockExtension {
 
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct EventRangeAllDay {
+    pub start: jiff::civil::Date,
+    pub end: jiff::civil::Date,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct EventRangeTimed {
+    pub start: jiff::civil::DateTime,
+    pub end: jiff::civil::DateTime,
+    pub tz: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum EventRange {
+    AllDay(EventRangeAllDay),
+    Timed(EventRangeTimed),
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum EventWeekday {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum EventMonthly {
+    DayOfMonth,
+    NthWeekday,
+    LastWeekday,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum EventRepeatRule {
+    Days,
+    Weeks(Vec<EventWeekday>),
+    Months(EventMonthly),
+    Years,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum EventRepeatEnd {
+    Never,
+    Until(jiff::civil::Date),
+    Count(u32),
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct EventRepeat {
+    pub interval: u32,
+    pub rule: EventRepeatRule,
+    pub end: EventRepeatEnd,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MessageBlockEvent {
+    pub text: String,
+    pub range: EventRange,
+    pub repeat: Option<EventRepeat>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum MessageBlock {
     Text(String),
     File(MessageBlockFile),
+    Event(MessageBlockEvent),
     Extension(MessageBlockExtension),
 }
 

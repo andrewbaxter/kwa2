@@ -674,3 +674,65 @@ impl Drop for StopStream {
 pub fn js_err(prefix: &str, e: JsValue) -> String {
     return format!("{}: {}", prefix, e.as_string().unwrap_or_else(|| format!("{:?}", e)));
 }
+
+pub fn locale_week_start() -> jiff::civil::Weekday {
+    let found = (|| -> Result<i8, JsValue> {
+        let language = window().navigator().language().ok_or_else(|| JsValue::from_str("No navigator language"))?;
+        let intl = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("Intl"))?;
+        let locale_ctor =
+            js_sys::Reflect::get(&intl, &JsValue::from_str("Locale"))?.dyn_into::<js_sys::Function>()?;
+        let locale = js_sys::Reflect::construct(&locale_ctor, &Array::of1(&JsValue::from_str(&language)))?;
+        let get_week_info = js_sys::Reflect::get(&locale, &JsValue::from_str("getWeekInfo"))?;
+        let week_info = match get_week_info.dyn_into::<js_sys::Function>() {
+            Ok(f) => f.call0(&locale)?,
+            Err(_) => js_sys::Reflect::get(&locale, &JsValue::from_str("weekInfo"))?,
+        };
+        let first_day =
+            js_sys::Reflect::get(&week_info, &JsValue::from_str("firstDay"))?
+                .as_f64()
+                .ok_or_else(|| JsValue::from_str("Week info first day isn't a number"))?;
+        return Ok(first_day as i8 - 1);
+    })();
+    match found.and_then(
+        |o| jiff::civil::Weekday::from_monday_zero_offset(o).map_err(|e| JsValue::from_str(&e.to_string())),
+    ) {
+        Ok(w) => return w,
+        Err(e) => {
+            crate::state::state().log.log_js("Browser doesn't provide locale week info, weeks start on Monday", &e);
+            return jiff::civil::Weekday::Monday;
+        },
+    }
+}
+
+fn intl_format(date: &js_sys::Date, options: &[(&str, &str)]) -> String {
+    let opts = Object::new();
+    for (k, v) in options {
+        js_sys::Reflect::set(&opts, &JsValue::from_str(k), &JsValue::from_str(v)).unwrap();
+    }
+    let format = js_sys::Intl::DateTimeFormat::new(&Array::new(), &opts);
+    return format.format().call1(&format, date).unwrap().as_string().unwrap();
+}
+
+pub fn intl_date(d: jiff::civil::Date, options: &[(&str, &str)]) -> String {
+    let date =
+        js_sys::Date::new(
+            &JsValue::from_f64(
+                js_sys::Date::utc(d.year() as f64, (d.month() - 1) as f64) + (d.day() as f64 - 1.) * 86400000. +
+                    12. * 3600000.,
+            ),
+        );
+    let mut options = options.to_vec();
+    options.push(("timeZone", "UTC"));
+    return intl_format(&date, &options);
+}
+
+pub fn intl_timestamp(t: Timestamp, options: &[(&str, &str)]) -> String {
+    return intl_format(&js_sys::Date::new(&JsValue::from_f64(t.as_millisecond() as f64)), options);
+}
+
+pub fn intl_weekday(w: jiff::civil::Weekday, style: &str) -> String {
+    return intl_date(
+        jiff::civil::date(2024, 1, 1).checked_add(jiff::Span::new().days(w.to_monday_zero_offset() as i64)).unwrap(),
+        &[("weekday", style)],
+    );
+}

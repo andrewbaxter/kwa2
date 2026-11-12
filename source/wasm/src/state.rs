@@ -24,6 +24,11 @@ use {
             req_api_channelgroups,
             req_api_channels,
         },
+        calendar::{
+            CalendarViewKey,
+            calendar_view_remembered,
+        },
+        page_calendar,
         page_channel,
         page_channel_delete,
         page_channel_edit,
@@ -237,6 +242,7 @@ pub enum Ministate {
     IdentityInviteEdit(MinistateIdentityInvite),
     IdentityInviteDelete(MinistateIdentityInvite),
     Channel(MinistateChannel),
+    ChannelCalendar(MinistateChannelSub),
     ChannelMenu(MinistateChannelSub),
     ChannelMembers(QualifiedChannelId),
     ChannelMember(MinistateChannelMember),
@@ -250,6 +256,7 @@ pub enum Ministate {
     ChannelInviteEdit(MinistateChannelInvite),
     ChannelInviteDelete(MinistateChannelInvite),
     ChannelGroup(MinistateChannelGroup),
+    ChannelGroupCalendar(ChannelGroupId),
     ChannelGroupMenu(ChannelGroupId),
     ChannelGroupEdit(ChannelGroupId),
     ChannelGroupDelete(ChannelGroupId),
@@ -333,6 +340,8 @@ pub struct LocalChannel1 {
     pub retention: HistPrim<ChannelRetention>,
     pub public_read: HistPrim<bool>,
     pub public_post: HistPrim<bool>,
+    pub reminders: HistPrim<bool>,
+    pub reminder_lead_minutes: HistPrim<u64>,
     pub own_identity: Identity,
 }
 
@@ -368,6 +377,7 @@ pub struct State_ {
     pub identity_portraits: RefCell<HashMap<Identity, WeakHistPrim<Option<FileRef>>>>,
     pub top: lunk::List<LocalCocg>,
     pub current_chat: RefCell<Option<CurrentChat>>,
+    pub current_calendar: RefCell<Option<std::rc::Weak<crate::calendar::Calendar_>>>,
     pub bg_pushing: RefCell<Option<oneshot::Receiver<()>>>,
     pub bg_pushing_dirty: Cell<bool>,
     pub bg_pulling_interval: RefCell<Option<Interval>>,
@@ -445,7 +455,19 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
             body = page_channel_join_qr::build(pc);
         },
         Ministate::Channel(s) => {
+            if s.reset_id.is_none() && calendar_view_remembered(&CalendarViewKey::Channel(s.id.clone())) {
+                let redirect = Ministate::ChannelCalendar(MinistateChannelSub {
+                    id: s.id.clone(),
+                    own_identity: s.own_identity.clone(),
+                });
+                record_replace_ministate(&state().log, &redirect);
+                build_ministate(pc, &redirect);
+                return;
+            }
             body = page_channel::build(pc, s);
+        },
+        Ministate::ChannelCalendar(s) => {
+            body = page_calendar::build_channel(pc, s);
         },
         Ministate::ChannelMenu(s) => {
             body = page_channel_menu::build(pc, s);
@@ -487,7 +509,16 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
             body = page_channelgroup_new::build(pc);
         },
         Ministate::ChannelGroup(s) => {
+            if s.reset_id.is_none() && calendar_view_remembered(&CalendarViewKey::Group(s.id)) {
+                let redirect = Ministate::ChannelGroupCalendar(s.id);
+                record_replace_ministate(&state().log, &redirect);
+                build_ministate(pc, &redirect);
+                return;
+            }
             body = page_channelgroup::build(pc, s);
+        },
+        Ministate::ChannelGroupCalendar(s) => {
+            body = page_calendar::build_group(pc, s);
         },
         Ministate::ChannelGroupMenu(s) => {
             body = page_channelgroup_menu::build(pc, s);
@@ -642,6 +673,8 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
                 existing_c.retention.set(pc, received_c.res.retention);
                 existing_c.public_read.set(pc, received_c.res.public_read);
                 existing_c.public_post.set(pc, received_c.res.public_post);
+                existing_c.reminders.set(pc, received_c.res.reminders);
+                existing_c.reminder_lead_minutes.set(pc, received_c.res.reminder_lead_minutes);
                 existing_c
             },
             None => {
@@ -660,6 +693,8 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
                     retention: HistPrim::new(pc, received_c.res.retention),
                     public_read: HistPrim::new(pc, received_c.res.public_read),
                     public_post: HistPrim::new(pc, received_c.res.public_post),
+                    reminders: HistPrim::new(pc, received_c.res.reminders),
+                    reminder_lead_minutes: HistPrim::new(pc, received_c.res.reminder_lead_minutes),
                 })
             },
         };

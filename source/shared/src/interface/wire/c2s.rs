@@ -232,6 +232,8 @@ pub struct ChannelRes {
     pub retention: ChannelRetention,
     pub public_read: bool,
     pub public_post: bool,
+    pub reminders: bool,
+    pub reminder_lead_minutes: u64,
 }
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -260,6 +262,10 @@ pub struct ChannelModify {
     pub public_post: Option<bool>,
     #[serde(default)]
     pub portrait: Option<ModifyOption<crate::interface::shared::Portrait>>,
+    #[serde(default)]
+    pub reminders: Option<bool>,
+    #[serde(default)]
+    pub reminder_lead_minutes: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -1102,6 +1108,151 @@ impl PathReqTrait for GetJoinPreviewFile {
     fn serialize_path(&self) -> String {
         return serialize_path(
             [PATH_PREFIX_JOIN_PREVIEW_FILE.to_string(), self.url.to_string(), self.hash.to_string()],
+        );
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct CalendarMonth {
+    pub year: i16,
+    pub month: i8,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct CalendarToken {
+    pub latest: Option<u64>,
+    pub floor: Option<u64>,
+}
+
+const CALENDAR_TOKEN_NONE: &str = "_";
+
+impl std::fmt::Display for CalendarToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let part = |v: Option<u64>| v.map(|v| v.to_string()).unwrap_or_else(|| CALENDAR_TOKEN_NONE.to_string());
+        return write!(f, "{}-{}", part(self.latest), part(self.floor));
+    }
+}
+
+impl FromStr for CalendarToken {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let Some((latest, floor)) = s.split_once("-") else {
+            return Err(format!("Calendar token missing separator"));
+        };
+        let part = |v: &str| -> Result<Option<u64>, String> {
+            if v == CALENDAR_TOKEN_NONE {
+                return Ok(None);
+            }
+            return Ok(Some(u64::from_str(v).map_err(|e| format!("Invalid calendar token part [{}]: {}", v, e))?));
+        };
+        return Ok(CalendarToken {
+            latest: part(latest)?,
+            floor: part(floor)?,
+        });
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct CalendarMessage {
+    pub original_id: QualifiedMessageId,
+    pub original_receive_time: Timestamp,
+    pub client_id: Option<MessageClientId>,
+    pub message: MessageBody,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct CalendarPage {
+    pub token: CalendarToken,
+    pub latest_activity: Option<ActivityPageOffsetPos>,
+    pub messages: Vec<CalendarMessage>,
+    pub last: bool,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum CalendarPageRes {
+    Page(CalendarPage),
+    Stale,
+}
+
+pub fn calendar_path_segments(
+    channel: &QualifiedChannelId,
+    month: CalendarMonth,
+    page: usize,
+    token: Option<CalendarToken>,
+) -> Vec<String> {
+    return vec![
+        channel.identity.to_string(),
+        channel.channel.0.to_string(),
+        month.year.to_string(),
+        month.month.to_string(),
+        page.to_string(),
+        token.map(|t| t.to_string()).unwrap_or_else(|| CALENDAR_TOKEN_NONE.to_string()),
+    ];
+}
+
+pub fn calendar_path_parse<
+    'a,
+>(
+    parts: &mut dyn Iterator<Item = Cow<'a, str>>,
+) -> Result<(QualifiedChannelId, CalendarMonth, usize, Option<CalendarToken>), String> {
+    let channel = QualifiedChannelId {
+        identity: confirm_path_element(parts, "channel identity")?,
+        channel: ChannelId(confirm_path_element(parts, "channel")?),
+    };
+    let month = CalendarMonth {
+        year: confirm_path_element(parts, "year")?,
+        month: confirm_path_element(parts, "month")?,
+    };
+    if !(1 ..= 12).contains(&month.month) {
+        return Err(format!("Calendar month out of range"));
+    }
+    let page = confirm_path_element(parts, "page")?;
+    let token: String = confirm_path_element(parts, "token")?;
+    let token = if token == CALENDAR_TOKEN_NONE {
+        None
+    } else {
+        Some(CalendarToken::from_str(&token)?)
+    };
+    return Ok((channel, month, page, token));
+}
+
+pub struct GetCalendarPage {
+    pub channel: QualifiedChannelId,
+    pub month: CalendarMonth,
+    pub page: usize,
+    pub token: Option<CalendarToken>,
+}
+
+const PATH_PREFIX_CALENDAR_PAGE: &str = "calendar_page";
+
+impl PathReqTrait for GetCalendarPage {
+    type Resp = Option<CalendarPageRes>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_CALENDAR_PAGE)?;
+        let (channel, month, page, token) = calendar_path_parse(&mut parts)?;
+        confirm_path_empty(&mut parts)?;
+        return Ok(GetCalendarPage {
+            channel: channel,
+            month: month,
+            page: page,
+            token: token,
+        });
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path(
+            [PATH_PREFIX_CALENDAR_PAGE.to_string()]
+                .into_iter()
+                .chain(calendar_path_segments(&self.channel, self.month, self.page, self.token)),
         );
     }
 }

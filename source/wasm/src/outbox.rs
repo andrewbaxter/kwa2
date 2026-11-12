@@ -28,6 +28,7 @@ use {
         Serialize,
     },
     shared::interface::shared::{
+        MessageBlockEvent,
         MessageBlockExtension,
         MessageClientId,
         QualifiedChannelId,
@@ -101,6 +102,7 @@ pub struct OutboxBlockFile {
 pub enum OutboxBlock {
     Text(String),
     File(OutboxBlockFile),
+    Event(MessageBlockEvent),
     Extension(MessageBlockExtension),
 }
 
@@ -125,6 +127,7 @@ pub async fn opfs_write_outbox_message(
         match block {
             ViewBlock::Text(t) => out_blocks.push(OutboxBlock::Text(t)),
             ViewBlock::Extension(e) => out_blocks.push(OutboxBlock::Extension(e)),
+            ViewBlock::Event(e) => out_blocks.push(OutboxBlock::Event(e)),
             ViewBlock::File(f) => {
                 let file = match f.source {
                     ViewFileSource::Remote { channel: _, file } => OutboxFile::Remote(file),

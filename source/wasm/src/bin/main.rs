@@ -101,6 +101,7 @@ pub fn main() {
         STATE.with(|s| *s.borrow_mut() = Some(Rc::new(State_ {
             eg: pc.eg(),
             current_chat: Default::default(),
+            current_calendar: Default::default(),
             service_worker: service_worker,
             page_root: Default::default(),
             modal_root: Default::default(),

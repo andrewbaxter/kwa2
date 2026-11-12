@@ -59,3 +59,6 @@ pub mod blocks;
 pub mod modal;
 pub mod media_viewer;
 pub mod camera;
+pub mod calendar;
+pub mod event_editor;
+pub mod page_calendar;

@@ -635,6 +635,7 @@ pub fn build_nol_chat_bar<
     pc: &mut ProcessingContext,
     back_link: &Ministate,
     v: NowOrLater<T>,
+    right: El,
     build: impl 'static + FnOnce(&mut ProcessingContext, T) -> El,
 ) -> style_export::ContChatHeadBarRet {
     let mut own = vec![];
@@ -668,7 +669,7 @@ pub fn build_nol_chat_bar<
     let out = style_export::cont_chat_head_bar(style_export::ContChatHeadBarArgs {
         back_link: ministate_octothorpe(&back_link),
         center: center,
-        right: None,
+        right: Some(right),
     });
     out.root.ref_own(move |_| own);
     return out;

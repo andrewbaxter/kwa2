@@ -2,10 +2,7 @@ use {
     crate::{
         blocks::ViewFile,
         js::style_export,
-        modal::{
-            close_modal,
-            show_modal,
-        },
+        modal::ModalHandle,
     },
     gloo::{
         events::EventListener,
@@ -29,6 +26,7 @@ use {
 
 pub fn open_media_viewer(files: Vec<ViewFile>, index: usize) {
     let viewer = style_export::cont_chat_modal_media_viewer();
+    let handle = ModalHandle::new(&viewer.root);
     let files = Rc::new(files);
     let current = Rc::new(Cell::new(index));
     let current_is_video = Rc::new(Cell::new(false));
@@ -101,9 +99,12 @@ pub fn open_media_viewer(files: Vec<ViewFile>, index: usize) {
     show(index);
     poke();
     viewer.download.ref_on("click", |ev| ev.stop_propagation());
-    viewer.close.ref_on("click", |ev| {
-        ev.stop_propagation();
-        close_modal();
+    viewer.close.ref_on("click", {
+        let handle = handle.clone();
+        move |ev| {
+            ev.stop_propagation();
+            handle.close();
+        }
     });
     viewer.prev.ref_on("click", {
         let step = step.clone();
@@ -201,15 +202,16 @@ pub fn open_media_viewer(files: Vec<ViewFile>, index: usize) {
     });
     viewer.root.ref_own(|_| EventListener::new(&window(), "keydown", {
         let step = step.clone();
+        let handle = handle.clone();
         move |ev| {
             let ev = ev.dyn_ref::<KeyboardEvent>().unwrap();
             match ev.key().as_str() {
                 "ArrowLeft" => step(-1),
                 "ArrowRight" => step(1),
-                "Escape" => close_modal(),
+                "Escape" => handle.close(),
                 _ => { },
             }
         }
     }));
-    show_modal(viewer.root);
+    handle.open();
 }

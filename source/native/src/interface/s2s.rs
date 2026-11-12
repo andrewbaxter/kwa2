@@ -73,6 +73,10 @@ pub mod s2sv1t {
                 QualifiedChannelId,
             },
             wire::c2s::{
+                calendar_path_parse,
+                calendar_path_segments,
+                CalendarMonth,
+                CalendarToken,
                 confirm_path_const,
                 confirm_path_element,
                 confirm_path_empty,
@@ -218,6 +222,7 @@ pub mod s2sv1t {
     pub const GET_PREFIX_SNAP_PAGE_CONTAINING_TIME: &str = "snap_page_containing_time";
     pub const GET_PREFIX_SNAP_LOOKUP: &str = "snap_lookup";
     pub const GET_PREFIX_MESSAGE_HISTORY: &str = "message_history";
+    pub const GET_PREFIX_CALENDAR_PAGE: &str = "calendar_page";
     pub const GET_PREFIX_JOIN_PREVIEW: &str = "join_preview";
     pub const GET_PREFIX_FILE: &str = "file";
     const FILE_AUTH_KIND_CALLER: &str = "t";
@@ -556,6 +561,53 @@ pub mod s2sv1t {
             };
             return serialize_path(
                 [GET_PREFIX_SNAP_LOOKUP.to_string()].into_iter().chain(channel_segments(&self.channel)).chain(tail),
+            );
+        }
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub struct CalendarPulledPage {
+        pub token: CalendarToken,
+        pub messages: Vec<PulledMessage>,
+        pub last: bool,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum CalendarPulledRes {
+        Page(CalendarPulledPage),
+        Stale,
+    }
+
+    pub struct GetCalendarPage {
+        pub channel: QualifiedChannelId,
+        pub month: CalendarMonth,
+        pub page: usize,
+        pub token: Option<CalendarToken>,
+    }
+
+    impl PathReqTrait for GetCalendarPage {
+        type Resp = Option<CalendarPulledRes>;
+
+        fn deserialize_path(path: &str) -> Result<Self, String> {
+            let mut parts = deserialize_path(path);
+            confirm_path_const(&mut parts, GET_PREFIX_CALENDAR_PAGE)?;
+            let (channel, month, page, token) = calendar_path_parse(&mut parts)?;
+            confirm_path_empty(&mut parts)?;
+            return Ok(GetCalendarPage {
+                channel: channel,
+                month: month,
+                page: page,
+                token: token,
+            });
+        }
+
+        fn serialize_path(&self) -> String {
+            return serialize_path(
+                [GET_PREFIX_CALENDAR_PAGE.to_string()]
+                    .into_iter()
+                    .chain(calendar_path_segments(&self.channel, self.month, self.page, self.token)),
             );
         }
     }

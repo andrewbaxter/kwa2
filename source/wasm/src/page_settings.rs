@@ -1,5 +1,6 @@
 use {
     crate::{
+        calendar::LOCALSTORAGE_WEEK_START,
         api::{
             req_get,
             req_post_json,
@@ -20,7 +21,18 @@ use {
         superif,
         ta_return,
     },
+    gloo::storage::{
+        LocalStorage,
+        Storage,
+    },
     js_sys::JSON,
+    shared::{
+        calendar::{
+            weekday_from_jiff,
+            weekday_to_jiff,
+        },
+        interface::shared::EventWeekday,
+    },
     rooting::El,
     shared::interface::wire::c2s,
     wasm_bindgen::JsValue,
@@ -55,7 +67,7 @@ pub fn build() -> El {
                                 style_export::LeafErrBlockArgs {
                                     data: format!("This app must be added to the home screen to enable notifications"),
                                 },
-                            ).root
+                            ).root,
                         ],
                     );
                 }
@@ -185,12 +197,54 @@ pub fn build() -> El {
                         return Ok(button);
                     }.await {
                         Ok(e) => return e,
-                        Err(e) => return style_export::leaf_err_block(style_export::LeafErrBlockArgs { data: e }).root,
+                        Err(e) => return style_export::leaf_err_block(
+                            style_export::LeafErrBlockArgs { data: e },
+                        ).root,
                     }
                 }
 
                 return Ok(vec![build_notification_button(pm).await]);
             }),
+            {
+                let week_start_text = || -> String {
+                    let name = |w: jiff::civil::Weekday| -> String {
+                        return crate::js::intl_weekday(w, "long");
+                    };
+                    match LocalStorage::get::<EventWeekday>(LOCALSTORAGE_WEEK_START) {
+                        Ok(w) => return format!("Weeks start on {}", name(weekday_to_jiff(w))),
+                        Err(_) => return format!("Weeks start on {} (locale)", name(crate::js::locale_week_start())),
+                    }
+                };
+                let button =
+                    style_export::leaf_menu_button(
+                        style_export::LeafMenuButtonArgs { text: week_start_text() },
+                    ).root;
+                button.ref_on("click", {
+                    let button = button.weak();
+                    move |_| {
+                        let Some(button) = button.upgrade() else {
+                            return;
+                        };
+                        let next = match LocalStorage::get::<EventWeekday>(LOCALSTORAGE_WEEK_START) {
+                            Ok(w) => match w {
+                                EventWeekday::Sunday => None,
+                                w => Some(weekday_from_jiff(weekday_to_jiff(w).next())),
+                            },
+                            Err(_) => Some(EventWeekday::Monday),
+                        };
+                        match next {
+                            Some(w) => {
+                                if let Err(e) = LocalStorage::set(LOCALSTORAGE_WEEK_START, w) {
+                                    state().log.log(&format!("Error storing week start: {}", e));
+                                }
+                            },
+                            None => LocalStorage::delete(LOCALSTORAGE_WEEK_START),
+                        }
+                        button.ref_text(&week_start_text());
+                    }
+                });
+                button
+            },
         ],
     }).root;
 }

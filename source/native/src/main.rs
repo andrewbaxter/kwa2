@@ -198,6 +198,8 @@ pub struct State {
     ffmpeg: PathBuf,
     max_file_size: u64,
     file_cache_size: u64,
+    calendar_cache: crate::subsystems::calendar::CalendarCache,
+    calendar_page_cache: crate::subsystems::calendar::CalendarPageCache,
 }
 
 fn api_resp<T: Serialize>(state: &State, r: Result<T, loga::Error>) -> Response<Body> {
@@ -795,6 +797,14 @@ fn main() {
                 ffmpeg: config.ffmpeg,
                 max_file_size: config.max_file_size,
                 file_cache_size: config.file_cache_size,
+                calendar_cache: moka::future::Cache::builder()
+                    .max_capacity(4096)
+                    .time_to_idle(std::time::Duration::from_secs(60 * 60))
+                    .build(),
+                calendar_page_cache: moka::future::Cache::builder()
+                    .max_capacity(4096)
+                    .time_to_idle(std::time::Duration::from_secs(60 * 60))
+                    .build(),
             });
             {
                 use crate::{
@@ -1330,7 +1340,7 @@ fn main() {
                                             };
                                         let expired = good_ormning::sqlite::good_query_many!(
                                             db,
-                                            r#"select sender, sender_unique from message where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and receive_time < ${time_ms_t = &crate::interface::db::DbTimeMs(cutoff)}"#;
+                                            r#"select sender, sender_unique, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and receive_time < ${time_ms_t = &crate::interface::db::DbTimeMs(cutoff)}"#;
                                             db_tx
                                         ).map_err(|e| loga::err(e.0))?;
                                         for m in expired {
@@ -1344,6 +1354,33 @@ fn main() {
                                                 r#"delete from message where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and sender = ${identity_id_t = &m.sender} and sender_unique = ${i64 = m.sender_unique}"#;
                                                 db_tx
                                             ).map_err(|e| loga::err(e.0))?;
+                                            let (root_sender, root_unique) =
+                                                match (
+                                                    m.rel_type.as_deref(),
+                                                    m.rel_target_sender,
+                                                    m.rel_target_unique,
+                                                ) {
+                                                    (
+                                                        Some(REL_EDIT_OF),
+                                                        Some(target_sender),
+                                                        Some(target_unique),
+                                                    ) => (
+                                                        target_sender,
+                                                        target_unique,
+                                                    ),
+                                                    (Some(REL_EDIT_OF), _, _) => {
+                                                        return Err(loga::err("Edit row missing target columns"));
+                                                    },
+                                                    _ => (m.sender, m.sender_unique),
+                                                };
+                                            crate::subsystems::calendar::message_event_reindex(
+                                                db_tx,
+                                                c.account_id,
+                                                c.identity,
+                                                &c.id,
+                                                root_sender,
+                                                root_unique,
+                                            )?;
                                         }
                                     }
                                     return Ok(());
@@ -1596,6 +1633,138 @@ fn main() {
                         }.await;
                         ret
                     };
+                }
+            });
+            tm.critical_task("reminders", {
+                let state = state.clone();
+                async move {
+                    use {
+                        crate::{
+                            dbutil::tx,
+                            interface::db::DbTimeMs,
+                            subsystems::{
+                                calendar::events_overlapping,
+                                push::push_send,
+                            },
+                        },
+                        jiff::{
+                            SignedDuration,
+                            Timestamp,
+                            ToSpan,
+                        },
+                        shared::{
+                            calendar::{
+                                event_occurrences,
+                                CalendarWindow,
+                                Occurrence,
+                            },
+                            interface::{
+                                shared::{
+                                    MessageId,
+                                    QualifiedChannelId,
+                                    QualifiedMessageId,
+                                },
+                                wire::s2c::{
+                                    PushPayload,
+                                    ReminderNotification,
+                                },
+                            },
+                        },
+                    };
+
+                    loop {
+                        let now = Timestamp::now();
+                        match tx(&state.db, move |db_tx| {
+                            let channels = good_ormning::sqlite::good_query_many!(
+                                db,
+                                r#"select account_id, identity, id, reminder_lead_minutes from channel where deleted is null and reminders = ${bool = true}"#;
+                                db_tx
+                            ).map_err(|e| loga::err(e.0))?;
+                            let mut due = vec![];
+                            for c in channels {
+                                let lead = SignedDuration::from_mins(c.reminder_lead_minutes.max(0));
+                                let end = now.checked_add(lead).map_err(|e| loga::err(e.to_string()))?;
+                                let utc_now = now.to_zoned(jiff::tz::TimeZone::UTC).date();
+                                let utc_end =
+                                    end
+                                        .to_zoned(jiff::tz::TimeZone::UTC)
+                                        .date()
+                                        .checked_add(1.day())
+                                        .map_err(|e| loga::err(e.to_string()))?;
+                                let window = CalendarWindow {
+                                    start: now,
+                                    end: end
+                                        .checked_add(SignedDuration::from_secs(1))
+                                        .map_err(|e| loga::err(e.to_string()))?,
+                                    start_date: utc_now,
+                                    end_date: utc_end,
+                                };
+                                for e in events_overlapping(
+                                    db_tx,
+                                    c.account_id,
+                                    c.identity,
+                                    &c.id,
+                                    window.start,
+                                    window.end,
+                                )? {
+                                    for o in event_occurrences(&e.event, &window).map_err(loga::err)? {
+                                        let Occurrence::Timed { start, .. } = o else {
+                                            continue;
+                                        };
+                                        if start <= now || start > end {
+                                            continue;
+                                        }
+                                        let root_sender = crate::interface::db::DbIdentity(e.root_sender);
+                                        good_ormning::sqlite::good_query!(
+                                            db,
+                                            r#"insert into reminder_sent (account_id, identity, channel, root_sender, root_unique, block_index, occurrence_start) values (${account_id_t = &c.account_id}, ${identity_id_t = &c.identity}, ${channel_id_t = &c.id}, ${identity_id_t = &root_sender}, ${i64 = e.root_unique}, ${i64 = e.block_index}, ${time_ms_t = &DbTimeMs(start)}) on conflict do nothing"#;
+                                            db_tx
+                                        ).map_err(|e| loga::err(e.0))?;
+                                        if db_tx.0.changes() == 0 {
+                                            continue;
+                                        }
+                                        due.push((c.account_id.0, ReminderNotification {
+                                            message: QualifiedMessageId {
+                                                channel: QualifiedChannelId {
+                                                    identity: c.identity.0,
+                                                    channel: c.id.0.clone(),
+                                                },
+                                                message: MessageId {
+                                                    identity: e.root_sender,
+                                                    unique: crate::subsystems::messages::i64_to_u64(e.root_unique),
+                                                },
+                                            },
+                                            text: e.event.text.clone(),
+                                            start: start,
+                                        }));
+                                    }
+                                }
+                            }
+                            let prune_before =
+                                now
+                                    .checked_sub(SignedDuration::from_hours(24))
+                                    .map_err(|e| loga::err(e.to_string()))?;
+                            good_ormning::sqlite::good_query!(
+                                db,
+                                r#"delete from reminder_sent where occurrence_start < ${time_ms_t = &DbTimeMs(prune_before)}"#;
+                                db_tx
+                            ).map_err(|e| loga::err(e.0))?;
+                            return Ok(due);
+                        }).await {
+                            Ok(due) => {
+                                for (account_id, reminder) in due {
+                                    let payload = serde_json::to_vec(&PushPayload::Reminder(reminder)).unwrap();
+                                    if let Err(e) = push_send(&state, account_id, &payload).await {
+                                        state.log.log_err(loga::WARN, e.context("Reminder push delivery failed"));
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                state.log.log_err(loga::WARN, e.context("Error computing due reminders"));
+                            },
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    }
                 }
             });
 
@@ -2775,6 +2944,140 @@ fn main() {
                                                                                 });
                                                                             }
                                                                         ).await;
+                                                                    }.await;
+                                                                ret
+                                                            });
+                                                        },
+                                                        GET_PREFIX_CALENDAR_PAGE => {
+                                                            let req =
+                                                                match <GetCalendarPage as c2s
+                                                                ::PathReqTrait>::deserialize_path(
+                                                                    rest
+                                                                ) {
+                                                                    Ok(r) => r,
+                                                                    Err(e) => return s2s_error_response(
+                                                                        state,
+                                                                        S2sError::BadRequest(e)
+                                                                    ),
+                                                                };
+                                                            return s2s_respond_get::<GetCalendarPage>(state, {
+                                                                use {
+                                                                    crate::{
+                                                                        interface::{
+                                                                            db::{
+                                                                                DbChannelId,
+                                                                                DbIdentity,
+                                                                            },
+                                                                            s2s::{
+                                                                                CalendarPulledPage,
+                                                                                CalendarPulledRes,
+                                                                                GetCalendarPage,
+                                                                            },
+                                                                        },
+                                                                        subsystems::{
+                                                                            calendar::{
+                                                                                calendar_local_page,
+                                                                                CalendarLocalPage,
+                                                                            },
+                                                                            s2s_error::{
+                                                                                not_found,
+                                                                                s2s_tx,
+                                                                                CachePolicy,
+                                                                                Cached,
+                                                                                S2sError,
+                                                                                SNAP_PAGE_MAX_AGE_SECS,
+                                                                            },
+                                                                        },
+                                                                        State,
+                                                                    },
+                                                                    std::sync::Arc,
+                                                                };
+                                                                use crate::subsystems::messages::*;
+
+                                                                let ret:
+                                                                    Result<
+                                                                        Cached<Option<CalendarPulledRes>>,
+                                                                        S2sError
+                                                                    > =
+                                                                    async {
+                                                                        let (state, token, req,):
+                                                                            (&Arc<State>, &str, GetCalendarPage,) =
+                                                                            (state, &auth_token, req,);
+                                                                        let caller =
+                                                                            resolve_caller(state, token).await?;
+                                                                        let db_owner =
+                                                                            DbIdentity(req.channel.identity);
+                                                                        let db_channel_id =
+                                                                            DbChannelId(req.channel.channel.clone());
+                                                                        let (account, local) =
+                                                                            s2s_tx(
+                                                                                &state.db,
+                                                                                "checking calendar access",
+                                                                                move |db_tx| {
+                                                                                    let (account, local) =
+                                                                                        not_found(
+                                                                                            owner_channel_get(
+                                                                                                db_tx,
+                                                                                                db_owner,
+                                                                                                &db_channel_id
+                                                                                            )?,
+                                                                                            "Channel not found on this server"
+                                                                                        )?;
+                                                                                    check_read_access(
+                                                                                        db_tx,
+                                                                                        account,
+                                                                                        db_owner,
+                                                                                        &db_channel_id,
+                                                                                        &local,
+                                                                                        caller
+                                                                                    )?;
+                                                                                    return Ok((account, local));
+                                                                                }
+                                                                            ).await?;
+                                                                        let page =
+                                                                            calendar_local_page(
+                                                                                state,
+                                                                                account,
+                                                                                &req.channel,
+                                                                                local.page_size,
+                                                                                local.latest_seq,
+                                                                                req.month,
+                                                                                req.page,
+                                                                                req.token
+                                                                            ).await?;
+                                                                        let value = match page {
+                                                                            CalendarLocalPage
+                                                                            ::Stale => CalendarPulledRes
+                                                                            ::Stale,
+                                                                            CalendarLocalPage::Page {
+                                                                                token,
+                                                                                roots,
+                                                                                last
+                                                                            } => {
+                                                                                let mut messages = vec![];
+                                                                                for r in roots {
+                                                                                    messages.push(
+                                                                                        r.original.to_pulled()?
+                                                                                    );
+                                                                                    if let Some(e) = r.edit {
+                                                                                        messages.push(e.to_pulled()?);
+                                                                                    }
+                                                                                }
+                                                                                CalendarPulledRes::Page(
+                                                                                    CalendarPulledPage {
+                                                                                        token: token,
+                                                                                        messages: messages,
+                                                                                        last: last,
+                                                                                    }
+                                                                                )
+                                                                            },
+                                                                        };
+                                                                        return Ok(Cached {
+                                                                            value: Some(value),
+                                                                            policy: CachePolicy::MaxAge(
+                                                                                SNAP_PAGE_MAX_AGE_SECS
+                                                                            ).only_if(local.public_read),
+                                                                        });
                                                                     }.await;
                                                                 ret
                                                             });
@@ -6824,6 +7127,27 @@ fn main() {
                                                                                     db_tx
                                                                                 ).map_err(|e| loga::err(e.0))?;
                                                                             }
+                                                                            if let Some(v) = req.reminders {
+                                                                                good_ormning::sqlite::good_query!(
+                                                                                    db,
+                                                                                    r#"update channel set reminders = ${bool = v} where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id}"#;
+                                                                                    db_tx
+                                                                                ).map_err(|e| loga::err(e.0))?;
+                                                                            }
+                                                                            if let Some(v) = req.reminder_lead_minutes {
+                                                                                let v =
+                                                                                    crate
+                                                                                    ::subsystems
+                                                                                    ::messages
+                                                                                    ::u64_to_i64(
+                                                                                        v
+                                                                                    );
+                                                                                good_ormning::sqlite::good_query!(
+                                                                                    db,
+                                                                                    r#"update channel set reminder_lead_minutes = ${i64 = v} where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id}"#;
+                                                                                    db_tx
+                                                                                ).map_err(|e| loga::err(e.0))?;
+                                                                            }
                                                                             return Ok(
                                                                                 channel_row_get(
                                                                                     db_tx,
@@ -6959,7 +7283,7 @@ fn main() {
                                                                                         ::sqlite
                                                                                         ::good_query_many!(
                                                                                             db,
-                                                                                            r#"select identity, id, local_identity, idem, channel_group, name, description, shown_name, shown_description, portrait, retention_secs, retention_mode, public_read, public_post from channel where account_id = ${account_id_t = &account_id} and deleted is null order by identity, id"#;
+                                                                                            r#"select identity, id, local_identity, idem, channel_group, name, description, shown_name, shown_description, portrait, retention_secs, retention_mode, public_read, public_post, reminders, reminder_lead_minutes from channel where account_id = ${account_id_t = &account_id} and deleted is null order by identity, id"#;
                                                                                             db_tx
                                                                                         ).map_err(|e| loga::err(e.0))?;
                                                                                     let mut out = vec![];
@@ -6989,6 +7313,8 @@ fn main() {
                                                                                             ),
                                                                                             public_read: r.public_read,
                                                                                             public_post: r.public_post,
+                                                                                            reminders: r.reminders,
+                                                                                            reminder_lead_minutes: r.reminder_lead_minutes,
                                                                                         });
                                                                                     }
                                                                                     return Ok(out);
@@ -7860,6 +8186,25 @@ fn main() {
                                                                                         "Sender isn't this account's identity in the channel"
                                                                                     )
                                                                                 );
+                                                                            }
+                                                                            for block in &req.blocks {
+                                                                                if let shared
+                                                                                ::interface
+                                                                                ::shared
+                                                                                ::MessageBlock
+                                                                                ::Event(
+                                                                                    event
+                                                                                ) =
+                                                                                    block {
+                                                                                    shared::calendar::validate_event(
+                                                                                        event
+                                                                                    ).map_err(
+                                                                                        |e| loga::err_with(
+                                                                                            "Message contains an invalid event",
+                                                                                            loga::ea!(err = e)
+                                                                                        )
+                                                                                    )?;
+                                                                                }
                                                                             }
                                                                             for block in &req.blocks {
                                                                                 let shared
@@ -8843,6 +9188,315 @@ fn main() {
                                                                             }.await;
                                                                         ret
                                                                     }),);
+                                                                },
+                                                                "calendar_page" => {
+                                                                    let req =
+                                                                        match c2s::GetCalendarPage::deserialize_path(
+                                                                            remainder
+                                                                        ) {
+                                                                            Ok(r) => r,
+                                                                            Err(e) => return Ok(response_400(e)),
+                                                                        };
+                                                                    return Ok(json_or_err(state, "calendar_page", {
+                                                                        use {
+                                                                            crate::subsystems::{
+                                                                                calendar::{
+                                                                                    calendar_local_page,
+                                                                                    calendar_message,
+                                                                                    stored_body,
+                                                                                    CalendarLocalPage,
+                                                                                },
+                                                                                messages::{
+                                                                                    channel_signer,
+                                                                                    verify_pulled,
+                                                                                    Verified,
+                                                                                },
+                                                                            },
+                                                                            shared::interface::{
+                                                                                shared::MessageRel,
+                                                                                wire::c2s::{
+                                                                                    CalendarPage,
+                                                                                    CalendarPageRes,
+                                                                                    ChannelRetention,
+                                                                                },
+                                                                            },
+                                                                        };
+
+                                                                        let ret:
+                                                                            Result<
+                                                                                Cached<Option<CalendarPageRes>>,
+                                                                                GetErr
+                                                                            > =
+                                                                            async {
+                                                                                let ctx =
+                                                                                    ChannelCtx::new(
+                                                                                        account,
+                                                                                        req.channel.clone()
+                                                                                    );
+                                                                                let Some(local) = tx(&state.db, {
+                                                                                    let account = ctx.account;
+                                                                                    let db_owner = ctx.db_owner;
+                                                                                    let db_channel_id =
+                                                                                        ctx.db_channel_id.clone();
+                                                                                    move |db_tx| local_channel_get(
+                                                                                        db_tx,
+                                                                                        account,
+                                                                                        db_owner,
+                                                                                        &db_channel_id
+                                                                                    )
+                                                                                })
+                                                                                    .await
+                                                                                    .context(
+                                                                                        "Error reading channel for calendar"
+                                                                                    )? else {
+                                                                                    return Ok(Cached::no_store(None));
+                                                                                };
+                                                                                let local_complete =
+                                                                                    local.is_owner(
+                                                                                        ctx.channel.identity
+                                                                                    ) ||
+                                                                                        (local.retention ==
+                                                                                            ChannelRetention::All &&
+                                                                                            local.backfill_done);
+                                                                                if local_complete {
+                                                                                    let page =
+                                                                                        calendar_local_page(
+                                                                                            state,
+                                                                                            ctx.account,
+                                                                                            &ctx.channel,
+                                                                                            local.page_size,
+                                                                                            local.latest_seq,
+                                                                                            req.month,
+                                                                                            req.page,
+                                                                                            req.token
+                                                                                        ).await?;
+                                                                                    let value = match page {
+                                                                                        CalendarLocalPage
+                                                                                        ::Stale => CalendarPageRes
+                                                                                        ::Stale,
+                                                                                        CalendarLocalPage::Page {
+                                                                                            token,
+                                                                                            roots,
+                                                                                            last
+                                                                                        } => {
+                                                                                            let mut messages = vec![];
+                                                                                            for r in roots {
+                                                                                                let edit =
+                                                                                                    match &r.edit {
+                                                                                                        Some(e) => Some(
+                                                                                                            stored_body(
+                                                                                                                &e.raw
+                                                                                                            )?
+                                                                                                        ),
+                                                                                                        None => None,
+                                                                                                    };
+                                                                                                messages.push(
+                                                                                                    calendar_message(
+                                                                                                        stored_body(
+                                                                                                            &r
+                                                                                                                .original
+                                                                                                                .raw
+                                                                                                        )?,
+                                                                                                        r
+                                                                                                            .original
+                                                                                                            .receive_time,
+                                                                                                        edit
+                                                                                                    )
+                                                                                                );
+                                                                                            }
+                                                                                            CalendarPageRes::Page(
+                                                                                                CalendarPage {
+                                                                                                    latest_activity: token
+                                                                                                        .latest
+                                                                                                        .map(
+                                                                                                            |
+                                                                                                                s
+                                                                                                            | activity_page_offset_pos(
+                                                                                                                s,
+                                                                                                                local.page_size
+                                                                                                            )
+                                                                                                        ),
+                                                                                                    token: token,
+                                                                                                    messages: messages,
+                                                                                                    last: last,
+                                                                                                }
+                                                                                            )
+                                                                                        },
+                                                                                    };
+                                                                                    return Ok(
+                                                                                        Cached::no_store(Some(value))
+                                                                                    );
+                                                                                }
+                                                                                if let Some(token) = req.token {
+                                                                                    if let Some(cached) =
+                                                                                        state
+                                                                                            .calendar_page_cache
+                                                                                            .get(
+                                                                                                &(
+                                                                                                    account,
+                                                                                                    ctx
+                                                                                                        .channel
+                                                                                                        .clone(),
+                                                                                                    req.month,
+                                                                                                    req.page,
+                                                                                                    token
+                                                                                                )
+                                                                                            )
+                                                                                            .await {
+                                                                                        return Ok(
+                                                                                            Cached::no_store(
+                                                                                                Some(
+                                                                                                    CalendarPageRes
+                                                                                                    ::Page(
+                                                                                                        cached
+                                                                                                    )
+                                                                                                )
+                                                                                            )
+                                                                                        );
+                                                                                    }
+                                                                                }
+                                                                                let signer =
+                                                                                    channel_signer(
+                                                                                        state,
+                                                                                        account,
+                                                                                        &local
+                                                                                    ).await?;
+                                                                                let Some(res) =
+                                                                                    remote(
+                                                                                        state
+                                                                                            .s2s_client
+                                                                                            .get_opt_authed(
+                                                                                                ctx.channel.identity,
+                                                                                                signer.as_ref(),
+                                                                                                &crate
+                                                                                                ::interface
+                                                                                                ::s2s
+                                                                                                ::GetCalendarPage {
+                                                                                                    channel: ctx
+                                                                                                        .channel
+                                                                                                        .clone(),
+                                                                                                    month: req.month,
+                                                                                                    page: req.page,
+                                                                                                    token: req.token,
+                                                                                                }
+                                                                                            )
+                                                                                            .await
+                                                                                            .context(
+                                                                                                "Error fetching calendar page from channel owner"
+                                                                                            )
+                                                                                    )? else {
+                                                                                        return Ok(
+                                                                                            Cached::no_store(None)
+                                                                                        );
+                                                                                    };
+                                                                                let page = match res {
+                                                                                    crate
+                                                                                    ::interface
+                                                                                    ::s2s
+                                                                                    ::CalendarPulledRes
+                                                                                    ::Stale => {
+                                                                                        return Ok(
+                                                                                            Cached::no_store(
+                                                                                                Some(
+                                                                                                    CalendarPageRes
+                                                                                                    ::Stale
+                                                                                                )
+                                                                                            )
+                                                                                        );
+                                                                                    },
+                                                                                    crate
+                                                                                    ::interface
+                                                                                    ::s2s
+                                                                                    ::CalendarPulledRes
+                                                                                    ::Page(
+                                                                                        p
+                                                                                    ) => p,
+                                                                                };
+                                                                                let verified =
+                                                                                    remote(
+                                                                                        verify_pulled(
+                                                                                            state,
+                                                                                            &ctx.channel,
+                                                                                            page.messages,
+                                                                                            None
+                                                                                        ).await
+                                                                                    )?;
+                                                                                let mut latest_edits:
+                                                                                    HashMap<MessageId, &Verified> =
+                                                                                    HashMap::new();
+                                                                                for v in &verified {
+                                                                                    let MessageRel::EditOf(target) =
+                                                                                        &v.body.rel else {
+                                                                                            continue;
+                                                                                        };
+                                                                                    let replace =
+                                                                                        latest_edits
+                                                                                            .get(target)
+                                                                                            .map(
+                                                                                                |existing| v.seq >
+                                                                                                    existing.seq
+                                                                                            )
+                                                                                            .unwrap_or(true);
+                                                                                    if replace {
+                                                                                        latest_edits.insert(
+                                                                                            target.clone(),
+                                                                                            v
+                                                                                        );
+                                                                                    }
+                                                                                }
+                                                                                let mut messages = vec![];
+                                                                                for v in &verified {
+                                                                                    if let MessageRel::EditOf(_) =
+                                                                                        &v.body.rel {
+                                                                                        continue;
+                                                                                    }
+                                                                                    messages.push(
+                                                                                        calendar_message(
+                                                                                            v.body.clone(),
+                                                                                            v.receive_time,
+                                                                                            latest_edits
+                                                                                                .get(&v.body.id)
+                                                                                                .map(|e| e.body.clone())
+                                                                                        )
+                                                                                    );
+                                                                                }
+                                                                                let out = CalendarPage {
+                                                                                    latest_activity: page
+                                                                                        .token
+                                                                                        .latest
+                                                                                        .map(
+                                                                                            |
+                                                                                                s
+                                                                                            | activity_page_offset_pos(
+                                                                                                s,
+                                                                                                local.page_size
+                                                                                            )
+                                                                                        ),
+                                                                                    token: page.token,
+                                                                                    messages: messages,
+                                                                                    last: page.last,
+                                                                                };
+                                                                                state
+                                                                                    .calendar_page_cache
+                                                                                    .insert(
+                                                                                        (
+                                                                                            account,
+                                                                                            ctx.channel.clone(),
+                                                                                            req.month,
+                                                                                            req.page,
+                                                                                            out.token
+                                                                                        ),
+                                                                                        out.clone()
+                                                                                    )
+                                                                                    .await;
+                                                                                return Ok(
+                                                                                    Cached::no_store(
+                                                                                        Some(CalendarPageRes::Page(out))
+                                                                                    )
+                                                                                );
+                                                                            }.await;
+                                                                        ret
+                                                                    }));
                                                                 },
                                                                 "snap_page" => {
                                                                     let req =

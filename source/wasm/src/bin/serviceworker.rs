@@ -333,6 +333,59 @@ pub fn handle_fetch(ev: FetchEvent) -> Promise {
     });
 }
 
+fn markdown_to_plain(text: &str) -> String {
+    let mut lines = vec![];
+    let mut in_code = false;
+    for line in malarkdowney::textformat::import_lines(text) {
+        let mut at = line.as_str();
+        loop {
+            let trimmed = at.trim_start();
+            let trimmed = trimmed.strip_prefix('>').unwrap_or(trimmed).trim_start();
+            let trimmed = if let Some(rest) = trimmed.strip_prefix("* ").or_else(|| trimmed.strip_prefix("- ")) {
+                rest
+            } else {
+                let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+                if digits > 0 && trimmed[digits..].starts_with(". ") {
+                    &trimmed[digits + 2..]
+                } else {
+                    trimmed
+                }
+            };
+            let trimmed = trimmed.trim_start_matches('#').trim_start();
+            if trimmed.len() == at.len() {
+                break;
+            }
+            at = trimmed;
+        }
+        if at.starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        if in_code {
+            lines.push(at.to_string());
+            continue;
+        }
+
+        fn inline_text(out: &mut String, inlines: Vec<malarkdowney::linemarkdown::Inline>) {
+            for inline in inlines {
+                match inline {
+                    malarkdowney::linemarkdown::Inline::Text(t) => out.push_str(&t),
+                    malarkdowney::linemarkdown::Inline::Strong(i) => inline_text(out, i.children),
+                    malarkdowney::linemarkdown::Inline::Emphasis(i) => inline_text(out, i.children),
+                    malarkdowney::linemarkdown::Inline::Strikethrough(i) => inline_text(out, i.children),
+                    malarkdowney::linemarkdown::Inline::Link(i) => inline_text(out, i.title),
+                    malarkdowney::linemarkdown::Inline::Code(i) => out.push_str(&i.text),
+                }
+            }
+        }
+
+        let mut text = String::new();
+        inline_text(&mut text, malarkdowney::linemarkdown::parse(at));
+        lines.push(text);
+    }
+    return lines.join("\n").trim().to_string();
+}
+
 #[wasm_bindgen]
 pub fn handle_push(ev: PushEvent) -> Promise {
     // Post to visible clients, or else show a notification if there are none
@@ -347,10 +400,41 @@ pub fn handle_push(ev: PushEvent) -> Promise {
                 data
                     .json()
                     .map_err(|e| format!("Error reading data from push event as json: {:?}", e.as_string()))?;
-            let data: s2c::Notification =
+            let payload: s2c::PushPayload =
                 JsValueSerdeExt::into_serde(
                     &data,
                 ).map_err(|e| format!("Received payload doesn't match expected format: {}", e))?;
+            let data = match payload {
+                s2c::PushPayload::Activity(n) => n,
+                s2c::PushPayload::Reminder(r) => {
+                    let start =
+                        wasm::js::intl_timestamp(
+                            r.start,
+                            &[
+                                ("weekday", "short"),
+                                ("day", "numeric"),
+                                ("month", "short"),
+                                ("year", "numeric"),
+                                ("hour", "numeric"),
+                                ("minute", "2-digit"),
+                            ],
+                        );
+                    let title = markdown_to_plain(&r.text);
+                    let title = if title.is_empty() {
+                        format!("Event at {}", start)
+                    } else {
+                        title
+                    };
+                    JsFuture::from(self_.registration().show_notification_with_options(&title, &{
+                        let o = NotificationOptions::new();
+                        o.set_body(&format!("Starts {}", start));
+                        o
+                    }).map_err(|e| format!("Error showing notification: {:?}", e.as_string()))?)
+                        .await
+                        .map_err(|e| format!("Error showing notification (async): {:?}", e.as_string()))?;
+                    return Ok(());
+                },
+            };
             let mut visible_clients = false;
             for client in Array::from(
                 &JsFuture::from(self_.clients().match_all())
@@ -374,57 +458,7 @@ pub fn handle_push(ev: PushEvent) -> Promise {
                 }
             }
             if !visible_clients {
-                let mut lines = vec![];
-                let mut in_code = false;
-                for line in malarkdowney::textformat::import_lines(&data.text) {
-                    let mut at = line.as_str();
-                    loop {
-                        let trimmed = at.trim_start();
-                        let trimmed = trimmed.strip_prefix('>').unwrap_or(trimmed).trim_start();
-                        let trimmed =
-                            if let Some(rest) = trimmed.strip_prefix("* ").or_else(|| trimmed.strip_prefix("- ")) {
-                                rest
-                            } else {
-                                let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
-                                if digits > 0 && trimmed[digits..].starts_with(". ") {
-                                    &trimmed[digits + 2..]
-                                } else {
-                                    trimmed
-                                }
-                            };
-                        let trimmed = trimmed.trim_start_matches('#').trim_start();
-                        if trimmed.len() == at.len() {
-                            break;
-                        }
-                        at = trimmed;
-                    }
-                    if at.starts_with("```") {
-                        in_code = !in_code;
-                        continue;
-                    }
-                    if in_code {
-                        lines.push(at.to_string());
-                        continue;
-                    }
-
-                    fn inline_text(out: &mut String, inlines: Vec<malarkdowney::linemarkdown::Inline>) {
-                        for inline in inlines {
-                            match inline {
-                                malarkdowney::linemarkdown::Inline::Text(t) => out.push_str(&t),
-                                malarkdowney::linemarkdown::Inline::Strong(i) => inline_text(out, i.children),
-                                malarkdowney::linemarkdown::Inline::Emphasis(i) => inline_text(out, i.children),
-                                malarkdowney::linemarkdown::Inline::Strikethrough(i) => inline_text(out, i.children),
-                                malarkdowney::linemarkdown::Inline::Link(i) => inline_text(out, i.title),
-                                malarkdowney::linemarkdown::Inline::Code(i) => out.push_str(&i.text),
-                            }
-                        }
-                    }
-
-                    let mut text = String::new();
-                    inline_text(&mut text, malarkdowney::linemarkdown::parse(at));
-                    lines.push(text);
-                }
-                let mut body = lines.join("\n").trim().to_string();
+                let mut body = markdown_to_plain(&data.text);
                 if data.deleted {
                     body = format!("Message deleted");
                 }
@@ -436,6 +470,16 @@ pub fn handle_push(ev: PushEvent) -> Promise {
                         format!("📎 1 file")
                     } else {
                         format!("📎 {} files", data.files)
+                    });
+                }
+                if data.events > 0 {
+                    if !body.is_empty() {
+                        body.push('\n');
+                    }
+                    body.push_str(&if data.events == 1 {
+                        format!("1 event")
+                    } else {
+                        format!("{} events", data.events)
                     });
                 }
                 if data.extensions > 0 {

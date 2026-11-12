@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod c2s;
 pub mod c2s_get;
+pub mod calendar;
 pub mod files;
 pub mod messages;
 pub mod oidc;

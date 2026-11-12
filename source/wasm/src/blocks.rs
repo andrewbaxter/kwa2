@@ -4,6 +4,7 @@ use {
         shared::{
             mime_is_media,
             MessageBlock,
+            MessageBlockEvent,
             MessageBlockExtension,
             QualifiedChannelId,
             QualifiedFileId,
@@ -110,6 +111,7 @@ impl ViewFile {
 pub enum ViewBlock {
     Text(String),
     File(ViewFile),
+    Event(MessageBlockEvent),
     Extension(MessageBlockExtension),
 }
 
@@ -125,6 +127,7 @@ pub fn view_blocks(channel: &QualifiedChannelId, blocks: Vec<MessageBlock>) -> V
             size: f.size,
             name: f.name,
         }),
+        MessageBlock::Event(e) => ViewBlock::Event(e),
         MessageBlock::Extension(e) => ViewBlock::Extension(e),
     }).collect();
 }
@@ -133,6 +136,7 @@ pub struct OrderedBlocks {
     pub texts: Vec<String>,
     pub media: Vec<ViewFile>,
     pub files: Vec<ViewFile>,
+    pub events: Vec<MessageBlockEvent>,
     pub extensions: Vec<MessageBlockExtension>,
 }
 
@@ -141,6 +145,7 @@ pub fn order_blocks(blocks: &[ViewBlock]) -> OrderedBlocks {
         texts: vec![],
         media: vec![],
         files: vec![],
+        events: vec![],
         extensions: vec![],
     };
     for block in blocks {
@@ -153,6 +158,7 @@ pub fn order_blocks(blocks: &[ViewBlock]) -> OrderedBlocks {
                     out.files.push(f.clone());
                 }
             },
+            ViewBlock::Event(e) => out.events.push(e.clone()),
             ViewBlock::Extension(e) => out.extensions.push(e.clone()),
         }
     }

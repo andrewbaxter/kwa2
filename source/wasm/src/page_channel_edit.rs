@@ -44,6 +44,10 @@ struct MemberForm_ {
     group: FormOptChannelGroup,
     #[title("Keep history")]
     retention: FormMemberRetention,
+    #[title("Event reminders")]
+    reminders: bool,
+    #[title("Remind minutes before")]
+    reminder_lead_minutes: u64,
 }
 
 #[derive(rooting_forms::Form)]
@@ -64,6 +68,10 @@ struct OwnerForm_ {
     retention: FormOwnerRetention,
     #[title("Public: anyone can read")]
     public_read: bool,
+    #[title("Event reminders")]
+    reminders: bool,
+    #[title("Remind minutes before")]
+    reminder_lead_minutes: u64,
 }
 
 struct Values {
@@ -74,6 +82,8 @@ struct Values {
     group: Option<ChannelGroupId>,
     retention: ChannelRetention,
     public_read: Option<bool>,
+    reminders: bool,
+    reminder_lead_minutes: u64,
 }
 
 pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
@@ -99,6 +109,8 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                             group: FormOptChannelGroup(local.group.get()),
                             retention: FormOwnerRetention(local.retention.get()),
                             public_read: local.public_read.get(),
+                            reminders: local.reminders.get(),
+                            reminder_lead_minutes: local.reminder_lead_minutes.get(),
                         }));
                         (form_els.error, form_els.elements, Rc::new(move || {
                             let v = form_state.parse()?;
@@ -110,6 +122,8 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                                 group: v.group.0,
                                 retention: v.retention.0,
                                 public_read: Some(v.public_read),
+                                reminders: v.reminders,
+                                reminder_lead_minutes: v.reminder_lead_minutes,
                             });
                         }))
                     } else {
@@ -119,6 +133,8 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                             portrait: portrait.clone(),
                             group: FormOptChannelGroup(local.group.get()),
                             retention: FormMemberRetention(local.retention.get()),
+                            reminders: local.reminders.get(),
+                            reminder_lead_minutes: local.reminder_lead_minutes.get(),
                         }));
                         (form_els.error, form_els.elements, Rc::new(move || {
                             let v = form_state.parse()?;
@@ -130,6 +146,8 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                                 group: v.group.0,
                                 retention: v.retention.0,
                                 public_read: None,
+                                reminders: v.reminders,
+                                reminder_lead_minutes: v.reminder_lead_minutes,
                             });
                         }))
                     };
@@ -180,6 +198,17 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                         },
                         public_post: None,
                         portrait: new_values.portrait.into_modify().await?,
+                        reminders: if new_values.reminders == local.reminders.get() {
+                            None
+                        } else {
+                            Some(new_values.reminders)
+                        },
+                        reminder_lead_minutes: if new_values.reminder_lead_minutes ==
+                            local.reminder_lead_minutes.get() {
+                            None
+                        } else {
+                            Some(new_values.reminder_lead_minutes)
+                        },
                     }).await?;
                     pull_top(&eg).await;
                     eg.event(|pc| {

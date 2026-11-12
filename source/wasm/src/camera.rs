@@ -9,10 +9,7 @@ use {
             style_export,
             StopStream,
         },
-        modal::{
-            close_modal,
-            show_modal,
-        },
+        modal::ModalHandle,
     },
     futures::channel::oneshot::{
         self,
@@ -120,6 +117,7 @@ async fn scaled_blob(source: &HtmlCanvasElement, max_edge: u32, quality: f64) ->
 
 pub fn open_camera(on_accept: Rc<dyn Fn(Blob)>) {
     let cam = style_export::cont_chat_editor_modal_camera();
+    let cam_handle = ModalHandle::new(&cam.root);
     let video = cam.video.raw().dyn_into::<HtmlVideoElement>().unwrap();
     let state = Rc::new(CameraState {
         mode: Cell::new(CameraMode::Photo),
@@ -213,7 +211,10 @@ pub fn open_camera(on_accept: Rc<dyn Fn(Blob)>) {
             }));
         }
     });
-    cam.close.ref_on("click", |_| close_modal());
+    cam.close.ref_on("click", {
+        let cam_handle = cam_handle.clone();
+        move |_| cam_handle.close()
+    });
     cam.flip.ref_on("click", {
         let state = Rc::downgrade(&state);
         let open_stream = open_stream.clone();
@@ -247,6 +248,7 @@ pub fn open_camera(on_accept: Rc<dyn Fn(Blob)>) {
         });
     }
     cam.shutter.ref_on("click", {
+        let cam_handle = cam_handle.clone();
         let state = Rc::downgrade(&state);
         let video = video.clone();
         let status = cam.status.weak();
@@ -285,6 +287,7 @@ pub fn open_camera(on_accept: Rc<dyn Fn(Blob)>) {
                         return;
                     }
                     let on_accept = on_accept.clone();
+                    let cam_handle = cam_handle.clone();
                     root.ref_own(|_| spawn_rooted(async move {
                         let res = async {
                             let full = canvas_blob(&canvas, 0.92).await?;
@@ -352,11 +355,17 @@ pub fn open_camera(on_accept: Rc<dyn Fn(Blob)>) {
                                     options: Some(select.clone()),
                                 },
                             );
+                        let preview_handle = ModalHandle::new(&preview.root);
                         preview.retake.ref_on("click", {
                             let on_accept = on_accept.clone();
-                            move |_| open_camera(on_accept.clone())
+                            let preview_handle = preview_handle.clone();
+                            move |_| {
+                                preview_handle.close();
+                                open_camera(on_accept.clone());
+                            }
                         });
                         preview.accept.ref_on("click", {
+                            let preview_handle = preview_handle.clone();
                             let options = options.clone();
                             let select = select.weak();
                             move |_| {
@@ -366,12 +375,13 @@ pub fn open_camera(on_accept: Rc<dyn Fn(Blob)>) {
                                 let i =
                                     select.raw().dyn_into::<HtmlSelectElement>().unwrap().selected_index() as usize;
                                 let blob = options[i].1.blob.clone();
-                                close_modal();
+                                preview_handle.close();
                                 on_accept(blob);
                             }
                         });
                         preview.root.ref_own(|_| options);
-                        show_modal(preview.root);
+                        cam_handle.close();
+                        preview_handle.open();
                     }));
                 },
                 CameraMode::Video => {
@@ -402,6 +412,7 @@ pub fn open_camera(on_accept: Rc<dyn Fn(Blob)>) {
                     });
                     let on_stop = Closure::<dyn FnMut(JsValue)>::new({
                         let state = state.clone();
+                        let cam_handle = cam_handle.clone();
                         let chunks = chunks.clone();
                         let on_accept = on_accept.clone();
                         let set_status = set_status.clone();
@@ -441,20 +452,27 @@ pub fn open_camera(on_accept: Rc<dyn Fn(Blob)>) {
                                         options: None,
                                     },
                                 );
+                            let preview_handle = ModalHandle::new(&preview.root);
                             preview.retake.ref_on("click", {
                                 let on_accept = on_accept.clone();
-                                move |_| open_camera(on_accept.clone())
+                                let preview_handle = preview_handle.clone();
+                                move |_| {
+                                    preview_handle.close();
+                                    open_camera(on_accept.clone());
+                                }
                             });
                             preview.accept.ref_on("click", {
+                                let preview_handle = preview_handle.clone();
                                 let local = local.clone();
                                 move |_| {
                                     let blob = local.blob.clone();
-                                    close_modal();
+                                    preview_handle.close();
                                     on_accept(blob);
                                 }
                             });
                             preview.root.ref_own(|_| local);
-                            show_modal(preview.root);
+                            cam_handle.close();
+                            preview_handle.open();
                         }
                     });
                     recorder.set_ondataavailable(Some(on_data.as_ref().unchecked_ref()));
@@ -476,5 +494,5 @@ pub fn open_camera(on_accept: Rc<dyn Fn(Blob)>) {
     refresh_buttons();
     open_stream();
     cam.root.ref_own(|_| (state, open_stream, refresh_buttons));
-    show_modal(cam.root);
+    cam_handle.open();
 }

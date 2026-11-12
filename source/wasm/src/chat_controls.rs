@@ -8,7 +8,13 @@ use {
             ViewFile,
             ViewFileSource,
         },
+        calendar::CalChannel,
         camera::open_camera,
+        event_editor::{
+            default_event,
+            event_timeline_text,
+            open_event_editor,
+        },
         chat::{
             ChatMode,
             ChatModeReplyMessage,
@@ -24,10 +30,7 @@ use {
             style_export,
         },
         media_viewer::open_media_viewer,
-        modal::{
-            close_modal,
-            show_modal,
-        },
+        modal::ModalHandle,
         outbox::{
             new_message_client_id,
             opfs_write_outbox_message,
@@ -52,6 +55,7 @@ use {
     },
     shared::interface::shared::{
         mime_is_media,
+        MessageBlockEvent,
         MessageBlockExtension,
         QualifiedChannelId,
     },
@@ -84,7 +88,14 @@ struct EditorFile {
     name: Option<El>,
 }
 
+struct EditorEvent {
+    event: RefCell<MessageBlockEvent>,
+    row: El,
+    editor: malarkdowney::Editor,
+}
+
 struct MessageEditor {
+    channel: CalChannel,
     rows: El,
     send: El,
     close: El,
@@ -93,17 +104,19 @@ struct MessageEditor {
     toolbox_text: El,
     toolbox_camera: El,
     toolbox_file: El,
+    toolbox_event: El,
     toolbox_delete: Option<El>,
     file_input: El,
     toolbox_open: Cell<bool>,
     deleting: Cell<bool>,
     text: RefCell<Option<EditorText>>,
     files: RefCell<Vec<EditorFile>>,
+    events: RefCell<Vec<Rc<EditorEvent>>>,
     extensions: RefCell<Vec<(MessageBlockExtension, El)>>,
 }
 
 impl MessageEditor {
-    fn new(rows: El, send: El, edit: bool, initial: &[ViewBlock]) -> Rc<MessageEditor> {
+    fn new(channel: CalChannel, rows: El, send: El, edit: bool, initial: &[ViewBlock]) -> Rc<MessageEditor> {
         let file_input =
             el("input")
                 .attr("type", "file")
@@ -112,15 +125,18 @@ impl MessageEditor {
         let toolbox_text = style_export::leaf_chat_editor_toolbox_button_text().root;
         let toolbox_camera = style_export::leaf_chat_editor_toolbox_button_camera().root;
         let toolbox_file = style_export::leaf_chat_editor_toolbox_button_file().root;
+        let toolbox_event = style_export::leaf_chat_editor_toolbox_button_event().root;
         let toolbox_delete = if edit {
             Some(style_export::leaf_chat_editor_toolbox_button_delete().root)
         } else {
             None
         };
-        let mut toolbox_children = vec![toolbox_text.clone(), toolbox_camera.clone(), toolbox_file.clone()];
+        let mut toolbox_children =
+            vec![toolbox_text.clone(), toolbox_camera.clone(), toolbox_file.clone(), toolbox_event.clone()];
         toolbox_children.extend(toolbox_delete.clone());
         toolbox_children.push(file_input.clone());
         let editor = Rc::new(MessageEditor {
+            channel: channel,
             rows: rows,
             send: send,
             close: style_export::leaf_chat_editor_button_close().root,
@@ -131,12 +147,14 @@ impl MessageEditor {
             toolbox_text: toolbox_text.clone(),
             toolbox_camera: toolbox_camera.clone(),
             toolbox_file: toolbox_file.clone(),
+            toolbox_event: toolbox_event.clone(),
             toolbox_delete: toolbox_delete.clone(),
             file_input: file_input.clone(),
             toolbox_open: Cell::new(false),
             deleting: Cell::new(false),
             text: RefCell::new(None),
             files: RefCell::new(vec![]),
+            events: RefCell::new(vec![]),
             extensions: RefCell::new(vec![]),
         });
         if let Some(toolbox_delete) = &toolbox_delete {
@@ -193,6 +211,22 @@ impl MessageEditor {
                 }));
             }
         });
+        toolbox_event.ref_on("click", {
+            let editor = Rc::downgrade(&editor);
+            move |_| {
+                let Some(editor) = editor.upgrade() else {
+                    return;
+                };
+                match default_event() {
+                    Ok(event) => editor.add_event(event),
+                    Err(e) => {
+                        state().log.log(&format!("Error creating event: {}", e));
+                        return;
+                    },
+                }
+                editor.render();
+            }
+        });
         toolbox_file.ref_on("click", {
             let file_input = file_input.weak();
             move |_| {
@@ -246,12 +280,17 @@ impl MessageEditor {
     fn load(self: &Rc<Self>, blocks: &[ViewBlock]) {
         *self.text.borrow_mut() = None;
         self.files.borrow_mut().clear();
+        self.events.borrow_mut().clear();
         self.extensions.borrow_mut().clear();
         self.deleting.set(false);
         let ordered = order_blocks(blocks);
         if !ordered.texts.is_empty() ||
-            (ordered.media.is_empty() && ordered.files.is_empty() && ordered.extensions.is_empty()) {
+            (ordered.media.is_empty() && ordered.files.is_empty() && ordered.events.is_empty() &&
+                ordered.extensions.is_empty()) {
             self.set_text(&ordered.texts.join("\n\n"));
+        }
+        for event in ordered.events {
+            self.add_event(event);
         }
         for file in ordered.media.into_iter().chain(ordered.files.into_iter()) {
             self.add_file(file);
@@ -311,6 +350,89 @@ impl MessageEditor {
             editor_el: editor_el,
             editor: editor,
         });
+    }
+
+    fn add_event(self: &Rc<Self>, event: MessageBlockEvent) {
+        let (editor_el, md_editor) =
+            malarkdowney::build(&event.text, malarkdowney::Options { newline_on_enter: true });
+        let delete = style_export::leaf_chat_editor_button_delete().root;
+        let middle = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
+        let row = style_export::cont_chat_editor_row(style_export::ContChatEditorRowArgs {
+            left: vec![delete.clone()],
+            middle: middle.clone(),
+        }).root;
+        let entry = Rc::new(EditorEvent {
+            event: RefCell::new(event),
+            row: row.clone(),
+            editor: md_editor,
+        });
+
+        fn build_middle(editor: &Rc<MessageEditor>, entry: &Rc<EditorEvent>, middle: &El, editor_el: &El) {
+            let timeline_text = match event_timeline_text(&entry.event.borrow()) {
+                Ok(t) => t,
+                Err(e) => format!("Invalid event time: {}", e),
+            };
+            let ev = style_export::leaf_chat_editor_event(style_export::LeafChatEditorEventArgs {
+                timeline: timeline_text,
+                editor: editor_el.clone(),
+            });
+            ev.timeline.ref_on("click", {
+                let editor = Rc::downgrade(editor);
+                let entry = Rc::downgrade(entry);
+                let middle = middle.weak();
+                let editor_el = editor_el.clone();
+                move |_| {
+                    let Some(editor) = editor.upgrade() else {
+                        return;
+                    };
+                    let Some(entry) = entry.upgrade() else {
+                        return;
+                    };
+                    let mut current = entry.event.borrow().clone();
+                    current.text = entry.editor.get_text();
+                    let on_done = Rc::new({
+                        let editor = Rc::downgrade(&editor);
+                        let entry = Rc::downgrade(&entry);
+                        let middle = middle.clone();
+                        let editor_el = editor_el.clone();
+                        move |event: MessageBlockEvent| {
+                            let Some(editor) = editor.upgrade() else {
+                                return;
+                            };
+                            let Some(entry) = entry.upgrade() else {
+                                return;
+                            };
+                            let Some(middle) = middle.upgrade() else {
+                                return;
+                            };
+                            *entry.event.borrow_mut() = event;
+                            build_middle(&editor, &entry, &middle, &editor_el);
+                        }
+                    });
+                    open_event_editor(editor.channel.clone(), &current, on_done);
+                }
+            });
+            middle.ref_clear();
+            middle.ref_push(ev.root);
+        }
+
+        build_middle(self, &entry, &middle, &editor_el);
+        delete.ref_on("click", {
+            let editor = Rc::downgrade(self);
+            let row = row.weak();
+            move |ev| {
+                ev.stop_propagation();
+                let Some(editor) = editor.upgrade() else {
+                    return;
+                };
+                let Some(row) = row.upgrade() else {
+                    return;
+                };
+                editor.events.borrow_mut().retain(|e| e.row.ptr_id() != row.ptr_id());
+                editor.render();
+            }
+        });
+        self.events.borrow_mut().push(entry);
     }
 
     fn add_file(self: &Rc<Self>, file: ViewFile) {
@@ -404,6 +526,7 @@ impl MessageEditor {
             self.toolbox_text.ref_modify_classes(&[(hidden, text.is_some() || deleting)]);
             self.toolbox_camera.ref_modify_classes(&[(hidden, deleting)]);
             self.toolbox_file.ref_modify_classes(&[(hidden, deleting)]);
+            self.toolbox_event.ref_modify_classes(&[(hidden, deleting)]);
             if let Some(toolbox_delete) = &self.toolbox_delete {
                 toolbox_delete.ref_modify_classes(&[(&style_export::class_state_selected().value, deleting)]);
             }
@@ -442,11 +565,16 @@ impl MessageEditor {
                             style_export::cont_chat_editor_modal_confirm(
                                 style_export::ContChatEditorModalConfirmArgs { text: format!("Delete the text?") },
                             );
-                        modal.cancel.ref_on("click", |_| close_modal());
+                        let handle = ModalHandle::new(&modal.root);
+                        modal.cancel.ref_on("click", {
+                            let handle = handle.clone();
+                            move |_| handle.close()
+                        });
                         modal.ok.ref_on("click", {
                             let editor = Rc::downgrade(&editor);
+                            let handle = handle.clone();
                             move |_| {
-                                close_modal();
+                                handle.close();
                                 let Some(editor) = editor.upgrade() else {
                                     return;
                                 };
@@ -454,7 +582,7 @@ impl MessageEditor {
                                 editor.render();
                             }
                         });
-                        show_modal(modal.root);
+                        handle.open();
                     }
                 });
                 left = vec![delete];
@@ -466,6 +594,9 @@ impl MessageEditor {
                 left: left,
                 middle: text.root.clone(),
             }).root);
+        }
+        for event in &*self.events.borrow() {
+            self.rows.ref_push(event.row.clone());
         }
         let files = self.files.borrow();
         let media = files.iter().filter(|f| f.file.is_media()).map(|f| f.row.clone()).collect::<Vec<_>>();
@@ -521,11 +652,23 @@ impl MessageEditor {
             }
             out.push(ViewBlock::File(file));
         }
+        for event in &*self.events.borrow() {
+            let mut e = event.event.borrow().clone();
+            e.text = event.editor.get_text();
+            out.push(ViewBlock::Event(e));
+        }
         for (extension, _) in &*self.extensions.borrow() {
             out.push(ViewBlock::Extension(extension.clone()));
         }
         return out;
     }
+}
+
+fn editor_calendar_channel(channel: &QualifiedChannelId, own_identity: &Identity) -> CalChannel {
+    return CalChannel {
+        id: channel.clone(),
+        own_identity: own_identity.clone(),
+    };
 }
 
 fn configure_send(
@@ -714,7 +857,14 @@ pub fn build_controls(
                     },
                     ChatMode::TopMessage(c) => {
                         let controls = style_export::leaf_chat_editor_mode_message();
-                        let editor = MessageEditor::new(controls.rows, controls.send, false, &[]);
+                        let editor =
+                            MessageEditor::new(
+                                editor_calendar_channel(&c.channel, &c.own_identity),
+                                controls.rows,
+                                controls.send,
+                                false,
+                                &[],
+                            );
                         editor.close.ref_on("click", {
                             let mode = mode.clone();
                             let eg = pc.eg();
@@ -729,7 +879,14 @@ pub fn build_controls(
                     },
                     ChatMode::ReplyMessage(c) => {
                         let controls = style_export::leaf_chat_editor_mode_message();
-                        let editor = MessageEditor::new(controls.rows, controls.send, false, &[]);
+                        let editor =
+                            MessageEditor::new(
+                                editor_calendar_channel(c.target.channel(), &c.own_identity),
+                                controls.rows,
+                                controls.send,
+                                false,
+                                &[],
+                            );
                         editor.close.ref_on("click", {
                             let mode = mode.clone();
                             let eg = pc.eg();
@@ -751,7 +908,14 @@ pub fn build_controls(
                     },
                     ChatMode::EditMessage(c) => {
                         let controls = style_export::leaf_chat_editor_mode_edit();
-                        let editor = MessageEditor::new(controls.rows, controls.send, true, &c.blocks.0);
+                        let editor =
+                            MessageEditor::new(
+                                editor_calendar_channel(&c.target.channel, &c.own_identity),
+                                controls.rows,
+                                controls.send,
+                                true,
+                                &c.blocks.0,
+                            );
                         editor.close.ref_on("click", {
                             let mode = mode.clone();
                             let eg = pc.eg();
