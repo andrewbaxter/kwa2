@@ -16,7 +16,10 @@ use {
 pub struct Notification {
     pub channel: QualifiedChannelId,
     pub offset: ActivityOffset,
-    pub body: String,
+    pub text: String,
+    pub files: usize,
+    pub extensions: usize,
+    pub deleted: bool,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]

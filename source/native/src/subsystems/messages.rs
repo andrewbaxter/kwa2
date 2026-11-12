@@ -36,6 +36,7 @@ use {
     shared::interface::{
         shared::{
             AccountId,
+            MessageBlock,
             MessageBody,
             MessageId,
             MessageRel,
@@ -295,7 +296,7 @@ pub struct MsgRow {
     pub receive_time: Timestamp,
     pub client_id: Option<String>,
     pub raw: String,
-    pub body_text: String,
+    pub blocks: String,
     pub rel_type: Option<String>,
     pub rel_target_sender: Option<Identity>,
     pub rel_target_unique: Option<i64>,
@@ -312,7 +313,7 @@ impl MsgRow {
             receive_time: v.receive_time,
             client_id: v.body.client_id.as_ref().map(|c| c.0.clone()),
             raw: v.raw.clone(),
-            body_text: v.body.body.clone(),
+            blocks: serde_json::to_string(&v.body.blocks).unwrap(),
             rel_type: rel.rel_type,
             rel_target_sender: rel.rel_target_sender.map(|s| s.0),
             rel_target_unique: rel.rel_target_unique,
@@ -341,7 +342,7 @@ pub fn snap_page_rows(
     let end = start + page_size as i64;
     let originals = good_ormning::sqlite::good_query_many!(
         db,
-        r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and snap_offset >= ${i64 = start} and snap_offset < ${i64 = end} order by snap_offset"#;
+        r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, blocks, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and snap_offset >= ${i64 = start} and snap_offset < ${i64 = end} order by snap_offset"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?;
     let mut out_originals = Vec::with_capacity(originals.len());
@@ -349,7 +350,7 @@ pub fn snap_page_rows(
     for r in originals {
         let edit = good_ormning::sqlite::good_query_opt!(
             db,
-            r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and rel_type = ${string = REL_EDIT_OF} and rel_target_sender = ${identity_id_t = &r.sender} and rel_target_unique = ${i64 = r.sender_unique} order by seq desc limit ${i64 = 1}"#;
+            r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, blocks, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and rel_type = ${string = REL_EDIT_OF} and rel_target_sender = ${identity_id_t = &r.sender} and rel_target_unique = ${i64 = r.sender_unique} order by seq desc limit ${i64 = 1}"#;
             db_tx
         ).map_err(|e| loga::err(e.0))?;
         if let Some(e) = edit {
@@ -361,7 +362,7 @@ pub fn snap_page_rows(
                 receive_time: e.receive_time.0,
                 client_id: e.client_id,
                 raw: e.raw,
-                body_text: e.body_text,
+                blocks: e.blocks,
                 rel_type: e.rel_type,
                 rel_target_sender: e.rel_target_sender.map(|s| s.0),
                 rel_target_unique: e.rel_target_unique,
@@ -375,7 +376,7 @@ pub fn snap_page_rows(
             receive_time: r.receive_time.0,
             client_id: r.client_id,
             raw: r.raw,
-            body_text: r.body_text,
+            blocks: r.blocks,
             rel_type: r.rel_type,
             rel_target_sender: r.rel_target_sender.map(|s| s.0),
             rel_target_unique: r.rel_target_unique,
@@ -395,14 +396,14 @@ pub fn message_history_rows(
     let sender_unique = u64_to_i64(id.unique);
     let Some(original) = good_ormning::sqlite::good_query_opt!(
         db,
-        r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &db_sender} and sender_unique = ${i64 = sender_unique} and snap_offset is not null"#;
+        r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, blocks, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &db_sender} and sender_unique = ${i64 = sender_unique} and snap_offset is not null"#;
         db_tx
     ).map_err(|e| loga::err(e.0))? else {
         return Ok(None);
     };
     let edits = good_ormning::sqlite::good_query_many!(
         db,
-        r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and rel_type = ${string = REL_EDIT_OF} and rel_target_sender = ${identity_id_t = &db_sender} and rel_target_unique = ${i64 = sender_unique} order by seq"#;
+        r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, blocks, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and rel_type = ${string = REL_EDIT_OF} and rel_target_sender = ${identity_id_t = &db_sender} and rel_target_unique = ${i64 = sender_unique} order by seq"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?;
     let mut out = Vec::with_capacity(edits.len() + 1);
@@ -414,7 +415,7 @@ pub fn message_history_rows(
         receive_time: original.receive_time.0,
         client_id: original.client_id,
         raw: original.raw,
-        body_text: original.body_text,
+        blocks: original.blocks,
         rel_type: original.rel_type,
         rel_target_sender: original.rel_target_sender.map(|s| s.0),
         rel_target_unique: original.rel_target_unique,
@@ -428,7 +429,7 @@ pub fn message_history_rows(
             receive_time: e.receive_time.0,
             client_id: e.client_id,
             raw: e.raw,
-            body_text: e.body_text,
+            blocks: e.blocks,
             rel_type: e.rel_type,
             rel_target_sender: e.rel_target_sender.map(|s| s.0),
             rel_target_unique: e.rel_target_unique,
@@ -560,23 +561,17 @@ pub fn ingest_message(
         return Ok(None);
     };
     let seq = local.latest_seq.map(|s| s + 1).unwrap_or(0);
-    let rel = rel_cols(&body.rel);
     let is_edit = matches!(body.rel, MessageRel::EditOf(_));
     let snap_offset = if is_edit {
         None
     } else {
         Some(local.latest_snap_offset.map(|s| s + 1).unwrap_or(0))
     };
-    let sender = DbIdentity(body.id.identity);
-    let sender_unique = u64_to_i64(body.id.unique);
-    let client_id = body.client_id.as_ref().map(|c| c.0.clone());
-    let receive_time = Timestamp::now();
-    good_ormning::sqlite::good_query!(
-        db,
-        r#"insert into message (account_id, identity, channel, sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique) values (${account_id_t = &account}, ${identity_id_t = &owner}, ${channel_id_t = channel}, ${identity_id_t = &sender}, ${i64 = sender_unique}, ${i64 = seq}, ${opt i64 = snap_offset}, ${time_ms_t = &crate::interface::db::DbTimeMs(receive_time)}, ${opt string = client_id.as_deref()}, ${string = raw}, ${string = body.body.as_str()}, ${opt string = rel.rel_type.as_deref()}, ${opt identity_id_t = rel.rel_target_sender.as_ref()}, ${opt i64 = rel.rel_target_unique}) on conflict do nothing"#;
-        db_tx
-    ).map_err(|e| loga::err(e.0))?;
-    if db_tx.0.changes() == 0 {
+    if !message_store(db_tx, account, owner, channel, raw, body, StoredMessage::Message {
+        seq: seq,
+        snap_offset: snap_offset,
+        receive_time: Timestamp::now(),
+    })? {
         return Ok(None);
     }
     let latest_snap_offset = snap_offset.or(local.latest_snap_offset);
@@ -601,18 +596,79 @@ pub fn store_remote_message(
             return Ok(false);
         }
     }
-    let rel = rel_cols(&v.body.rel);
-    let sender = DbIdentity(v.body.id.identity);
-    let sender_unique = u64_to_i64(v.body.id.unique);
-    let seq = u64_to_i64(v.seq);
-    let snap_offset = v.snap_offset.map(u64_to_i64);
-    let client_id = v.body.client_id.as_ref().map(|c| c.0.clone());
-    good_ormning::sqlite::good_query!(
-        db,
-        r#"insert into message (account_id, identity, channel, sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, body_text, rel_type, rel_target_sender, rel_target_unique) values (${account_id_t = &account}, ${identity_id_t = &owner}, ${channel_id_t = channel}, ${identity_id_t = &sender}, ${i64 = sender_unique}, ${i64 = seq}, ${opt i64 = snap_offset}, ${time_ms_t = &crate::interface::db::DbTimeMs(v.receive_time)}, ${opt string = client_id.as_deref()}, ${string = v.raw.as_str()}, ${string = v.body.body.as_str()}, ${opt string = rel.rel_type.as_deref()}, ${opt identity_id_t = rel.rel_target_sender.as_ref()}, ${opt i64 = rel.rel_target_unique}) on conflict do nothing"#;
-        db_tx
-    ).map_err(|e| loga::err(e.0))?;
-    return Ok(db_tx.0.changes() > 0);
+    return message_store(db_tx, account, owner, channel, &v.raw, &v.body, StoredMessage::Message {
+        seq: u64_to_i64(v.seq),
+        snap_offset: v.snap_offset.map(u64_to_i64),
+        receive_time: v.receive_time,
+    });
+}
+
+pub const MESSAGE_FILE_SOURCE_MESSAGE: &str = "message";
+pub const MESSAGE_FILE_SOURCE_OUTBOX: &str = "outbox";
+
+pub fn parse_blocks(blocks: &str) -> Result<Vec<MessageBlock>, loga::Error> {
+    return Ok(serde_json::from_str(blocks).context("Stored message blocks were not valid JSON")?);
+}
+
+pub enum StoredMessage {
+    Message {
+        seq: i64,
+        snap_offset: Option<i64>,
+        receive_time: Timestamp,
+    },
+    Outbox {
+        created: Timestamp,
+    },
+}
+
+pub fn message_store(
+    db_tx: &mut db::Db<Transaction<'_>>,
+    account: DbAccountId,
+    owner: DbIdentity,
+    channel: &DbChannelId,
+    raw: &str,
+    body: &MessageBody,
+    stored: StoredMessage,
+) -> Result<bool, loga::Error> {
+    let sender = DbIdentity(body.id.identity);
+    let sender_unique = u64_to_i64(body.id.unique);
+    let source;
+    match stored {
+        StoredMessage::Message { seq, snap_offset, receive_time } => {
+            let rel = rel_cols(&body.rel);
+            let client_id = body.client_id.as_ref().map(|c| c.0.clone());
+            let blocks = serde_json::to_string(&body.blocks).unwrap();
+            good_ormning::sqlite::good_query!(
+                db,
+                r#"insert into message (account_id, identity, channel, sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, blocks, rel_type, rel_target_sender, rel_target_unique) values (${account_id_t = &account}, ${identity_id_t = &owner}, ${channel_id_t = channel}, ${identity_id_t = &sender}, ${i64 = sender_unique}, ${i64 = seq}, ${opt i64 = snap_offset}, ${time_ms_t = &crate::interface::db::DbTimeMs(receive_time)}, ${opt string = client_id.as_deref()}, ${string = raw}, ${string = blocks.as_str()}, ${opt string = rel.rel_type.as_deref()}, ${opt identity_id_t = rel.rel_target_sender.as_ref()}, ${opt i64 = rel.rel_target_unique}) on conflict do nothing"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
+            source = MESSAGE_FILE_SOURCE_MESSAGE;
+        },
+        StoredMessage::Outbox { created } => {
+            let client_id = &body.client_id.as_ref().expect("Outbox messages are always created with a client id").0;
+            good_ormning::sqlite::good_query!(
+                db,
+                r#"insert into outbox (account_id, identity, channel, sender, sender_unique, client_id, raw, created) values (${account_id_t = &account}, ${identity_id_t = &owner}, ${channel_id_t = channel}, ${identity_id_t = &sender}, ${i64 = sender_unique}, ${string = client_id.as_str()}, ${string = raw}, ${time_ms_t = &crate::interface::db::DbTimeMs(created)}) on conflict do nothing"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
+            source = MESSAGE_FILE_SOURCE_OUTBOX;
+        },
+    }
+    if db_tx.0.changes() == 0 {
+        return Ok(false);
+    }
+    for block in &body.blocks {
+        let MessageBlock::File(file) = block else {
+            continue;
+        };
+        good_ormning::sqlite::good_query!(
+            db,
+            r#"insert into message_file (account_id, identity, channel, source, sender, sender_unique, hash) values (${account_id_t = &account}, ${identity_id_t = &owner}, ${channel_id_t = channel}, ${string = source}, ${identity_id_t = &sender}, ${i64 = sender_unique}, ${string = file.file.hash.0.as_str()}) on conflict do nothing"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
+    }
+    return Ok(true);
 }
 
 pub fn load_signer_tx(
@@ -662,13 +718,27 @@ pub async fn publish_local_notification(
     account_id: AccountId,
     channel: QualifiedChannelId,
     seq: u64,
-    body: String,
+    blocks: Vec<MessageBlock>,
     web_push: bool,
 ) {
+    let deleted = blocks.is_empty();
+    let mut text = vec![];
+    let mut files = 0;
+    let mut extensions = 0;
+    for block in blocks {
+        match block {
+            MessageBlock::Text(t) => text.push(t),
+            MessageBlock::File(_) => files += 1,
+            MessageBlock::Extension(_) => extensions += 1,
+        }
+    }
     let notification = Notification {
         channel: channel,
         offset: ActivityOffset(seq as usize),
-        body: body,
+        text: text.join("\n\n"),
+        files: files,
+        extensions: extensions,
+        deleted: deleted,
     };
     state.ws_bus.publish(account_id, WsEvent::Activity(notification.clone())).await;
     if web_push {
@@ -1239,6 +1309,88 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
                     );
                 return false;
             });
+            let mut accepted = Vec::with_capacity(verified.len());
+            'next_message: for v in verified {
+                for block in &v.body.blocks {
+                    let MessageBlock::File(file) = block else {
+                        continue;
+                    };
+                    if file.file.identity != owner {
+                        state
+                            .log
+                            .log_with(
+                                loga::WARN,
+                                "Refusing pulled message: file isn't addressed to the channel owner",
+                                ea!(sender = v.body.id.identity, file_identity = file.file.identity),
+                            );
+                        continue 'next_message;
+                    }
+                    if file.size > state.max_file_size {
+                        state
+                            .log
+                            .log_with(
+                                loga::WARN,
+                                "Refusing pulled message: file exceeds the size limit",
+                                ea!(sender = v.body.id.identity, size = file.size, limit = state.max_file_size),
+                            );
+                        continue 'next_message;
+                    }
+                    let existing = tx(&state.db, {
+                        let hash = file.file.hash.0.clone();
+                        move |db_tx| {
+                            return crate::subsystems::files::file_ref(db_tx, account, Some(hash));
+                        }
+                    }).await.context("Error checking for existing file")?;
+                    if existing.is_some() {
+                        continue;
+                    }
+                    let dir = crate::subsystems::files::account_files_dir(state, account);
+                    crate::fsutil::create_dirs(&dir).await?;
+                    let tmp_path = crate::subsystems::files::tmp_path_in(&dir);
+                    let downloaded =
+                        state.s2s_client.get_file_to_disk(source, signer.as_ref(), &crate::interface::s2s::GetFile {
+                            auth: crate::interface::s2s::FileAuth::Channel(qualified_channel.clone()),
+                            hash: file.file.hash.clone(),
+                            thumbnail: false,
+                        }, &tmp_path, file.size).await;
+                    let (hash, size) = match downloaded {
+                        Ok(d) => d,
+                        Err(e) => {
+                            crate::fsutil::remove_file_if_exists(&tmp_path).await?;
+                            return Err(
+                                e.context_with("Error fetching message file from sender", ea!(hash = file.file.hash)),
+                            );
+                        },
+                    };
+                    if hash != file.file.hash || size != file.size {
+                        crate::fsutil::remove_file_if_exists(&tmp_path).await?;
+                        state
+                            .log
+                            .log_with(
+                                loga::WARN,
+                                "Refusing pulled message: file contents don't match the message",
+                                ea!(
+                                    sender = v.body.id.identity,
+                                    want_hash = file.file.hash,
+                                    got_hash = hash,
+                                    want_size = file.size,
+                                    got_size = size
+                                ),
+                            );
+                        continue 'next_message;
+                    }
+                    crate::subsystems::files::store_file_tmp(
+                        state,
+                        account,
+                        file.mime_type.clone(),
+                        &tmp_path,
+                        hash,
+                        size,
+                    ).await?;
+                }
+                accepted.push(v);
+            }
+            verified = accepted;
         }
         let batch_snap_max = verified.iter().filter_map(|v| v.snap_offset).max().map(u64_to_i64);
         if let Some(s) = batch_snap_max {
@@ -1248,12 +1400,12 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
             let db_channel_id = db_channel_id.clone();
             let cursor_seq = u64_to_i64(batch_max_seq);
             move |db_tx| {
-                let mut ingested: Vec<(u64, String)> = vec![];
+                let mut ingested: Vec<(u64, Vec<MessageBlock>)> = vec![];
                 if is_owner_mode {
                     for v in &verified {
                         if let Some(seq) =
                             ingest_message(db_tx, account, db_owner, &db_channel_id, &v.raw, &v.body)? {
-                            ingested.push((seq, v.body.body.clone()));
+                            ingested.push((seq, v.body.blocks.clone()));
                         }
                     }
                     good_ormning::sqlite::good_query!(
@@ -1270,7 +1422,7 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
                             },
                         };
                         if new {
-                            ingested.push((v.seq, v.body.body.clone()));
+                            ingested.push((v.seq, v.body.blocks.clone()));
                         }
                     }
                     good_ormning::sqlite::good_query!(

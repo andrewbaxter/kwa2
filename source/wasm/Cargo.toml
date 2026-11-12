@@ -18,7 +18,17 @@ wasm-bindgen-futures = { version = "0.4", features = [
 ] }
 web-sys = { version = "0.3", features = [
     "Cache",
+    "Blob",
+    "BlobEvent",
+    "BlobPropertyBag",
     "CanvasRenderingContext2d",
+    "HtmlOptionElement",
+    "MediaRecorder",
+    "MediaRecorderOptions",
+    "PointerEvent",
+    "Touch",
+    "TouchEvent",
+    "TouchList",
     "HtmlCanvasElement",
     "ImageData",
     "MediaDevices",
@@ -117,6 +127,7 @@ mime2ext = "0.1"
 spaghettinuum = { path = "../spaghettinuum/source/shared" }
 jiff = { version = "0.2", features = ["serde", "js"] }
 similar = { version = "2", features = ["inline"] }
+malarkdowney = "0.3"
 
 [build-dependencies]
 convert_case = "0.12"

@@ -21,38 +21,154 @@ use {
         Sha256,
     },
     shared::interface::shared::{
+        mime_is_media,
         FileHash,
         FileRef,
     },
-    std::path::PathBuf,
+    std::{
+        path::{
+            Path,
+            PathBuf,
+        },
+        pin::Pin,
+        task::{
+            Context,
+            Poll,
+        },
+    },
+    tokio::io::AsyncWrite,
 };
 
+pub const THUMBNAIL_MIME_TYPE: &str = "image/jpeg";
+
 pub fn file_path(state: &State, account: DbAccountId, hash: &FileHash) -> PathBuf {
-    return state.files_dir.join(account.0.0.to_string()).join(&hash.0);
+    return account_files_dir(state, account).join(&hash.0);
 }
 
-pub async fn store_file(
+pub fn thumbnail_path(path: &Path) -> PathBuf {
+    return path.with_extension("thumb");
+}
+
+pub fn tmp_path_in(dir: &Path) -> PathBuf {
+    return dir.join(format!("tmp.{}", rand::random::<u64>()));
+}
+
+pub fn file_cache_path(
+    state: &State,
+    owner: spaghettinuum::interface::identity::Identity,
+    hash: &str,
+    thumbnail: bool,
+) -> PathBuf {
+    let path = state.file_cache_dir.join(owner.to_string()).join(hash);
+    if thumbnail {
+        return thumbnail_path(&path);
+    }
+    return path;
+}
+
+pub fn account_files_dir(state: &State, account: DbAccountId) -> PathBuf {
+    return state.files_dir.join(account.0.0.to_string());
+}
+
+pub struct HashingWriter<W> {
+    pub inner: W,
+    pub hasher: Sha256,
+    pub size: u64,
+    pub limit: u64,
+}
+
+impl<W: AsyncWrite + Unpin> AsyncWrite for HashingWriter<W> {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        if self.size + buf.len() as u64 > self.limit {
+            return Poll::Ready(
+                Err(std::io::Error::other(format!("File exceeds size limit of {} bytes", self.limit))),
+            );
+        }
+        let res = Pin::new(&mut self.inner).poll_write(cx, buf);
+        if let Poll::Ready(Ok(written)) = &res {
+            let written = *written;
+            self.hasher.update(&buf[..written]);
+            self.size += written as u64;
+        }
+        return res;
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        return Pin::new(&mut self.inner).poll_flush(cx);
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        return Pin::new(&mut self.inner).poll_shutdown(cx);
+    }
+}
+
+pub fn finish_hash(hasher: Sha256) -> FileHash {
+    return FileHash(hex::encode(hasher.finalize()));
+}
+
+pub async fn store_file_tmp(
     state: &State,
     account: DbAccountId,
     mime_type: String,
-    data: Vec<u8>,
+    tmp_path: &Path,
+    hash: FileHash,
+    size: u64,
 ) -> Result<FileRef, loga::Error> {
-    let hash = {
-        (|| -> FileHash {
-            let (data,): (&[u8],) = (&data,);
-            return FileHash(hex::encode(Sha256::digest(data)));
-        })()
-    };
     let path = file_path(state, account, &hash);
-    create_dirs(path.parent().unwrap()).await?;
-    let tmp_path = path.with_extension(format!("tmp.{}", rand::random::<u64>()));
-    tokio::fs::write(&tmp_path, &data)
+    tokio::fs::rename(tmp_path, &path)
         .await
-        .context_with("Error writing file to disk", ea!(path = tmp_path.dbg_str()))?;
-    tokio::fs::rename(&tmp_path, &path)
-        .await
-        .context_with("Error moving file into place", ea!(path = path.dbg_str()))?;
-    let size = data.len() as i64;
+        .context_with("Error moving file into place", ea!(from = tmp_path.dbg_str(), to = path.dbg_str()))?;
+    if mime_is_media(&mime_type) {
+        let thumb_path = thumbnail_path(&path);
+        if !tokio::fs::try_exists(&thumb_path)
+            .await
+            .context_with("Error checking for existing thumbnail", ea!(path = thumb_path.dbg_str()))? {
+            let mut thumb_tmp_path = tmp_path_in(path.parent().unwrap()).into_os_string();
+            thumb_tmp_path.push(".jpg");
+            let thumb_tmp_path = PathBuf::from(thumb_tmp_path);
+            let output =
+                tokio::process::Command::new(&state.ffmpeg)
+                    .arg("-nostdin")
+                    .arg("-loglevel")
+                    .arg("error")
+                    .arg("-i")
+                    .arg(&path)
+                    .arg("-vf")
+                    .arg("thumbnail,scale='min(512,iw)':'min(512,ih)':force_original_aspect_ratio=decrease")
+                    .arg("-frames:v")
+                    .arg("1")
+                    .arg("-f")
+                    .arg("image2")
+                    .arg("-c:v")
+                    .arg("mjpeg")
+                    .arg("-q:v")
+                    .arg("4")
+                    .arg(&thumb_tmp_path)
+                    .output()
+                    .await
+                    .context_with("Error running ffmpeg", ea!(ffmpeg = state.ffmpeg.dbg_str()))?;
+            if output.status.success() {
+                tokio::fs::rename(&thumb_tmp_path, &thumb_path)
+                    .await
+                    .context_with("Error moving thumbnail into place", ea!(path = thumb_path.dbg_str()))?;
+            } else {
+                state
+                    .log
+                    .log_with(
+                        loga::WARN,
+                        "Thumbnail generation failed",
+                        ea!(
+                            path = path.dbg_str(),
+                            mime_type = mime_type,
+                            status = output.status,
+                            stderr = String::from_utf8_lossy(&output.stderr)
+                        ),
+                    );
+                crate::fsutil::remove_file_if_exists(&thumb_tmp_path).await?;
+            }
+        }
+    }
+    let size = i64::try_from(size).context("File size out of range")?;
     let created = DbTimeMs(Timestamp::now());
     let row = tx(&state.db, {
         let hash = hash.clone();
@@ -66,6 +182,22 @@ pub async fn store_file(
         }
     }).await.context("Error recording file")?;
     return Ok(row);
+}
+
+pub async fn store_file(
+    state: &State,
+    account: DbAccountId,
+    mime_type: String,
+    data: Vec<u8>,
+) -> Result<FileRef, loga::Error> {
+    let hash = FileHash(hex::encode(Sha256::digest(&data)));
+    let dir = account_files_dir(state, account);
+    create_dirs(&dir).await?;
+    let tmp_path = tmp_path_in(&dir);
+    tokio::fs::write(&tmp_path, &data)
+        .await
+        .context_with("Error writing file to disk", ea!(path = tmp_path.dbg_str()))?;
+    return Ok(store_file_tmp(state, account, mime_type, &tmp_path, hash, data.len() as u64).await?);
 }
 
 pub fn file_ref(
@@ -87,11 +219,12 @@ pub fn file_ref(
     }));
 }
 
-pub async fn read_file(
+pub async fn file_local(
     state: &State,
     account: DbAccountId,
     hash: &FileHash,
-) -> Result<Option<(String, Vec<u8>)>, loga::Error> {
+    thumbnail: bool,
+) -> Result<Option<(String, PathBuf)>, loga::Error> {
     let file_ref = tx(&state.db, {
         let hash = hash.clone();
         move |db_tx| {
@@ -102,9 +235,10 @@ pub async fn read_file(
         return Ok(None);
     };
     let path = file_path(state, account, hash);
-    let data =
-        tokio::fs::read(&path).await.context_with("Error reading file from disk", ea!(path = path.dbg_str()))?;
-    return Ok(Some((file_ref.mime_type, data)));
+    if thumbnail {
+        return Ok(Some((THUMBNAIL_MIME_TYPE.to_string(), thumbnail_path(&path))));
+    }
+    return Ok(Some((file_ref.mime_type, path)));
 }
 
 pub fn file_referenced(
@@ -129,6 +263,13 @@ pub fn file_referenced(
     if good_ormning::sqlite::good_query_opt!(
         db,
         r#"select 1 as x from contact where account_id = ${account_id_t = &account} and portrait = ${string = hash}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?.is_some() {
+        return Ok(true);
+    }
+    if good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select 1 as x from message_file where account_id = ${account_id_t = &account} and hash = ${string = hash} limit ${i64 = 1}"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?.is_some() {
         return Ok(true);

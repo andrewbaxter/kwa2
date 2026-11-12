@@ -321,6 +321,21 @@
     /** @type { Presentation["classStateSticky"]} */ () => ({
       value: classStateSticky,
     });
+  const classStateControlsHidden = "controls_hidden";
+  presentation.classStateControlsHidden =
+    /** @type { Presentation["classStateControlsHidden"]} */ () => ({
+      value: classStateControlsHidden,
+    });
+  const classStateRecording = "recording";
+  presentation.classStateRecording =
+    /** @type { Presentation["classStateRecording"]} */ () => ({
+      value: classStateRecording,
+    });
+  const classStateVideo = "video";
+  presentation.classStateVideo =
+    /** @type { Presentation["classStateVideo"]} */ () => ({
+      value: classStateVideo,
+    });
 
   // xx Text classes
 
@@ -1203,13 +1218,13 @@ svg.spinner4 path {
     "": (s) => {
       s.borderRadius = "9999cm";
     },
-    [classStateSelected]: (s) => {
+    [`.${classStateSelected}`]: (s) => {
       s.backgroundColor = varCBackground;
     },
     ":hover": (s) => {
       s.backgroundColor = varCBackground;
     },
-    [`${classStateSelected}:hover`]: (s) => {
+    [`.${classStateSelected}:hover`]: (s) => {
       s.backgroundColor = `color-mix(in srgb, ${varCBackground} 50%, transparent)`;
     },
   });
@@ -1217,13 +1232,13 @@ svg.spinner4 path {
     "": (s) => {
       s.borderRadius = "9999cm";
     },
-    [classStateSelected]: (s) => {
+    [`.${classStateSelected}`]: (s) => {
       s.backgroundColor = varCBackgroundDark;
     },
     ":hover": (s) => {
       s.backgroundColor = varCBackgroundDark;
     },
-    [`${classStateSelected}:hover`]: (s) => {
+    [`.${classStateSelected}:hover`]: (s) => {
       s.backgroundColor = `color-mix(in srgb, ${varCBackgroundDark} 50%, transparent)`;
     },
   });
@@ -1664,6 +1679,27 @@ svg.spinner4 path {
   const svgIconHistory = `<circle cx="5" cy="5" r="3.6" />
       <path d="M 5,2.9 V 5 L 6.5,6" /> `;
   const svgIconCheck = `<path d="M 1.8,5.2 4,7.4 8.4,2.6" /> `;
+  const svgIconTrash = `<path d="M 2,3 H 8" />
+      <path d="M 4,3 V 1.8 H 6 V 3" />
+      <path d="M 2.8,3 3.3,8.5 H 6.7 L 7.2,3" /> `;
+  const svgIconCamera = `<rect x="1" y="3" width="8" height="5.5" rx="0.8" />
+      <path d="M 3.5,3 4.2,1.8 H 5.8 L 6.5,3" />
+      <circle cx="5" cy="5.7" r="1.6" /> `;
+  const svgIconVideo = `<rect x="1" y="2.8" width="5.6" height="4.4" rx="0.6" />
+      <path d="M 6.6,4.4 9,3 V 7 L 6.6,5.6" /> `;
+  const svgIconFile = `<path d="M 2.5,1 H 6 L 7.5,2.5 V 9 H 2.5 Z" />
+      <path d="M 6,1 V 2.5 H 7.5" /> `;
+  const svgIconText = `<path d="M 2,2 H 8" />
+      <path d="M 5,2 V 8.5" /> `;
+  const svgIconFlip = `<path d="M 2,4 A 3.2,3.2 0 0 1 8,4" />
+      <path d="M 8,1.8 V 4 H 5.8" />
+      <path d="M 8,6 A 3.2,3.2 0 0 1 2,6" />
+      <path d="M 2,8.2 V 6 H 4.2" /> `;
+  const svgIconDownload = `<path d="M 5,1.5 V 6.5" />
+      <path d="M 2.8,4.5 5,6.7 7.2,4.5" />
+      <path d="M 1.5,8.5 H 8.5" /> `;
+  const svgIconPlay = `<path d="M 3,2 8,5 3,8 Z" /> `;
+  const svgIconForward = `<path d="m 3.6430367,1.06654 3.86699,3.98597 -3.92649,3.98598" />`;
   const svgIconClosed = `<path d="M 3.31381,2.55686 6.54797,4.97396 3.31381,7.42511" /> `;
   const svgIconMessage = `<path        d="M 1.0451019,9.0882899 C 1.881773,6.8346388 0.9807132,6.4106016 1.0025419,4.7517916 1.0270541,2.8890523 2.5540914,1.2417577 5.1503393,1.2344073 7.7465873,1.2270557 9.178426,2.801595 9.1403442,4.7019845 9.1022618,6.6023739 7.7306769,8.016585 5.0856639,8.0388243 3.4647788,8.0524527 2.7929907,7.4356862 1.0451019,9.0882899 Z"
 />`;
@@ -2273,7 +2309,16 @@ svg.spinner4 path {
         "div",
         {},
         {
-          styles_: [contVboxStyle, bubbleStyle, chatEntryBodySpecificStyle],
+          styles_: [
+            contVboxStyle,
+            bubbleStyle,
+            chatEntryBodySpecificStyle,
+            s("chat_entry_body", {
+              "": (s) => {
+                s.gap = varPSmall;
+              },
+            }),
+          ],
         },
       );
       const actions = e(
@@ -2541,10 +2586,104 @@ svg.spinner4 path {
         ),
       };
     };
-  presentation.leafChatEntryModeMessageTextBlock =
-    /** @type { Presentation["leafChatEntryModeMessageTextBlock"] } */ (
-      args,
-    ) => {
+  const mediaSquareStyle = s("media_square", {
+    "": (s) => {
+      s.position = "relative";
+      s.display = "grid";
+      s.gridTemplateColumns = "1fr";
+      s.gridTemplateRows = "1fr";
+      s.overflow = "hidden";
+      s.borderRadius = varRSelectable;
+      s.pointerEvents = "initial";
+      s.backgroundColor = varCForegroundUltraLight;
+    },
+    ":hover": (s) => {
+      s.opacity = varOIcon;
+    },
+  });
+  presentation.leafMediaThumb = /** @type { Presentation["leafMediaThumb"] } */ (
+    args,
+  ) => {
+    const mediaStyle = s("leaf_media_thumb_media", {
+      "": (s) => {
+        s.gridColumn = "1";
+        s.gridRow = "1";
+        s.width = "100%";
+        s.height = "100%";
+        s.objectFit = "cover";
+      },
+    });
+    /** @type { HTMLElement[] } */
+    const children = [];
+    if (args.srcIsVideo) {
+      children.push(
+        e(
+          "video",
+          { src: args.src, preload: "metadata", muted: true, playsInline: true },
+          { styles_: [mediaStyle] },
+        ),
+      );
+    } else {
+      children.push(
+        e(
+          "img",
+          { src: args.src, loading: "lazy", decoding: "async" },
+          { styles_: [mediaStyle] },
+        ),
+      );
+    }
+    if (args.video) {
+      children.push(
+        e(
+          "div",
+          {},
+          {
+            styles_: [
+              s("leaf_media_thumb_play", {
+                "": (s) => {
+                  s.gridColumn = "1";
+                  s.gridRow = "1";
+                  s.placeSelf = "center";
+                  s.display = "grid";
+                  s.justifyItems = "center";
+                  s.alignItems = "center";
+                  s.width = s.height = "0.8cm";
+                  s.borderRadius = "999cm";
+                  s.backgroundColor = `color-mix(in srgb, black 50%, transparent)`;
+                  s.color = "white";
+                },
+              }),
+            ],
+            children_: [leafSvg({ text: svgIconPlay, width: "0.5cm" })],
+          },
+        ),
+      );
+    }
+    return {
+      root: e(
+        "div",
+        {},
+        {
+          styles_: [
+            s("leaf_media_thumb", {
+              "": (s) => {
+                s.display = "grid";
+                s.gridTemplateColumns = "1fr";
+                s.gridTemplateRows = "1fr";
+                s.gridColumn = "1";
+                s.gridRow = "1";
+                s.width = "100%";
+                s.height = "100%";
+              },
+            }),
+          ],
+          children_: children,
+        },
+      ),
+    };
+  };
+  presentation.leafChatEntryMessageText =
+    /** @type { Presentation["leafChatEntryMessageText"] } */ (args) => {
       return {
         root: e(
           "div",
@@ -2557,7 +2696,171 @@ svg.spinner4 path {
                 },
               }),
             ],
-            children_: [e("p", { textContent: args.text }, {})],
+            children_: [args.content],
+          },
+        ),
+      };
+    };
+  const varSEntryMedia = "3cm";
+  presentation.contChatEntryMessageMedia =
+    /** @type { Presentation["contChatEntryMessageMedia"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              s("cont_chat_entry_message_media", {
+                "": (s) => {
+                  s.display = "flex";
+                  s.flexDirection = "row";
+                  s.flexWrap = "wrap";
+                  s.justifyContent = "center";
+                  s.gap = "0.1cm";
+                },
+              }),
+            ],
+            children_: args.children,
+          },
+        ),
+      };
+    };
+  presentation.leafChatEntryMessageMediaSquare =
+    /** @type { Presentation["leafChatEntryMessageMediaSquare"] } */ (args) => {
+      return {
+        root: e(
+          "button",
+          {},
+          {
+            styles_: [
+              mediaSquareStyle,
+              s("leaf_chat_entry_message_media_square", {
+                "": (s) => {
+                  s.width = s.height = varSEntryMedia;
+                },
+              }),
+            ],
+            children_: [args.content],
+          },
+        ),
+      };
+    };
+  presentation.leafChatEntryMessageExtension =
+    /** @type { Presentation["leafChatEntryMessageExtension"] } */ (args) => {
+      return {
+        root: e(
+          "details",
+          {},
+          {
+            styles_: [
+              s("leaf_chat_entry_message_extension", {
+                "": (s) => {
+                  s.pointerEvents = "initial";
+                  s.minWidth = "0";
+                },
+                " > summary": (s) => {
+                  s.cursor = "pointer";
+                  s.color = varCForegroundLight;
+                },
+                " > summary:hover": (s) => {
+                  s.color = varCForeground;
+                },
+              }),
+            ],
+            children_: [
+              e(
+                "summary",
+                {},
+                { children_: [e("code", { textContent: args.key }, { styles_: [classCode] })] },
+              ),
+              e(
+                "pre",
+                { textContent: args.json },
+                {
+                  styles_: [
+                    classCode,
+                    s("leaf_chat_entry_message_extension_json", {
+                      "": (s) => {
+                        s.pointerEvents = "initial";
+                        s.whiteSpace = "pre";
+                        s.overflowX = "auto";
+                        s.marginTop = "0.1cm";
+                        s.padding = "0.1cm 0.2cm";
+                        s.borderRadius = varRSelectable;
+                        s.backgroundColor = varCForegroundUltraLight;
+                      },
+                    }),
+                  ],
+                },
+              ),
+            ],
+          },
+        ),
+      };
+    };
+  presentation.leafChatEntryMessageFile =
+    /** @type { Presentation["leafChatEntryMessageFile"] } */ (args) => {
+      return {
+        root: e(
+          "a",
+          { href: args.link, download: args.name, title: args.name },
+          {
+            styles_: [
+              contHboxStyle,
+              s("leaf_chat_entry_message_file", {
+                "": (s) => {
+                  s.gap = "0.2cm";
+                  s.alignItems = "center";
+                  s.minWidth = "0";
+                },
+                ":hover": (s) => {
+                  s.textDecoration = "underline";
+                },
+              }),
+            ],
+            children_: [
+              leafSvg({
+                text: svgIconFile,
+                width: varSChatControlsButton,
+                extraStyles: [
+                  s("leaf_chat_entry_message_file_icon", {
+                    "": (s) => {
+                      s.color = varCForegroundVeryLight;
+                    },
+                  }),
+                ],
+              }),
+              e(
+                "span",
+                { textContent: args.name },
+                {
+                  styles_: [
+                    s("leaf_chat_entry_message_file_name", {
+                      "": (s) => {
+                        s.overflow = "hidden";
+                        s.textOverflow = "ellipsis";
+                        s.whiteSpace = "nowrap";
+                        s.minWidth = "0";
+                      },
+                    }),
+                  ],
+                },
+              ),
+              e(
+                "span",
+                { textContent: args.size },
+                {
+                  styles_: [
+                    s("leaf_chat_entry_message_file_size", {
+                      "": (s) => {
+                        s.color = varCForegroundLight;
+                        s.fontSize = "9pt";
+                      },
+                    }),
+                  ],
+                },
+              ),
+            ],
           },
         ),
       };
@@ -2616,6 +2919,29 @@ svg.spinner4 path {
     };
 
   // Controls
+  const chatControlsButtonRowStyles = [
+    contHboxStyle,
+    s("leaf_chat_controls_mode_menu_buttons", {
+      "": (s) => {
+        s.gap = "0.2cm";
+        s.justifyContent = "center";
+      },
+    }),
+  ];
+  const chatControlsIconButton = /** @type { (svg: string, title: string) => HTMLElement } */ (
+    svg,
+    title,
+  ) => {
+    return e(
+      "button",
+      { title: title },
+      {
+        styles_: [...onBlueIconButtonStyles],
+        children_: [leafSvg({ text: svg, width: varSChatControlsButton })],
+      },
+    );
+  };
+
   presentation.contChatControlsBarModeMenu =
     /** @type { Presentation["contChatControlsBarModeMenu"] } */ (args) => {
       return {
@@ -2625,14 +2951,7 @@ svg.spinner4 path {
               "div",
               {},
               {
-                styles_: [
-                  contHboxStyle,
-                  s("leaf_chat_controls_mode_menu_buttons", {
-                    "": (s) => {
-                      s.gap = "0.2cm";
-                    },
-                  }),
-                ],
+                styles_: chatControlsButtonRowStyles,
                 children_: args.children,
               },
             ),
@@ -2653,45 +2972,46 @@ svg.spinner4 path {
     /** @type { Presentation["leafChatControlsBarModeMenuButtonNewMessage"] } */ (
       args,
     ) => {
-      return {
-        root: e(
-          "button",
-          {},
-          {
-            styles_: [...onBlueIconButtonStyles],
-            children_: [
-              leafSvg({ text: svgIconMessage, width: varSChatControlsButton }),
-            ],
-          },
-        ),
-      };
+      return { root: chatControlsIconButton(svgIconMessage, "New message") };
     };
 
-  const chatControlsBarMessage =
-    /** @type { (args: { sendSvg: string, prefix: HTMLElement[] }) => { root: HTMLElement, send: HTMLElement, text: HTMLElement, close: HTMLElement } } */ (
+  const chatEditorLeftWidth = "0.8cm";
+  const chatEditorTextStyle = s("leaf_chat_editor_text", {
+    "": (s) => {
+      s.display = "block";
+      s.backgroundColor = `color-mix(in srgb, ${varCBackground} 50%, transparent)`;
+      s.borderRadius = varRBubble;
+      s.padding = "0.1cm 0.2cm";
+      s.minWidth = "0";
+    },
+    " > .malarkdowney": (s) => {
+      s.display = "block";
+      s.minHeight = "1.2em";
+      s.cursor = "text";
+    },
+  });
+  const chatEditorBar =
+    /** @type { (args: { sendSvg: string }) => { root: HTMLElement, rows: HTMLElement, send: HTMLElement } } */ (
       args,
     ) => {
-      const close = e(
-        "button",
-        {},
-        {
-          styles_: [...onBlueIconButtonStyles],
-          children_: [
-            leafSvg({ text: svgIconNope, width: varSChatControlsButton }),
-          ],
-        },
-      );
       const send = e(
         "button",
         {},
         {
-          styles_: [...onBlueIconButtonStyles],
+          styles_: [
+            ...onBlueIconButtonStyles,
+            s("chat_editor_message_send_button", {
+              "": (s) => {
+                s.alignSelf = "flex-end";
+              },
+            }),
+          ],
           children_: [
             leafSvg({
               text: args.sendSvg,
               width: varSChatControlsButton,
               extraStyles: [
-                s("chat_controls_bar_message_send", {
+                s("chat_editor_message_send", {
                   "": (s) => {
                     s.color = varCMutateForeground;
                   },
@@ -2701,18 +3021,18 @@ svg.spinner4 path {
           ],
         },
       );
-      const text = e(
+      const rows = e(
         "div",
-        { contentEditable: "plaintext-only" },
+        {},
         {
           styles_: [
-            s("leaf_chat_controls_mode_message_text", {
+            contVboxStyle,
+            s("chat_editor_message_rows", {
               "": (s) => {
-                s.backgroundColor = `color-mix(in srgb, ${varCBackground} 50%, transparent)`;
-                s.borderRadius = varRBubble;
-                s.padding = "0.1cm 0.2cm";
+                s.gap = "0.1cm";
                 s.flexGrow = "1";
                 s.flexBasis = "0";
+                s.minWidth = "0";
               },
             }),
           ],
@@ -2720,47 +3040,335 @@ svg.spinner4 path {
       );
       return {
         root: floatingBar({
-          children_: [close, ...args.prefix, text, send],
+          children_: [rows, send],
           extraStyles: [
             contHboxStyle,
-            s("leaf_chat_controls_mode_message", {
+            s("leaf_chat_editor_mode_message", {
               "": (s) => {
                 s.gap = "0.1cm";
               },
             }),
           ],
         }),
+        rows: rows,
         send: send,
-        close: close,
-        text: text,
       };
     };
 
-  presentation.leafChatControlsBarModeMessage =
-    /** @type { Presentation["leafChatControlsBarModeMessage"] } */ (args) => {
-      return chatControlsBarMessage({ sendSvg: svgIconSend, prefix: [] });
+  presentation.leafChatEditorModeMessage =
+    /** @type { Presentation["leafChatEditorModeMessage"] } */ (args) => {
+      return chatEditorBar({ sendSvg: svgIconSend });
     };
 
-  presentation.leafChatControlsBarModeEdit =
-    /** @type { Presentation["leafChatControlsBarModeEdit"] } */ (args) => {
-      return chatControlsBarMessage({
-        sendSvg: svgIconCheck,
-        prefix: [
-          leafSvg({
-            text: svgIconEdit,
-            width: varSChatControlsButton,
-            extraStyles: [
-              s("chat_controls_bar_edit_indicator", {
+  presentation.leafChatEditorModeEdit =
+    /** @type { Presentation["leafChatEditorModeEdit"] } */ (args) => {
+      return chatEditorBar({ sendSvg: svgIconEdit });
+    };
+
+  presentation.contChatEditorRow =
+    /** @type { Presentation["contChatEditorRow"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              contHboxStyle,
+              s("cont_chat_editor_row", {
                 "": (s) => {
-                  s.alignSelf = "center";
-                  s.flexShrink = "0";
-                  s.color = varCForegroundVeryLight;
+                  s.gap = "0.1cm";
+                  s.alignItems = "flex-start";
                 },
               }),
             ],
-          }),
-        ],
-      });
+            children_: [
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    contVboxStyle,
+                    s("cont_chat_editor_row_left", {
+                      "": (s) => {
+                        s.width = chatEditorLeftWidth;
+                        s.alignItems = "center";
+                      },
+                    }),
+                  ],
+                  children_: args.left,
+                },
+              ),
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    s("cont_chat_editor_row_middle", {
+                      "": (s) => {
+                        s.flexGrow = "1";
+                        s.flexBasis = "0";
+                        s.minWidth = "0";
+                      },
+                    }),
+                  ],
+                  children_: [args.middle],
+                },
+              ),
+            ],
+          },
+        ),
+      };
+    };
+
+  presentation.leafChatEditorButtonClose =
+    /** @type { Presentation["leafChatEditorButtonClose"] } */ (args) => {
+      return { root: chatControlsIconButton(svgIconNope, "Close") };
+    };
+
+  presentation.leafChatEditorButtonDelete =
+    /** @type { Presentation["leafChatEditorButtonDelete"] } */ (args) => {
+      return { root: chatControlsIconButton(svgIconTrash, "Delete") };
+    };
+
+  presentation.leafChatEditorButtonPlus =
+    /** @type { Presentation["leafChatEditorButtonPlus"] } */ (args) => {
+      return {
+        root: e(
+          "button",
+          { title: "Add" },
+          {
+            styles_: [
+              onBlueButtonColors,
+              s("leaf_chat_editor_button_plus", {
+                "": (s) => {
+                  s.float = "right";
+                  s.display = "grid";
+                  s.justifyItems = "center";
+                  s.alignItems = "center";
+                  s.width = s.height = "0.55cm";
+                  s.marginLeft = "0.1cm";
+                  s.color = varCForegroundLight;
+                },
+              }),
+            ],
+            children_: [leafSvg({ text: svgIconAdd, width: "0.4cm" })],
+          },
+        ),
+      };
+    };
+
+  presentation.contChatEditorToolbox =
+    /** @type { Presentation["contChatEditorToolbox"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: chatControlsButtonRowStyles,
+            children_: args.children,
+          },
+        ),
+      };
+    };
+
+  presentation.leafChatEditorToolboxButtonText =
+    /** @type { Presentation["leafChatEditorToolboxButtonText"] } */ (args) => {
+      return { root: chatControlsIconButton(svgIconText, "Add text") };
+    };
+
+  presentation.leafChatEditorToolboxButtonCamera =
+    /** @type { Presentation["leafChatEditorToolboxButtonCamera"] } */ (
+      args,
+    ) => {
+      return { root: chatControlsIconButton(svgIconCamera, "Camera") };
+    };
+
+  presentation.leafChatEditorToolboxButtonDelete =
+    /** @type { Presentation["leafChatEditorToolboxButtonDelete"] } */ (
+      args,
+    ) => {
+      return {
+        root: e(
+          "button",
+          { title: "Delete message" },
+          {
+            styles_: [
+              onBlueIconButtonStyle,
+              s("leaf_chat_editor_toolbox_button_delete", {
+                "": (s) => {
+                  s.borderRadius = "9999cm";
+                },
+                ":hover": (s) => {
+                  s.backgroundColor = varCForegroundError;
+                  s.color = "white";
+                },
+                [`.${classStateSelected}`]: (s) => {
+                  s.backgroundColor = varCForegroundError;
+                  s.color = "white";
+                },
+                [`.${classStateSelected}:hover`]: (s) => {
+                  s.backgroundColor = `color-mix(in srgb, ${varCForegroundError} 50%, transparent)`;
+                },
+              }),
+            ],
+            children_: [leafSvg({ text: svgIconTrash, width: varSChatControlsButton })],
+          },
+        ),
+      };
+    };
+
+  presentation.leafChatEditorToolboxButtonFile =
+    /** @type { Presentation["leafChatEditorToolboxButtonFile"] } */ (args) => {
+      return { root: chatControlsIconButton(svgIconFile, "Add files") };
+    };
+
+  presentation.leafChatEditorText =
+    /** @type { Presentation["leafChatEditorText"] } */ (args) => {
+      const plusSlot = e("div", {}, { styles_: [contGroupStyle] });
+      return {
+        root: e(
+          "div",
+          {},
+          { styles_: [chatEditorTextStyle], children_: [plusSlot, args.editor] },
+        ),
+        plusSlot: plusSlot,
+      };
+    };
+
+  const varSControlsMedia = "2cm";
+  presentation.contChatEditorMedia =
+    /** @type { Presentation["contChatEditorMedia"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              s("cont_chat_editor_media", {
+                "": (s) => {
+                  s.display = "grid";
+                  s.gridTemplateColumns = `repeat(auto-fill, ${varSControlsMedia})`;
+                  s.gap = "0.1cm";
+                },
+              }),
+            ],
+            children_: args.children,
+          },
+        ),
+      };
+    };
+
+  presentation.leafChatEditorMediaSquare =
+    /** @type { Presentation["leafChatEditorMediaSquare"] } */ (args) => {
+      const del = e(
+        "button",
+        { title: "Delete" },
+        {
+          styles_: [
+            s("leaf_chat_editor_media_delete", {
+              "": (s) => {
+                s.position = "absolute";
+                s.top = "0.05cm";
+                s.right = "0.05cm";
+                s.display = "grid";
+                s.justifyItems = "center";
+                s.alignItems = "center";
+                s.width = s.height = "0.55cm";
+                s.borderRadius = "999cm";
+                s.backgroundColor = `color-mix(in srgb, ${varCBackground} 80%, transparent)`;
+              },
+            }),
+          ],
+          children_: [leafSvg({ text: svgIconTrash, width: "0.4cm" })],
+        },
+      );
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              mediaSquareStyle,
+              s("leaf_chat_editor_media_square", {
+                "": (s) => {
+                  s.width = s.height = varSControlsMedia;
+                  s.cursor = "pointer";
+                },
+                ":hover": (s) => {
+                  s.backgroundColor = varCBackground;
+                },
+              }),
+            ],
+            children_: [args.content, del],
+          },
+        ),
+        delete: del,
+      };
+    };
+
+  presentation.leafChatEditorFile =
+    /** @type { Presentation["leafChatEditorFile"] } */ (args) => {
+      const name = e(
+        "input",
+        { type: "text", value: args.name, placeholder: "File name" },
+        {
+          styles_: [
+            chatEditorTextStyle,
+            s("leaf_chat_editor_file_name", {
+              "": (s) => {
+                s.flexGrow = "1";
+                s.minWidth = "0";
+              },
+            }),
+          ],
+        },
+      );
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              contHboxStyle,
+              s("leaf_chat_editor_file", {
+                "": (s) => {
+                  s.gap = "0.2cm";
+                  s.alignItems = "center";
+                },
+              }),
+            ],
+            children_: [
+              leafSvg({
+                text: svgIconFile,
+                width: varSChatControlsButton,
+                extraStyles: [
+                  s("leaf_chat_editor_file_icon", {
+                    "": (s) => {
+                      s.color = varCForegroundVeryLight;
+                    },
+                  }),
+                ],
+              }),
+              name,
+              e(
+                "span",
+                { textContent: args.size },
+                {
+                  styles_: [
+                    s("leaf_chat_editor_file_size", {
+                      "": (s) => {
+                        s.color = varCForegroundLight;
+                        s.fontSize = "9pt";
+                      },
+                    }),
+                  ],
+                },
+              ),
+            ],
+          },
+        ),
+        name: name,
+      };
     };
 
   ///////////////////////////////////////////////////////////////////////////////
@@ -3019,6 +3627,530 @@ svg.spinner4 path {
                   }),
                 ]
               : [],
+          },
+        ),
+      };
+    };
+
+  ///////////////////////////////////////////////////////////////////////////////
+  // xx Components, styles: modals
+
+  globalStyle.insertRule(`.${classStateHidden} { display: none !important; }`, 0);
+  globalStyle.insertRule(`.malarkdowney { white-space-collapse: preserve; }`, 0);
+  globalStyle.insertRule(
+    `code.malarkdowney, .malarkdowney_block_code { font-family: monospace; }`,
+    0,
+  );
+  globalStyle.insertRule(`.malarkdowney_line { min-height: 1em; }`, 0);
+  globalStyle.insertRule(`codeline { display: block; }`, 0);
+  globalStyle.insertRule(
+    `.malarkdowney_aligned { position: relative; display: inline-block; width: 0; text-wrap: nowrap; }`,
+    0,
+  );
+  globalStyle.insertRule(`.malarkdowney a { pointer-events: initial; text-decoration: underline; }`, 0);
+
+  presentation.contModalRoot = /** @type { Presentation["contModalRoot"] } */ (
+    args,
+  ) => {
+    return { root: e("div", {}, { styles_: [contGroupStyle] }) };
+  };
+
+  const modalOverlayStyle = s("modal_overlay", {
+    "": (s) => {
+      s.position = "fixed";
+      s.inset = "0";
+      s.zIndex = "1000";
+      s.pointerEvents = "initial";
+    },
+  });
+  const modalTextButtonStyle = s("modal_text_button", {
+    "": (s) => {
+      s.padding = "0.2cm 0.4cm";
+      s.borderRadius = varRInput;
+      s.backgroundColor = `color-mix(in srgb, ${varCBackground} 80%, transparent)`;
+      s.color = varCForeground;
+    },
+    ":hover": (s) => {
+      s.backgroundColor = varCBackground;
+    },
+  });
+  const modalTextButton = /** @type { (text: string) => HTMLElement } */ (
+    text,
+  ) => {
+    return e("button", { textContent: text }, { styles_: [modalTextButtonStyle] });
+  };
+  const modalIconButtonStyle = s("modal_icon_button", {
+    "": (s) => {
+      s.display = "grid";
+      s.justifyItems = "center";
+      s.alignItems = "center";
+      s.width = s.height = "1cm";
+      s.borderRadius = "999cm";
+      s.color = "white";
+      s.backgroundColor = `color-mix(in srgb, black 40%, transparent)`;
+    },
+    ":hover": (s) => {
+      s.backgroundColor = `color-mix(in srgb, white 30%, transparent)`;
+    },
+    [`.${classStateSelected}`]: (s) => {
+      s.backgroundColor = `color-mix(in srgb, white 30%, transparent)`;
+    },
+    [`.${classStateSelected}:hover`]: (s) => {
+      s.backgroundColor = `color-mix(in srgb, white 15%, transparent)`;
+    },
+  });
+  const modalIconButton = /** @type { (svg: string, title: string, tag?: "button"|"a") => HTMLElement } */ (
+    svg,
+    title,
+    tag,
+  ) => {
+    return e(
+      tag ?? "button",
+      { title: title },
+      {
+        styles_: [modalIconButtonStyle],
+        children_: [leafSvg({ text: svg, width: "0.6cm" })],
+      },
+    );
+  };
+  const modalDarkStyle = s("modal_dark", {
+    "": (s) => {
+      s.backgroundColor = "black";
+      s.color = "white";
+      s.display = "grid";
+      s.gridTemplateColumns = "1fr";
+      s.gridTemplateRows = "1fr";
+    },
+  });
+  const modalFillStyle = s("modal_fill", {
+    "": (s) => {
+      s.gridColumn = "1";
+      s.gridRow = "1";
+      s.width = "100%";
+      s.height = "100%";
+      s.minWidth = "0";
+      s.minHeight = "0";
+      s.objectFit = "contain";
+    },
+  });
+  const modalBarStyle = s("modal_bar", {
+    "": (s) => {
+      s.gridColumn = "1";
+      s.gridRow = "1";
+      s.display = "flex";
+      s.flexDirection = "row";
+      s.alignItems = "center";
+      s.justifyContent = "space-between";
+      s.gap = "0.3cm";
+      s.padding = "0.3cm";
+      s.zIndex = "1";
+    },
+  });
+
+  presentation.contChatEditorModalConfirm =
+    /** @type { Presentation["contChatEditorModalConfirm"] } */ (args) => {
+      const ok = modalTextButton("Delete");
+      const cancel = modalTextButton("Cancel");
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              modalOverlayStyle,
+              s("chat_editor_modal_confirm", {
+                "": (s) => {
+                  s.display = "grid";
+                  s.justifyItems = "center";
+                  s.alignItems = "center";
+                  s.backgroundColor = `color-mix(in srgb, black 40%, transparent)`;
+                },
+              }),
+            ],
+            children_: [
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    contVboxStyle,
+                    bubbleStyle,
+                    s("chat_editor_modal_confirm_panel", {
+                      "": (s) => {
+                        s.gap = "0.4cm";
+                        s.padding = "0.5cm";
+                        s.backgroundColor = varCBackground;
+                        s.maxWidth = varSPageNarrow;
+                      },
+                    }),
+                  ],
+                  children_: [
+                    e("p", { textContent: args.text }, {}),
+                    e(
+                      "div",
+                      {},
+                      {
+                        styles_: [
+                          contHboxStyle,
+                          s("chat_editor_modal_confirm_buttons", {
+                            "": (s) => {
+                              s.justifyContent = "flex-end";
+                              s.gap = "0.2cm";
+                            },
+                          }),
+                        ],
+                        children_: [cancel, ok],
+                      },
+                    ),
+                  ],
+                },
+              ),
+            ],
+          },
+        ),
+        ok: ok,
+        cancel: cancel,
+      };
+    };
+
+  presentation.contChatModalMediaViewer =
+    /** @type { Presentation["contChatModalMediaViewer"] } */ (args) => {
+      const stage = e(
+        "div",
+        {},
+        {
+          styles_: [
+            modalFillStyle,
+            s("chat_modal_media_viewer_stage", {
+              "": (s) => {
+                s.display = "grid";
+                s.gridTemplateColumns = "1fr";
+                s.gridTemplateRows = "1fr";
+                s.justifyItems = "center";
+                s.alignItems = "center";
+              },
+            }),
+          ],
+        },
+      );
+      const download = modalIconButton(svgIconDownload, "Download", "a");
+      const close = modalIconButton(svgIconNope, "Close");
+      const prev = modalIconButton(svgIconBack, "Previous");
+      const next = modalIconButton(svgIconForward, "Next");
+      const counter = e("span", {}, {});
+      const controlsStyle = s("chat_modal_media_viewer_controls", {
+        "": (s) => {
+        },
+      });
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              modalOverlayStyle,
+              modalDarkStyle,
+              s("chat_modal_media_viewer", {
+                [`.${classStateControlsHidden}`]: (s) => {
+                  s.cursor = "none";
+                },
+                [`.${classStateControlsHidden} .${controlsStyle}`]: (s) => {
+                  s.opacity = "0";
+                  s.pointerEvents = "none";
+                },
+              }),
+            ],
+            children_: [
+              stage,
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    modalBarStyle,
+                    controlsStyle,
+                    s("chat_modal_media_viewer_top", {
+                      "": (s) => {
+                        s.alignSelf = "start";
+                      },
+                    }),
+                  ],
+                  children_: [
+                    counter,
+                    e(
+                      "div",
+                      {},
+                      {
+                        styles_: [
+                          contHboxStyle,
+                          s("chat_modal_media_viewer_top_buttons", {
+                            "": (s) => {
+                              s.gap = "0.3cm";
+                            },
+                          }),
+                        ],
+                        children_: [download, close],
+                      },
+                    ),
+                  ],
+                },
+              ),
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    modalBarStyle,
+                    controlsStyle,
+                    s("chat_modal_media_viewer_sides", {
+                      "": (s) => {
+                        s.alignSelf = "center";
+                        s.pointerEvents = "none";
+                      },
+                      " > *": (s) => {
+                        s.pointerEvents = "initial";
+                      },
+                    }),
+                  ],
+                  children_: [prev, next],
+                },
+              ),
+            ],
+          },
+        ),
+        stage: stage,
+        download: download,
+        close: close,
+        prev: prev,
+        next: next,
+        counter: counter,
+      };
+    };
+
+  presentation.leafChatModalMediaViewerImage =
+    /** @type { Presentation["leafChatModalMediaViewerImage"] } */ (args) => {
+      return { root: e("img", { src: args.src }, { styles_: [modalFillStyle] }) };
+    };
+
+  presentation.leafChatModalMediaViewerVideo =
+    /** @type { Presentation["leafChatModalMediaViewerVideo"] } */ (args) => {
+      return {
+        root: e(
+          "video",
+          { src: args.src, controls: true, autoplay: true, playsInline: true },
+          {
+            styles_: [
+              modalFillStyle,
+              s("chat_modal_media_viewer_video", {
+                "": (s) => {
+                  s.pointerEvents = "initial";
+                },
+              }),
+            ],
+          },
+        ),
+      };
+    };
+
+  presentation.contChatEditorModalCamera =
+    /** @type { Presentation["contChatEditorModalCamera"] } */ (args) => {
+      const video = e(
+        "video",
+        { autoplay: true, muted: true, playsInline: true },
+        { styles_: [modalFillStyle] },
+      );
+      const status = e(
+        "p",
+        {},
+        {
+          styles_: [
+            s("chat_editor_modal_camera_status", {
+              "": (s) => {
+                s.gridColumn = "1";
+                s.gridRow = "1";
+                s.placeSelf = "center";
+                s.padding = "0.5cm";
+              },
+            }),
+          ],
+        },
+      );
+      const close = modalIconButton(svgIconNope, "Close");
+      const flip = modalIconButton(svgIconFlip, "Switch camera");
+      const modePhoto = modalIconButton(svgIconCamera, "Photo");
+      const modeVideo = modalIconButton(svgIconVideo, "Video");
+      const shutterInner = s("chat_editor_modal_camera_shutter_inner", {
+        "": (s) => {
+          s.width = s.height = "1.2cm";
+          s.borderRadius = "999cm";
+          s.backgroundColor = "white";
+        },
+      });
+      const shutter = e(
+        "button",
+        { title: "Capture" },
+        {
+          styles_: [
+            s("chat_editor_modal_camera_shutter", {
+              "": (s) => {
+                s.display = "grid";
+                s.justifyItems = "center";
+                s.alignItems = "center";
+                s.width = s.height = "1.6cm";
+                s.borderRadius = "999cm";
+                s.border = "0.1cm solid white";
+              },
+              [`:hover .${shutterInner}`]: (s) => {
+                s.opacity = varOIcon;
+              },
+              [`.${classStateVideo} .${shutterInner}`]: (s) => {
+                s.backgroundColor = "rgb(220, 40, 40)";
+              },
+              [`.${classStateRecording} .${shutterInner}`]: (s) => {
+                s.width = s.height = "0.6cm";
+                s.borderRadius = "0.1cm";
+              },
+            }),
+          ],
+          children_: [e("div", {}, { styles_: [shutterInner] })],
+        },
+      );
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [modalOverlayStyle, modalDarkStyle],
+            children_: [
+              video,
+              status,
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    modalBarStyle,
+                    s("chat_editor_modal_camera_top", {
+                      "": (s) => {
+                        s.alignSelf = "start";
+                      },
+                    }),
+                  ],
+                  children_: [close, flip],
+                },
+              ),
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    modalBarStyle,
+                    s("chat_editor_modal_camera_bottom", {
+                      "": (s) => {
+                        s.alignSelf = "end";
+                        s.justifyContent = "center";
+                      },
+                    }),
+                  ],
+                  children_: [modePhoto, shutter, modeVideo],
+                },
+              ),
+            ],
+          },
+        ),
+        video: video,
+        status: status,
+        close: close,
+        flip: flip,
+        modePhoto: modePhoto,
+        modeVideo: modeVideo,
+        shutter: shutter,
+      };
+    };
+
+  presentation.contChatEditorModalCameraPreview =
+    /** @type { Presentation["contChatEditorModalCameraPreview"] } */ (args) => {
+      const retake = modalIconButton(svgIconTrash, "Retake");
+      const accept = modalIconButton(svgIconCheck, "Use");
+      /** @type { HTMLElement[] } */
+      const bar = [retake];
+      if (args.options != null) {
+        bar.push(args.options);
+      }
+      bar.push(accept);
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [modalOverlayStyle, modalDarkStyle],
+            children_: [
+              args.media,
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    modalBarStyle,
+                    s("chat_editor_modal_camera_preview_bottom", {
+                      "": (s) => {
+                        s.alignSelf = "end";
+                      },
+                    }),
+                  ],
+                  children_: bar,
+                },
+              ),
+            ],
+          },
+        ),
+        retake: retake,
+        accept: accept,
+      };
+    };
+
+  presentation.leafChatEditorModalCameraPreviewImage =
+    /** @type { Presentation["leafChatEditorModalCameraPreviewImage"] } */ (args) => {
+      return { root: e("img", { src: args.src }, { styles_: [modalFillStyle] }) };
+    };
+
+  presentation.leafChatEditorModalCameraPreviewVideo =
+    /** @type { Presentation["leafChatEditorModalCameraPreviewVideo"] } */ (args) => {
+      return {
+        root: e(
+          "video",
+          { src: args.src, controls: true, autoplay: true, loop: true, playsInline: true },
+          {
+            styles_: [
+              modalFillStyle,
+              s("chat_editor_modal_camera_preview_video", {
+                "": (s) => {
+                  s.pointerEvents = "initial";
+                },
+              }),
+            ],
+          },
+        ),
+      };
+    };
+
+  presentation.leafChatEditorModalCameraPreviewSelect =
+    /** @type { Presentation["leafChatEditorModalCameraPreviewSelect"] } */ (args) => {
+      return {
+        root: e(
+          "select",
+          {},
+          {
+            styles_: [
+              modalTextButtonStyle,
+              s("chat_editor_modal_camera_preview_select", {
+                "": (s) => {
+                  s.flexShrink = "1";
+                  s.minWidth = "0";
+                },
+              }),
+            ],
+            children_: args.children,
           },
         ),
       };

@@ -86,6 +86,7 @@ struct ContainerImage {
     name: &'static str,
     tf_id: &'static str,
     sources: Vec<&'static str>,
+    extra_bins: Vec<&'static str>,
 }
 
 fn build_image(
@@ -110,7 +111,7 @@ fn build_image(
             registry.repository_id(),
             spec.name
         ).into(),
-        files: vec![
+        files: [
             BuildImage_Files { source: out.join(spec.name).to_string_lossy().to_string().into() }
                 .build()
                 .set_dest(&bin_dest)
@@ -119,7 +120,20 @@ fn build_image(
                 .build()
                 .set_dest("/etc/ssl/certs/ca-certificates.crt")
                 .set_mode("0644"),
-        ],
+        ]
+            .into_iter()
+            .chain(
+                spec
+                    .extra_bins
+                    .iter()
+                    .map(
+                        |b| BuildImage_Files { source: out.join(b).to_string_lossy().to_string().into() }
+                            .build()
+                            .set_dest(&format!("/{}", b))
+                            .set_mode("0755"),
+                    ),
+            )
+            .collect(),
     }
         .build(stack)
         .depends_on(push_binding)
@@ -254,6 +268,7 @@ fn main() {
             &ContainerImage {
                 name: "kwa",
                 tf_id: "zKTIMGKWA",
+                extra_bins: vec!["ffmpeg"],
                 sources: vec![
                     "kwa3/source/build.nix",
                     "kwa3/source/infra/test/containers.nix",
@@ -281,6 +296,7 @@ fn main() {
             &ContainerImage {
                 name: "openfdap",
                 tf_id: "zKTIMGOFD",
+                extra_bins: vec![],
                 sources: vec!["kwa3/source/infra/test/containers.nix", "openfdap/source/**", "!**/target/**"],
             },
         );
@@ -297,6 +313,7 @@ fn main() {
             &ContainerImage {
                 name: "fdap-login",
                 tf_id: "zKTIMGFDL",
+                extra_bins: vec![],
                 sources: vec!["kwa3/source/infra/test/containers.nix", "fdap-login/source/**", "!**/target/**"],
             },
         );
@@ -549,6 +566,7 @@ fn main() {
             }],
             "cache_dir": format !("{}/kwa/cache", PERSISTENT_DIR),
             "persistent_dir": format !("{}/kwa/persistent", PERSISTENT_DIR),
+            "ffmpeg": "/ffmpeg",
             "oidc_config": {
                 "provider_url": format !("https://{}", login_domain),
                 "client_id": "kwa",

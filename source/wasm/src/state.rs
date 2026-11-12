@@ -356,6 +356,7 @@ pub struct State_ {
     pub service_worker: BgVal<Result<ServiceWorkerRegistration, String>>,
     /// Set once during init, after the rest of the state is available.
     pub page_root: std::cell::OnceCell<El>,
+    pub modal_root: std::cell::OnceCell<El>,
     pub ministate: Prim<Ministate>,
     pub env: Env,
     pub log: Rc<dyn Log>,

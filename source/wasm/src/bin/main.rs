@@ -103,6 +103,7 @@ pub fn main() {
             current_chat: Default::default(),
             service_worker: service_worker,
             page_root: Default::default(),
+            modal_root: Default::default(),
             lookup_channel: Default::default(),
             lookup_channelgroup: Default::default(),
             stored_identity_portraits: Default::default(),
@@ -175,6 +176,8 @@ pub fn main() {
         let root0 = style_export::cont_root(style_export::ContRootArgs { menu: page_top::build(pc) });
         let root = root0.page;
         state().page_root.set(root.clone()).ok().unwrap();
+        let modal_root = style_export::cont_modal_root().root;
+        state().modal_root.set(modal_root.clone()).ok().unwrap();
 
         // Load initial view
         let ministate = state().ministate.borrow().clone();
@@ -268,8 +271,6 @@ pub fn main() {
             }
         }).forget();
         trigger_push();
-
-        // Root and display
-        set_root(vec![root0.root]);
+        set_root(vec![root0.root, modal_root]);
     });
 }

@@ -8,6 +8,7 @@ use {
         subsystems::messages::{
             earliest_snap_offset,
             i64_to_u64,
+            parse_blocks,
             u64_to_i64,
             LocalChannel,
             MsgRow,
@@ -36,6 +37,7 @@ use {
     shared::interface::{
         shared::{
             AccountId,
+            MessageBlock,
             MessageId,
             QualifiedChannelId,
         },
@@ -179,14 +181,14 @@ pub fn channel_floor(
 pub struct OutboxEdit {
     pub created: jiff::Timestamp,
     pub client_id: String,
-    pub body: String,
+    pub blocks: Vec<MessageBlock>,
 }
 
 pub fn build_message_history(
     id: &MessageId,
     rows: Vec<MsgRow>,
     outbox_edits: Vec<OutboxEdit>,
-) -> Option<Vec<MessageRevision>> {
+) -> Result<Option<Vec<MessageRevision>>, loga::Error> {
     let sender_unique = u64_to_i64(id.unique);
     let mut original = None;
     let mut edits = vec![];
@@ -204,12 +206,14 @@ pub fn build_message_history(
             },
         }
     }
-    let original = original?;
+    let Some(original) = original else {
+        return Ok(None);
+    };
     edits.sort_by_key(|r| r.seq);
     let mut out = Vec::with_capacity(edits.len() + outbox_edits.len() + 1);
     out.push(MessageRevision {
         receive_time: original.receive_time,
-        body: original.body_text,
+        blocks: parse_blocks(&original.blocks)?,
     });
     let mut owner_client_ids = HashSet::new();
     for r in edits {
@@ -218,7 +222,7 @@ pub fn build_message_history(
         }
         out.push(MessageRevision {
             receive_time: r.receive_time,
-            body: r.body_text,
+            blocks: parse_blocks(&r.blocks)?,
         });
     }
     let mut extra = vec![];
@@ -228,7 +232,7 @@ pub fn build_message_history(
         }
         extra.push(MessageRevision {
             receive_time: e.created,
-            body: e.body,
+            blocks: e.blocks,
         });
     }
     if !extra.is_empty() {
@@ -237,5 +241,5 @@ pub fn build_message_history(
         out.sort_by_key(|r| r.receive_time);
         out.insert(0, first);
     }
-    return Some(out);
+    return Ok(Some(out));
 }

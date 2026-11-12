@@ -588,6 +588,16 @@ dependencies = [
 
 [[package]]
 name = "gloo"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfcc48ab4c2db58b3e9d6c9af9eef336c2318dfdf7f75b710c46b2a1855d1a1e"
+dependencies = [
+ "gloo-timers 0.2.6",
+ "gloo-utils 0.1.7",
+]
+
+[[package]]
+name = "gloo"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc13cc21c3835347855fd83900414d94716adc1e332f09f7fba56f21be127214"
@@ -600,7 +610,7 @@ dependencies = [
  "gloo-net 0.7.0",
  "gloo-render",
  "gloo-storage",
- "gloo-timers",
+ "gloo-timers 0.4.0",
  "gloo-utils 0.3.0",
  "gloo-worker",
 ]
@@ -742,6 +752,16 @@ dependencies = [
  "thiserror 2.0.21",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "gloo-timers"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b995a66bb87bebce9a0f4a95aed01daca4872c050bfcb21653361c03bc35e5c"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1140,6 +1160,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "malarkdowney"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d170fa9880bbcada62f6b8f2bb557f39979fb885734186b3d4f8942415c2c81"
+dependencies = [
+ "console_error_panic_hook",
+ "flowcontrol",
+ "gloo 0.9.0",
+ "js-sys",
+ "rooting",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "markdown"
 version = "1.0.0-alpha.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1374,7 +1409,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a74b69b8838addaab2a74a3c78631b0b05df4d5fde424ea53522c588794f04d"
 dependencies = [
- "gloo",
+ "gloo 0.12.0",
  "jiff",
  "rooting",
  "rooting_forms_proc_macros",
@@ -2007,12 +2042,13 @@ dependencies = [
  "futures",
  "genemichaels-lib",
  "getrandom 0.4.3",
- "gloo",
+ "gloo 0.12.0",
  "gloo-events 0.1.2",
  "hex",
  "jiff",
  "js-sys",
  "lunk",
+ "malarkdowney",
  "mime2ext",
  "proc-macro2",
  "qrcode",

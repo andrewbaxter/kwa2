@@ -1,5 +1,6 @@
 use {
     crate::{
+        blocks::ViewBlock,
         chat_entry::{
             ChatEntry,
             ChatEntryMessageInternal,
@@ -10,6 +11,7 @@ use {
         chat_feed_server_outbox::ServerOutboxFeed,
         state::CurrentChatSource,
     },
+    by_address::ByAddress,
     defer::defer,
     lunk::{
         EventGraph,
@@ -40,7 +42,7 @@ use {
 
 pub struct EditOverlay {
     pub stamp: Timestamp,
-    pub body: String,
+    pub blocks: Vec<ViewBlock>,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
@@ -80,7 +82,7 @@ pub struct ChatModeReplyMessage {
 pub struct ChatModeEditMessage {
     pub target: QualifiedMessageId,
     pub own_identity: Identity,
-    pub body: String,
+    pub blocks: ByAddress<Rc<Vec<ViewBlock>>>,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
@@ -152,10 +154,10 @@ impl ChatState {
         };
     }
 
-    pub fn overlay_body(&self, id: &QualifiedMessageId, body: String) -> String {
+    pub fn overlay_blocks(&self, id: &QualifiedMessageId, blocks: Vec<ViewBlock>) -> Vec<ViewBlock> {
         match self.edit_overlays.borrow().get(id) {
-            Some(o) => return o.body.clone(),
-            None => return body,
+            Some(o) => return o.blocks.clone(),
+            None => return blocks,
         }
     }
 
@@ -164,7 +166,7 @@ impl ChatState {
         pc: &mut ProcessingContext,
         target: QualifiedMessageId,
         client_id: &MessageClientId,
-        body: String,
+        blocks: Vec<ViewBlock>,
     ) {
         let stamp = Timestamp::from_str(&client_id.0).unwrap();
         {
@@ -174,7 +176,7 @@ impl ChatState {
             }
             overlays.insert(target.clone(), EditOverlay {
                 stamp: stamp,
-                body: body.clone(),
+                blocks: blocks.clone(),
             });
         }
         let Some(e) = self.entry_channel_lookup.borrow().get(&target).and_then(|e| e.upgrade()) else {
@@ -182,7 +184,7 @@ impl ChatState {
         };
         let internal = e.message().internal.borrow();
         if let ChatEntryMessageInternal::Message(m) = &*internal {
-            m.body.set(pc, body);
+            m.blocks.set(pc, blocks);
         }
     }
 
@@ -223,28 +225,28 @@ pub fn new_message_copy(
     key: ClientIdKey,
     message_id: Option<QualifiedMessageId>,
     time: ChatTime,
-    body: String,
+    blocks: Vec<ViewBlock>,
 ) -> Rc<ChatEntry> {
     let existing = chat_state.live_copies(&key).into_iter().next();
-    let (body, hidden) = match existing {
+    let (blocks, hidden) = match existing {
         Some(existing) => {
-            let existing_body = match &*existing.message().internal.borrow() {
-                ChatEntryMessageInternal::Message(m) => Some(m.body.clone()),
+            let existing_blocks = match &*existing.message().internal.borrow() {
+                ChatEntryMessageInternal::Message(m) => Some(m.blocks.clone()),
                 ChatEntryMessageInternal::Deleted => None,
             };
-            match existing_body {
-                Some(existing_body) => {
+            match existing_blocks {
+                Some(existing_blocks) => {
                     if let CopyStage::Channel = stage {
-                        if *existing_body.borrow() != body {
-                            chat_state.eg.event(|pc| existing_body.set(pc, body)).unwrap();
+                        if *existing_blocks.borrow() != blocks {
+                            chat_state.eg.event(|pc| existing_blocks.set(pc, blocks)).unwrap();
                         }
                     }
-                    (existing_body, true)
+                    (existing_blocks, true)
                 },
-                None => (Prim::new(body), true),
+                None => (Prim::new(blocks), true),
             }
         },
-        None => (Prim::new(body), false),
+        None => (Prim::new(blocks), false),
     };
     let entry =
         ChatEntry::new_message(
@@ -252,7 +254,7 @@ pub fn new_message_copy(
             key.1.clone(),
             message_id.clone(),
             time,
-            body,
+            blocks,
             hidden,
             Some(key.clone()),
             scope_any(defer({

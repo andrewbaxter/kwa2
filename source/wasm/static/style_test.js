@@ -432,7 +432,7 @@
       );
     };
     const buildChat =
-      /** @type {(_:{controls: boolean, sticky: "none"|"real"|"holder"}) => HTMLElement} */ (
+      /** @type {(_:{controls: boolean, stickyHolder?: boolean, blocks?: boolean, deleting?: boolean}) => HTMLElement} */ (
         args,
       ) => {
         const infinite = document.createElement("div");
@@ -487,6 +487,7 @@
           e.style.position = "sticky";
           e.style.top = "0px";
           e.style.bottom = "0px";
+          e.style.zIndex = "1";
           e.style.display = "flex";
           e.style.flexDirection = "column";
           return e;
@@ -568,8 +569,81 @@
             }).root,
           );
         } else {
-          const controls = presentation.leafChatControlsBarModeMessage({});
-          controls.text.textContent = "This is a message to a distant thing.";
+          const controls = args.deleting
+            ? presentation.leafChatEditorModeEdit({})
+            : presentation.leafChatEditorModeMessage({});
+          const editor = document.createElement("div");
+          editor.classList.add("malarkdowney");
+          editor.contentEditable = "true";
+          editor.textContent = "This is a message to a distant thing.";
+          if (args.deleting) {
+            const deleteButton = presentation.leafChatEditorToolboxButtonDelete({}).root;
+            deleteButton.classList.add(presentation.classStateSelected({}).value);
+            controls.rows.appendChild(
+              presentation.contChatEditorRow({
+                left: [presentation.leafChatEditorButtonClose({}).root],
+                middle: presentation.contChatEditorToolbox({
+                  children: [deleteButton],
+                }).root,
+              }).root,
+            );
+          } else if (args.blocks) {
+            controls.rows.appendChild(
+              presentation.contChatEditorRow({
+                left: [presentation.leafChatEditorButtonClose({}).root],
+                middle: presentation.contChatEditorToolbox({
+                  children: [
+                    presentation.leafChatEditorToolboxButtonCamera({}).root,
+                    presentation.leafChatEditorToolboxButtonFile({}).root,
+                    presentation.leafChatEditorToolboxButtonDelete({}).root,
+                  ],
+                }).root,
+              }).root,
+            );
+            controls.rows.appendChild(
+              presentation.contChatEditorRow({
+                left: [presentation.leafChatEditorButtonDelete({}).root],
+                middle: presentation.leafChatEditorText({ editor: editor }).root,
+              }).root,
+            );
+            controls.rows.appendChild(
+              presentation.contChatEditorRow({
+                left: [],
+                middle: presentation.contChatEditorMedia({
+                  children: [false, true].map(
+                    (video) =>
+                      presentation.leafChatEditorMediaSquare({
+                        content: presentation.leafMediaThumb({
+                          src: "testportrait.jpg",
+                          video: video,
+                          srcIsVideo: false,
+                        }).root,
+                      }).root,
+                  ),
+                }).root,
+              }).root,
+            );
+            controls.rows.appendChild(
+              presentation.contChatEditorRow({
+                left: [presentation.leafChatEditorButtonDelete({}).root],
+                middle: presentation.leafChatEditorFile({
+                  name: "report",
+                  size: "1.2 MB",
+                }).root,
+              }).root,
+            );
+          } else {
+            const text = presentation.leafChatEditorText({ editor: editor });
+            text.plusSlot.appendChild(
+              presentation.leafChatEditorButtonPlus({}).root,
+            );
+            controls.rows.appendChild(
+              presentation.contChatEditorRow({
+                left: [presentation.leafChatEditorButtonClose({}).root],
+                middle: text.root,
+              }).root,
+            );
+          }
           paddingPost.appendChild(controls.root);
         }
 
@@ -591,9 +665,11 @@
               presentation.leafChatEntryPortrait({ image: "testportrait.jpg" })
                 .root,
             );
+            const content = document.createElement("div");
+            content.classList.add("malarkdowney");
+            content.textContent = text;
             entryMessage1.body.appendChild(
-              presentation.leafChatEntryModeMessageTextBlock({ text: text })
-                .root,
+              presentation.leafChatEntryMessageText({ content: content }).root,
             );
             return entryMessage1.root;
           };
@@ -604,14 +680,12 @@
         );
         selectedMessage.classList.add(presentation.classStateSelected({}).value);
         const selectedEntry = entry(selectedMessage);
-        if (args.sticky != "none") {
-          selectedEntry.style.position = "sticky";
-          selectedEntry.style.top = "0px";
-          selectedEntry.style.bottom = "0px";
-          selectedEntry.style.zIndex = "1";
-          selectedEntry.classList.add(presentation.classStateSticky({}).value);
-        }
-        if (args.sticky == "holder") {
+        selectedEntry.style.position = "sticky";
+        selectedEntry.style.top = "0px";
+        selectedEntry.style.bottom = "0px";
+        selectedEntry.style.zIndex = "1";
+        selectedEntry.classList.add(presentation.classStateSticky({}).value);
+        if (args.stickyHolder) {
           earlySticky.appendChild(selectedEntry);
         }
 
@@ -619,16 +693,59 @@
         real.appendChild(
           entry(presentation.contChatEntryModeDeleted({ left: true }).root),
         );
-        for (let i = 0; i < 5; i += 1) {
+        for (let i = 0; i < 15; i += 1) {
           real.appendChild(entry(textMessage(true, "Spam")));
         }
-        if (args.sticky != "none") {
-          for (let i = 0; i < 10; i += 1) {
-            real.appendChild(entry(textMessage(true, "Spam")));
-          }
-        }
         real.appendChild(entry(textMessage(true, "This is a short chat message")));
-        if (args.sticky != "holder") {
+        {
+          const mediaMessage = presentation.contChatEntryModeMessage({
+            left: true,
+            date: new Date().toISOString(),
+          });
+          mediaMessage.portrait.appendChild(
+            presentation.leafChatEntryPortrait({ image: "testportrait.jpg" }).root,
+          );
+          mediaMessage.body.appendChild(
+            presentation.contChatEntryMessageMedia({
+              children: [
+                ["testportrait.jpg", false, false],
+                ["testvideo.mp4", true, true],
+                ["testportrait.jpg", true, false],
+                ["testportrait.jpg", false, false],
+                ["testportrait.jpg", false, false],
+                ["testportrait.jpg", false, false],
+              ].map(
+                ([src, video, srcIsVideo]) =>
+                  presentation.leafChatEntryMessageMediaSquare({
+                    content: presentation.leafMediaThumb({
+                      src: /** @type {string} */ (src),
+                      video: /** @type {boolean} */ (video),
+                      srcIsVideo: /** @type {boolean} */ (srcIsVideo),
+                    }).root,
+                  }).root,
+              ),
+            }).root,
+          );
+          mediaMessage.body.appendChild(
+            presentation.leafChatEntryMessageFile({
+              name: "report.pdf",
+              size: "1.2 MB",
+              link: "testportrait.jpg",
+            }).root,
+          );
+          mediaMessage.body.appendChild(
+            presentation.leafChatEntryMessageExtension({
+              key: "com.example.poll",
+              json: JSON.stringify(
+                { question: "Lunch?", options: ["Noodles", "Rice"] },
+                null,
+                2,
+              ),
+            }).root,
+          );
+          real.appendChild(entry(mediaMessage.root));
+        }
+        if (!args.stickyHolder) {
           real.appendChild(selectedEntry);
         }
 
@@ -660,65 +777,173 @@
         return infinite;
       };
 
-    const hash = location.hash;
-    switch (hash) {
-      case "#top":
-        {
-          buildRoot();
-        }
-        break;
-      case "#menu":
-        {
-          buildRoot(buildMenu({ link: true }));
-        }
-        break;
-      case "#menu_nolink":
-        {
-          buildRoot(buildMenu({ link: false }));
-        }
-        break;
-      case "#menu_invite":
-        {
-          buildRoot(await buildMenuInvite());
-        }
-        break;
-      case "#form":
-        {
-          buildRoot(buildForm());
-        }
-        break;
-      case "#form_confirm":
-        {
-          buildRoot(buildFormConfirm());
-        }
-        break;
-      case "#form_all":
-        {
-          buildRoot(buildFormAll());
-        }
-        break;
-      case "#chat":
-        {
-          buildRoot(buildChat({ controls: false, sticky: "none" }));
-        }
-        break;
-      case "#chat_sticky":
-        {
-          buildRoot(buildChat({ controls: false, sticky: "real" }));
-        }
-        break;
-      case "#chat_sticky_holder":
-        {
-          buildRoot(buildChat({ controls: false, sticky: "holder" }));
-        }
-        break;
-      case "#chat_controls":
-        {
-          buildRoot(buildChat({ controls: true, sticky: "none" }));
-        }
-        break;
-      default:
-        throw new Error();
+    const showModal = /** @type {(e: HTMLElement) => void} */ (e) => {
+      buildRoot(buildChat({ controls: false }));
+      document.body.appendChild(e);
+    };
+    const buildMediaViewer = /** @type {(video: boolean, hidden: boolean) => HTMLElement} */ (
+      video,
+      hidden,
+    ) => {
+      const viewer = presentation.contChatModalMediaViewer({});
+      if (video) {
+        viewer.stage.appendChild(
+          presentation.leafChatModalMediaViewerVideo({ src: "testvideo.mp4" }).root,
+        );
+      } else {
+        viewer.stage.appendChild(
+          presentation.leafChatModalMediaViewerImage({ src: "testportrait.jpg" }).root,
+        );
+      }
+      viewer.counter.textContent = "2 / 3";
+      const download = /** @type {HTMLAnchorElement} */ (viewer.download);
+      download.href = video ? "testvideo.mp4" : "testportrait.jpg";
+      download.download = video ? "file.mp4" : "file.jpg";
+      if (hidden) {
+        viewer.root.classList.add(presentation.classStateControlsHidden({}).value);
+      }
+      return viewer.root;
+    };
+    const buildCamera = /** @type {(mode: "photo"|"video"|"recording", status?: string) => HTMLElement} */ (
+      mode,
+      status,
+    ) => {
+      const camera = presentation.contChatEditorModalCamera({});
+      const video = /** @type {HTMLVideoElement} */ (camera.video);
+      if (status == null) {
+        video.src = "testvideo.mp4";
+        video.loop = true;
+      } else {
+        camera.status.textContent = status;
+      }
+      const selected = presentation.classStateSelected({}).value;
+      if (mode == "photo") {
+        camera.modePhoto.classList.add(selected);
+      } else {
+        camera.modeVideo.classList.add(selected);
+        camera.shutter.classList.add(presentation.classStateVideo({}).value);
+      }
+      if (mode == "recording") {
+        camera.shutter.classList.add(presentation.classStateRecording({}).value);
+      }
+      return camera.root;
+    };
+    const buildCameraPreview = /** @type {(video: boolean) => HTMLElement} */ (
+      video,
+    ) => {
+      if (video) {
+        return presentation.contChatEditorModalCameraPreview({
+          media: presentation.leafChatEditorModalCameraPreviewVideo({ src: "testvideo.mp4" })
+            .root,
+          options: undefined,
+        }).root;
+      }
+      return presentation.contChatEditorModalCameraPreview({
+        media: presentation.leafChatEditorModalCameraPreviewImage({ src: "testportrait.jpg" })
+          .root,
+        options: presentation.leafChatEditorModalCameraPreviewSelect({
+          children: [
+            "Full size - 3.2 MB",
+            "High quality - 1.1 MB",
+            "Low quality - 240.0 KB",
+          ].map((t) => {
+            const o = document.createElement("option");
+            o.textContent = t;
+            return o;
+          }),
+        }).root,
+      }).root;
+    };
+
+    /** @type { {[hash: string]: () => Promise<void>} } */
+    const tests = {
+      "#top": async () => {
+        buildRoot();
+      },
+      "#menu": async () => {
+        buildRoot(buildMenu({ link: true }));
+      },
+      "#menu_nolink": async () => {
+        buildRoot(buildMenu({ link: false }));
+      },
+      "#menu_invite": async () => {
+        buildRoot(await buildMenuInvite());
+      },
+      "#form": async () => {
+        buildRoot(buildForm());
+      },
+      "#form_confirm": async () => {
+        buildRoot(buildFormConfirm());
+      },
+      "#form_all": async () => {
+        buildRoot(buildFormAll());
+      },
+      "#chat": async () => {
+        buildRoot(buildChat({ controls: false }));
+      },
+      "#chat_sticky_holder": async () => {
+        buildRoot(buildChat({ controls: false, stickyHolder: true }));
+      },
+      "#chat_editor_blocks": async () => {
+        buildRoot(buildChat({ controls: false, blocks: true }));
+      },
+      "#chat_editor_deleting": async () => {
+        buildRoot(buildChat({ controls: false, deleting: true }));
+      },
+      "#chat_controls_menu": async () => {
+        buildRoot(buildChat({ controls: true }));
+      },
+      "#chat_editor_modal_confirm": async () => {
+        showModal(presentation.contChatEditorModalConfirm({ text: "Delete the text?" }).root);
+      },
+      "#chat_modal_viewer_image": async () => {
+        showModal(buildMediaViewer(false, false));
+      },
+      "#chat_modal_viewer_image_hidden": async () => {
+        showModal(buildMediaViewer(false, true));
+      },
+      "#chat_modal_viewer_video": async () => {
+        showModal(buildMediaViewer(true, false));
+      },
+      "#chat_editor_modal_camera_photo": async () => {
+        showModal(buildCamera("photo"));
+      },
+      "#chat_editor_modal_camera_video": async () => {
+        showModal(buildCamera("video"));
+      },
+      "#chat_editor_modal_camera_recording": async () => {
+        showModal(buildCamera("recording"));
+      },
+      "#chat_editor_modal_camera_error": async () => {
+        showModal(
+          buildCamera("photo", "Error requesting camera: NotAllowedError"),
+        );
+      },
+      "#chat_editor_modal_camera_preview_photo": async () => {
+        showModal(buildCameraPreview(false));
+      },
+      "#chat_editor_modal_camera_preview_video": async () => {
+        showModal(buildCameraPreview(true));
+      },
+    };
+    addEventListener("hashchange", () => location.reload());
+    const test = tests[location.hash];
+    if (test != null) {
+      await test();
+    } else {
+      const index = document.createElement("div");
+      index.style.display = "flex";
+      index.style.flexDirection = "column";
+      index.style.gap = "0.2cm";
+      index.style.padding = "0.5cm";
+      for (const hash of Object.keys(tests)) {
+        const link = document.createElement("a");
+        link.href = hash;
+        link.textContent = hash;
+        link.style.textDecoration = "underline";
+        index.appendChild(link);
+      }
+      document.body.appendChild(index);
     }
   });
 }

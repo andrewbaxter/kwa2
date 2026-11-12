@@ -374,7 +374,81 @@ pub fn handle_push(ev: PushEvent) -> Promise {
                 }
             }
             if !visible_clients {
-                JsFuture::from(self_.registration().show_notification_with_options(&data.body, &{
+                let mut lines = vec![];
+                let mut in_code = false;
+                for line in malarkdowney::textformat::import_lines(&data.text) {
+                    let mut at = line.as_str();
+                    loop {
+                        let trimmed = at.trim_start();
+                        let trimmed = trimmed.strip_prefix('>').unwrap_or(trimmed).trim_start();
+                        let trimmed =
+                            if let Some(rest) = trimmed.strip_prefix("* ").or_else(|| trimmed.strip_prefix("- ")) {
+                                rest
+                            } else {
+                                let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+                                if digits > 0 && trimmed[digits..].starts_with(". ") {
+                                    &trimmed[digits + 2..]
+                                } else {
+                                    trimmed
+                                }
+                            };
+                        let trimmed = trimmed.trim_start_matches('#').trim_start();
+                        if trimmed.len() == at.len() {
+                            break;
+                        }
+                        at = trimmed;
+                    }
+                    if at.starts_with("```") {
+                        in_code = !in_code;
+                        continue;
+                    }
+                    if in_code {
+                        lines.push(at.to_string());
+                        continue;
+                    }
+
+                    fn inline_text(out: &mut String, inlines: Vec<malarkdowney::linemarkdown::Inline>) {
+                        for inline in inlines {
+                            match inline {
+                                malarkdowney::linemarkdown::Inline::Text(t) => out.push_str(&t),
+                                malarkdowney::linemarkdown::Inline::Strong(i) => inline_text(out, i.children),
+                                malarkdowney::linemarkdown::Inline::Emphasis(i) => inline_text(out, i.children),
+                                malarkdowney::linemarkdown::Inline::Strikethrough(i) => inline_text(out, i.children),
+                                malarkdowney::linemarkdown::Inline::Link(i) => inline_text(out, i.title),
+                                malarkdowney::linemarkdown::Inline::Code(i) => out.push_str(&i.text),
+                            }
+                        }
+                    }
+
+                    let mut text = String::new();
+                    inline_text(&mut text, malarkdowney::linemarkdown::parse(at));
+                    lines.push(text);
+                }
+                let mut body = lines.join("\n").trim().to_string();
+                if data.deleted {
+                    body = format!("Message deleted");
+                }
+                if data.files > 0 {
+                    if !body.is_empty() {
+                        body.push('\n');
+                    }
+                    body.push_str(&if data.files == 1 {
+                        format!("📎 1 file")
+                    } else {
+                        format!("📎 {} files", data.files)
+                    });
+                }
+                if data.extensions > 0 {
+                    if !body.is_empty() {
+                        body.push('\n');
+                    }
+                    body.push_str(&if data.extensions == 1 {
+                        format!("1 unsupported block")
+                    } else {
+                        format!("{} unsupported blocks", data.extensions)
+                    });
+                }
+                JsFuture::from(self_.registration().show_notification_with_options(&body, &{
                     let o = NotificationOptions::new();
                     o
                 }).map_err(|e| format!("Error showing notification: {:?}", e.as_string()))?)

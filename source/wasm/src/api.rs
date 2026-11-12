@@ -104,6 +104,27 @@ pub async fn req_post_json<T: c2s::proto::ReqTrait>(base_url: &str, req: T) -> R
     );
 }
 
+pub async fn req_upload_file(file: &web_sys::Blob, mime_type: &str) -> Result<c2s::FileUploadRes, String> {
+    let req =
+        Request::post(&format!("{}{}", state().env.base_url, c2s::PATH_FILE_UPLOAD))
+            .header("Content-type", mime_type)
+            .body(wasm_bindgen::JsValue::from(file.clone()));
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(format!("Failed to send upload: {}", e));
+        },
+    };
+    let body = read_resp(resp).await?;
+    return Ok(
+        serde_json::from_slice::<c2s::FileUploadRes>(
+            &body,
+        ).map_err(
+            |e| format!("Error parsing JSON upload response: {}\nBody: {}", e, String::from_utf8_lossy(&body)),
+        )?,
+    );
+}
+
 pub async fn req_file(url: &str) -> Result<Vec<u8>, String> {
     let resp = match Request::get(url).send().await {
         Ok(r) => r,

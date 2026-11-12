@@ -133,10 +133,39 @@ pub struct QualifiedMessageId {
     pub message: MessageId,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct QualifiedFileId {
+    pub identity: Identity,
+    pub hash: FileHash,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MessageBlockFile {
+    pub file: QualifiedFileId,
+    pub mime_type: String,
+    pub size: u64,
+    pub name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MessageBlockExtension {
+    pub key: String,
+    pub data: serde_json::Value,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum MessageBlock {
     Text(String),
+    File(MessageBlockFile),
+    Extension(MessageBlockExtension),
+}
+
+pub fn mime_is_media(mime_type: &str) -> bool {
+    return mime_type.starts_with("image/") || mime_type.starts_with("video/");
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
@@ -154,8 +183,7 @@ pub struct MessageBody {
     pub client_id: Option<MessageClientId>,
     pub id: MessageId,
     pub rel: MessageRel,
-    //. pub blocks: Vec<MessageBlock>,
-    pub body: String,
+    pub blocks: Vec<MessageBlock>,
 }
 
 impl SigDomained for MessageBody {

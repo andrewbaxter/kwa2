@@ -152,10 +152,23 @@ pub struct Config {
     pub fdap: Option<FdapConfig>,
     #[serde(default = "default_page_size_default")]
     pub default_page_size: usize,
+    pub ffmpeg: PathBuf,
+    #[serde(default = "max_file_size_default")]
+    pub max_file_size: u64,
+    #[serde(default = "file_cache_size_default")]
+    pub file_cache_size: u64,
 }
 
 fn default_page_size_default() -> usize {
     return 100;
+}
+
+fn max_file_size_default() -> u64 {
+    return 1024 * 1024 * 1024;
+}
+
+fn file_cache_size_default() -> u64 {
+    return 10 * 1024 * 1024 * 1024;
 }
 
 #[derive(Aargvark)]
@@ -178,6 +191,13 @@ pub struct State {
     default_page_size: usize,
     pull_scheduler: Arc<crate::subsystems::pull_scheduler::PullScheduler>,
     files_dir: PathBuf,
+    file_cache_dir: PathBuf,
+    file_cache_fills: std
+    ::sync
+    ::Mutex<std::collections::HashSet<(spaghettinuum::interface::identity::Identity, String, bool)>>,
+    ffmpeg: PathBuf,
+    max_file_size: u64,
+    file_cache_size: u64,
 }
 
 fn api_resp<T: Serialize>(state: &State, r: Result<T, loga::Error>) -> Response<Body> {
@@ -364,6 +384,8 @@ fn main() {
             let db_path = config.persistent_dir.join("db.sqlite3");
             let files_dir = config.persistent_dir.join("files");
             create_dirs(&files_dir).await?;
+            let file_cache_dir = config.cache_dir.join("files");
+            create_dirs(&file_cache_dir).await?;
 
             // Spagh
             let mut global_ips = vec![];
@@ -768,6 +790,11 @@ fn main() {
                     })()
                 },
                 files_dir: files_dir,
+                file_cache_dir: file_cache_dir,
+                file_cache_fills: std::sync::Mutex::new(std::collections::HashSet::new()),
+                ffmpeg: config.ffmpeg,
+                max_file_size: config.max_file_size,
+                file_cache_size: config.file_cache_size,
             });
             {
                 use crate::{
@@ -1254,7 +1281,12 @@ fn main() {
                             crate::{
                                 db,
                                 dbutil::tx,
-                                interface::db::DbTimeMs,
+                                interface::db::{
+                                    DbAccountId,
+                                    DbChannelId,
+                                    DbIdentity,
+                                    DbTimeMs,
+                                },
                                 State,
                             },
                             jiff::Timestamp,
@@ -1263,8 +1295,15 @@ fn main() {
                                 DebugDisplay,
                                 ResultContext,
                             },
-                            shared::interface::shared::FileHash,
+                            shared::interface::shared::{
+                                FileHash,
+                                Message,
+                                MessageBlock,
+                                MessageBody,
+                            },
+                            spaghettinuum::interface::identity::Identity,
                             std::{
+                                collections::HashSet,
                                 sync::Arc,
                                 time::Duration,
                             },
@@ -1289,17 +1328,213 @@ fn main() {
                                             )? else {
                                                 continue;
                                             };
-                                        good_ormning::sqlite::good_query!(
+                                        let expired = good_ormning::sqlite::good_query_many!(
                                             db,
-                                            r#"delete from message where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and receive_time < ${time_ms_t = &crate::interface::db::DbTimeMs(cutoff)}"#;
+                                            r#"select sender, sender_unique from message where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and receive_time < ${time_ms_t = &crate::interface::db::DbTimeMs(cutoff)}"#;
                                             db_tx
                                         ).map_err(|e| loga::err(e.0))?;
+                                        for m in expired {
+                                            good_ormning::sqlite::good_query!(
+                                                db,
+                                                r#"delete from message_file where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and source = ${string = MESSAGE_FILE_SOURCE_MESSAGE} and sender = ${identity_id_t = &m.sender} and sender_unique = ${i64 = m.sender_unique}"#;
+                                                db_tx
+                                            ).map_err(|e| loga::err(e.0))?;
+                                            good_ormning::sqlite::good_query!(
+                                                db,
+                                                r#"delete from message where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and sender = ${identity_id_t = &m.sender} and sender_unique = ${i64 = m.sender_unique}"#;
+                                                db_tx
+                                            ).map_err(|e| loga::err(e.0))?;
+                                        }
                                     }
                                     return Ok(());
                                 }).await {
                                     state
                                         .log
                                         .log_err(loga::WARN, e.context("Error running message retention cleanup"));
+                                }
+                                match tx(&state.db, move |db_tx| {
+                                    let mut expected = HashSet::new();
+                                    for m in good_ormning::sqlite::good_query_many!(
+                                        db,
+                                        r#"select account_id, identity, channel, sender, sender_unique, blocks from message"#;
+                                        db_tx
+                                    ).map_err(|e| loga::err(e.0))? {
+                                        for block in parse_blocks(&m.blocks)? {
+                                            let MessageBlock::File(f) = block else {
+                                                continue;
+                                            };
+                                            expected.insert(
+                                                (
+                                                    m.account_id.0,
+                                                    m.identity.0,
+                                                    m.channel.0.clone(),
+                                                    MESSAGE_FILE_SOURCE_MESSAGE.to_string(),
+                                                    m.sender.0,
+                                                    m.sender_unique,
+                                                    f.file.hash.0,
+                                                ),
+                                            );
+                                        }
+                                    }
+                                    for m in good_ormning::sqlite::good_query_many!(
+                                        db,
+                                        r#"select account_id, identity, channel, sender, sender_unique, raw from outbox"#;
+                                        db_tx
+                                    ).map_err(|e| loga::err(e.0))? {
+                                        let message =
+                                            serde_json::from_str::<Message>(
+                                                &m.raw,
+                                            ).context("Stored outbox message was not valid JSON")?;
+                                        let body =
+                                            serde_json::from_str::<MessageBody>(
+                                                &message.0.message,
+                                            ).context("Stored outbox body was not valid JSON")?;
+                                        for block in body.blocks {
+                                            let MessageBlock::File(f) = block else {
+                                                continue;
+                                            };
+                                            expected.insert(
+                                                (
+                                                    m.account_id.0,
+                                                    m.identity.0,
+                                                    m.channel.0.clone(),
+                                                    MESSAGE_FILE_SOURCE_OUTBOX.to_string(),
+                                                    m.sender.0,
+                                                    m.sender_unique,
+                                                    f.file.hash.0,
+                                                ),
+                                            );
+                                        }
+                                    }
+                                    let mut extra = vec![];
+                                    for r in good_ormning::sqlite::good_query_many!(
+                                        db,
+                                        r#"select account_id, identity, channel, source, sender, sender_unique, hash from message_file"#;
+                                        db_tx
+                                    ).map_err(|e| loga::err(e.0))? {
+                                        let key =
+                                            (
+                                                r.account_id.0,
+                                                r.identity.0,
+                                                r.channel.0.clone(),
+                                                r.source.clone(),
+                                                r.sender.0,
+                                                r.sender_unique,
+                                                r.hash.clone(),
+                                            );
+                                        if !expected.remove(&key) {
+                                            good_ormning::sqlite::good_query!(
+                                                db,
+                                                r#"delete from message_file where account_id = ${account_id_t = &r.account_id} and identity = ${identity_id_t = &r.identity} and channel = ${channel_id_t = &r.channel} and source = ${string = r.source.as_str()} and sender = ${identity_id_t = &r.sender} and sender_unique = ${i64 = r.sender_unique} and hash = ${string = r.hash.as_str()}"#;
+                                                db_tx
+                                            ).map_err(|e| loga::err(e.0))?;
+                                            extra.push(key);
+                                        }
+                                    }
+                                    let missing = expected.into_iter().collect::<Vec<_>>();
+                                    for (account_id, owner, channel, source, sender, sender_unique, hash) in &missing {
+                                        good_ormning::sqlite::good_query!(
+                                            db,
+                                            r#"insert into message_file (account_id, identity, channel, source, sender, sender_unique, hash) values (${account_id_t = &DbAccountId(*account_id)}, ${identity_id_t = &DbIdentity(*owner)}, ${channel_id_t = &DbChannelId(channel.clone())}, ${string = source.as_str()}, ${identity_id_t = &DbIdentity(*sender)}, ${i64 = *sender_unique}, ${string = hash.as_str()})"#;
+                                            db_tx
+                                        ).map_err(|e| loga::err(e.0))?;
+                                    }
+                                    return Ok((extra, missing));
+                                }).await {
+                                    Ok((extra, missing)) => {
+                                        for key in extra {
+                                            state
+                                                .log
+                                                .log_with(
+                                                    loga::WARN,
+                                                    "Deleted message file index entry with no matching message",
+                                                    ea!(
+                                                        account = key.0.0,
+                                                        owner = key.1,
+                                                        channel = key.2.0,
+                                                        source = key.3,
+                                                        sender = key.4,
+                                                        sender_unique = key.5,
+                                                        hash = key.6
+                                                    ),
+                                                );
+                                        }
+                                        for key in missing {
+                                            state
+                                                .log
+                                                .log_with(
+                                                    loga::WARN,
+                                                    "Added missing message file index entry",
+                                                    ea!(
+                                                        account = key.0.0,
+                                                        owner = key.1,
+                                                        channel = key.2.0,
+                                                        source = key.3,
+                                                        sender = key.4,
+                                                        sender_unique = key.5,
+                                                        hash = key.6
+                                                    ),
+                                                );
+                                        }
+                                    },
+                                    Err(e) => {
+                                        state
+                                            .log
+                                            .log_err(loga::WARN, e.context("Error reconciling message file index"));
+                                    },
+                                }
+                                match async {
+                                    flowcontrol::ta_return!(Vec <(Identity, String, bool) >, loga::Error);
+                                    let rows = tx(&state.db, move |db_tx| {
+                                        return Ok(good_ormning::sqlite::good_query_many!(
+                                            db,
+                                            r#"select owner, hash, thumbnail from file_cache"#;
+                                            db_tx
+                                        ).map_err(|e| loga::err(e.0))?);
+                                    }).await.context("Error listing file cache entries")?;
+                                    let mut stale = vec![];
+                                    for r in rows {
+                                        let path =
+                                            crate::subsystems::files::file_cache_path(
+                                                &state,
+                                                r.owner.0,
+                                                &r.hash,
+                                                r.thumbnail,
+                                            );
+                                        if tokio::fs::try_exists(&path)
+                                            .await
+                                            .context_with("Error checking cached file", ea!(path = path.dbg_str()))? {
+                                            continue;
+                                        }
+                                        tx(&state.db, {
+                                            let hash = r.hash.clone();
+                                            move |db_tx| {
+                                                good_ormning::sqlite::good_query!(
+                                                    db,
+                                                    r#"delete from file_cache where owner = ${identity_id_t = &r.owner} and hash = ${string = hash.as_str()} and thumbnail = ${bool = r.thumbnail}"#;
+                                                    db_tx
+                                                ).map_err(|e| loga::err(e.0))?;
+                                                return Ok(());
+                                            }
+                                        }).await.context("Error deleting stale file cache entry")?;
+                                        stale.push((r.owner.0, r.hash, r.thumbnail));
+                                    }
+                                    return Ok(stale);
+                                }.await {
+                                    Ok(stale) => {
+                                        for (owner, hash, thumbnail) in stale {
+                                            state
+                                                .log
+                                                .log_with(
+                                                    loga::WARN,
+                                                    "Deleted file cache entry whose file was missing",
+                                                    ea!(owner = owner, hash = hash, thumbnail = thumbnail),
+                                                );
+                                        }
+                                    },
+                                    Err(e) => {
+                                        state.log.log_err(loga::WARN, e.context("Error checking file cache"));
+                                    },
                                 }
                                 if let Err(e) = async {
                                     flowcontrol::ta_return!((), loga::Error);
@@ -1342,18 +1577,10 @@ fn main() {
                                         }
                                         let path =
                                             crate::subsystems::files::file_path(&state, account, &FileHash(hash));
-                                        match tokio::fs::remove_file(&path).await {
-                                            Ok(_) => { },
-                                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => { },
-                                            Err(e) => return Err(
-                                                loga::err(
-                                                    e.to_string(),
-                                                ).context_with(
-                                                    "Error deleting unreferenced file",
-                                                    ea!(path = path.dbg_str()),
-                                                ),
-                                            ),
-                                        }
+                                        crate::fsutil::remove_file_if_exists(&path).await?;
+                                        crate::fsutil::remove_file_if_exists(
+                                            &crate::subsystems::files::thumbnail_path(&path),
+                                        ).await?;
                                     }
                                     return Ok(());
                                 }.await {
@@ -3128,213 +3355,312 @@ fn main() {
                                                                 };
                                                                 use crate::subsystems::messages::*;
 
-                                                                let ret: Result<(String, Vec<u8>), S2sError> = async {
-                                                                    let (state, token, req,):
-                                                                        (&Arc<State>, &str, GetFile,) =
-                                                                        (state, &auth_token, req,);
-                                                                    let hash = req.hash.clone();
-                                                                    let account = match req.auth {
-                                                                        FileAuth::IdentityInvite { identity, code } => {
-                                                                            let db_identity = DbIdentity(identity);
-                                                                            s2s_tx(
-                                                                                &state.db,
-                                                                                "checking invited identity file access",
-                                                                                move |db_tx| {
-                                                                                    let invite =
-                                                                                        lookup_identity_invite(
-                                                                                            db_tx,
-                                                                                            db_identity,
-                                                                                            &code
-                                                                                        )?;
-                                                                                    let meta =
-                                                                                        owner_identity_meta(
-                                                                                            db_tx,
-                                                                                            invite.account_id,
-                                                                                            db_identity
-                                                                                        )?;
-                                                                                    if meta.portrait.as_deref() !=
-                                                                                        Some(hash.0.as_str()) {
-                                                                                        return Err(
-                                                                                            S2sError::Forbidden(
-                                                                                                "File is not part of this invitation".to_string()
-                                                                                            )
-                                                                                        );
+                                                                let ret:
+                                                                    Result<(String, std::path::PathBuf), S2sError> =
+                                                                    async {
+                                                                        let (state, token, req,):
+                                                                            (&Arc<State>, &str, GetFile,) =
+                                                                            (state, &auth_token, req,);
+                                                                        let hash = req.hash.clone();
+                                                                        let account = match req.auth {
+                                                                            FileAuth::IdentityInvite {
+                                                                                identity,
+                                                                                code
+                                                                            } => {
+                                                                                let db_identity =
+                                                                                    DbIdentity(identity);
+                                                                                s2s_tx(
+                                                                                    &state.db,
+                                                                                    "checking invited identity file access",
+                                                                                    move |db_tx| {
+                                                                                        let invite =
+                                                                                            lookup_identity_invite(
+                                                                                                db_tx,
+                                                                                                db_identity,
+                                                                                                &code
+                                                                                            )?;
+                                                                                        let meta =
+                                                                                            owner_identity_meta(
+                                                                                                db_tx,
+                                                                                                invite.account_id,
+                                                                                                db_identity
+                                                                                            )?;
+                                                                                        if meta.portrait.as_deref() !=
+                                                                                            Some(hash.0.as_str()) {
+                                                                                            return Err(
+                                                                                                S2sError::Forbidden(
+                                                                                                    "File is not part of this invitation".to_string()
+                                                                                                )
+                                                                                            );
+                                                                                        }
+                                                                                        return Ok(invite.account_id);
                                                                                     }
-                                                                                    return Ok(invite.account_id);
-                                                                                }
-                                                                            ).await?
-                                                                        },
-                                                                        FileAuth::ChannelInvite { channel, code } => {
-                                                                            let db_owner =
-                                                                                DbIdentity(channel.identity);
-                                                                            let db_channel_id =
-                                                                                DbChannelId(channel.channel);
-                                                                            s2s_tx(
-                                                                                &state.db,
-                                                                                "checking invited channel file access",
-                                                                                move |db_tx| {
-                                                                                    let invite =
-                                                                                        lookup_channel_invite(
-                                                                                            db_tx,
-                                                                                            &db_channel_id,
-                                                                                            &code
-                                                                                        )?;
-                                                                                    if invite.owner.0 !=
-                                                                                        channel.identity {
-                                                                                        return Err(
-                                                                                            S2sError::NotFound(
-                                                                                                "Invitation not recognized".to_string()
-                                                                                            )
-                                                                                        );
+                                                                                ).await?
+                                                                            },
+                                                                            FileAuth::ChannelInvite {
+                                                                                channel,
+                                                                                code
+                                                                            } => {
+                                                                                let db_owner =
+                                                                                    DbIdentity(channel.identity);
+                                                                                let db_channel_id =
+                                                                                    DbChannelId(channel.channel);
+                                                                                s2s_tx(
+                                                                                    &state.db,
+                                                                                    "checking invited channel file access",
+                                                                                    move |db_tx| {
+                                                                                        let invite =
+                                                                                            lookup_channel_invite(
+                                                                                                db_tx,
+                                                                                                &db_channel_id,
+                                                                                                &code
+                                                                                            )?;
+                                                                                        if invite.owner.0 !=
+                                                                                            channel.identity {
+                                                                                            return Err(
+                                                                                                S2sError::NotFound(
+                                                                                                    "Invitation not recognized".to_string()
+                                                                                                )
+                                                                                            );
+                                                                                        }
+                                                                                        let meta =
+                                                                                            owner_channel_meta(
+                                                                                                db_tx,
+                                                                                                invite.account_id,
+                                                                                                db_owner,
+                                                                                                &db_channel_id
+                                                                                            )?;
+                                                                                        if meta.portrait.as_deref() !=
+                                                                                            Some(hash.0.as_str()) {
+                                                                                            return Err(
+                                                                                                S2sError::Forbidden(
+                                                                                                    "File is not part of this invitation".to_string()
+                                                                                                )
+                                                                                            );
+                                                                                        }
+                                                                                        return Ok(invite.account_id);
                                                                                     }
-                                                                                    let meta =
-                                                                                        owner_channel_meta(
-                                                                                            db_tx,
-                                                                                            invite.account_id,
-                                                                                            db_owner,
-                                                                                            &db_channel_id
-                                                                                        )?;
-                                                                                    if meta.portrait.as_deref() !=
-                                                                                        Some(hash.0.as_str()) {
-                                                                                        return Err(
-                                                                                            S2sError::Forbidden(
-                                                                                                "File is not part of this invitation".to_string()
-                                                                                            )
-                                                                                        );
-                                                                                    }
-                                                                                    return Ok(invite.account_id);
-                                                                                }
-                                                                            ).await?
-                                                                        },
-                                                                        FileAuth::Caller => {
-                                                                            let caller =
-                                                                                resolve_caller(state, token).await?;
-                                                                            s2s_tx(
-                                                                                &state.db,
-                                                                                "checking file access",
-                                                                                move |db_tx| {
-                                                                                    let identities =
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query_many!(
-                                                                                            db,
-                                                                                            r#"select account_id, id from identity where portrait = ${string = hash.0.as_str()} and soft_deleted_at is null"#;
-                                                                                            db_tx
-                                                                                        ).map_err(|e| loga::err(e.0))?;
-                                                                                    if let Some(caller) = caller {
-                                                                                        let db_caller =
-                                                                                            DbIdentity(caller);
-                                                                                        for i in identities {
-                                                                                            let identity_owns =
-                                                                                                good_ormning
-                                                                                                ::sqlite
-                                                                                                ::good_query_opt!(
-                                                                                                    db,
-                                                                                                    r#"select 1 as x from channel_member where account_id = ${account_id_t = &i.account_id} and identity = ${identity_id_t = &i.id} and member = ${identity_id_t = &db_caller}"#;
-                                                                                                    db_tx
-                                                                                                ).map_err(
-                                                                                                    |e| loga::err(e.0)
-                                                                                                )?;
-                                                                                            if identity_owns.is_some() {
-                                                                                                return Ok(
-                                                                                                    i.account_id
-                                                                                                );
+                                                                                ).await?
+                                                                            },
+                                                                            FileAuth::Channel(channel) => {
+                                                                                let caller =
+                                                                                    resolve_caller(
+                                                                                        state,
+                                                                                        token
+                                                                                    ).await?;
+                                                                                let db_owner =
+                                                                                    DbIdentity(channel.identity);
+                                                                                let db_channel_id =
+                                                                                    DbChannelId(channel.channel);
+                                                                                s2s_tx(
+                                                                                    &state.db,
+                                                                                    "checking channel file access",
+                                                                                    move |db_tx| {
+                                                                                        let accounts =
+                                                                                            good_ormning
+                                                                                            ::sqlite
+                                                                                            ::good_query_many!(
+                                                                                                db,
+                                                                                                r#"select distinct account_id from message_file where identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and hash = ${string = hash.0.as_str()}"#;
+                                                                                                db_tx
+                                                                                            ).map_err(
+                                                                                                |e| loga::err(e.0)
+                                                                                            )?;
+                                                                                        for account in accounts {
+                                                                                            let Some(local) =
+                                                                                                local_channel_get(
+                                                                                                    db_tx,
+                                                                                                    account,
+                                                                                                    db_owner,
+                                                                                                    &db_channel_id
+                                                                                                )? else {
+                                                                                                    continue;
+                                                                                                };
+                                                                                            if caller ==
+                                                                                                Some(db_owner.0) {
+                                                                                                return Ok(account);
                                                                                             }
-                                                                                            let caller_owns =
-                                                                                                good_ormning
-                                                                                                ::sqlite
-                                                                                                ::good_query_opt!(
-                                                                                                    db,
-                                                                                                    r#"select 1 as x from channel where account_id = ${account_id_t = &i.account_id} and identity = ${identity_id_t = &db_caller} and local_identity = ${identity_id_t = &i.id} and deleted is null"#;
-                                                                                                    db_tx
-                                                                                                ).map_err(
-                                                                                                    |e| loga::err(e.0)
-                                                                                                )?;
-                                                                                            if caller_owns.is_some() {
-                                                                                                return Ok(
-                                                                                                    i.account_id
-                                                                                                );
+                                                                                            if local.is_owner(
+                                                                                                db_owner.0
+                                                                                            ) &&
+                                                                                                check_read_access(
+                                                                                                    db_tx,
+                                                                                                    account,
+                                                                                                    db_owner,
+                                                                                                    &db_channel_id,
+                                                                                                    &local,
+                                                                                                    caller
+                                                                                                ).is_ok() {
+                                                                                                return Ok(account);
                                                                                             }
                                                                                         }
-                                                                                    }
-                                                                                    let channels =
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query_many!(
-                                                                                            db,
-                                                                                            r#"select account_id, identity, id, local_identity from channel where portrait = ${string = hash.0.as_str()} and deleted is null"#;
-                                                                                            db_tx
-                                                                                        ).map_err(|e| loga::err(e.0))?;
-                                                                                    for c in channels {
-                                                                                        if c.identity.0 !=
-                                                                                            c.local_identity.0 {
-                                                                                            continue;
+                                                                                        if caller.is_some() {
+                                                                                            return Err(
+                                                                                                S2sError::Forbidden(
+                                                                                                    "Caller has no access to this file".to_string()
+                                                                                                )
+                                                                                            );
+                                                                                        } else {
+                                                                                            return Err(
+                                                                                                S2sError::Unauthorized(
+                                                                                                    "File requires authentication".to_string()
+                                                                                                )
+                                                                                            );
                                                                                         }
-                                                                                        let Some(local) =
-                                                                                            local_channel_get(
+                                                                                    }
+                                                                                ).await?
+                                                                            },
+                                                                            FileAuth::Caller => {
+                                                                                let caller =
+                                                                                    resolve_caller(
+                                                                                        state,
+                                                                                        token
+                                                                                    ).await?;
+                                                                                s2s_tx(
+                                                                                    &state.db,
+                                                                                    "checking file access",
+                                                                                    move |db_tx| {
+                                                                                        let identities =
+                                                                                            good_ormning
+                                                                                            ::sqlite
+                                                                                            ::good_query_many!(
+                                                                                                db,
+                                                                                                r#"select account_id, id from identity where portrait = ${string = hash.0.as_str()} and soft_deleted_at is null"#;
+                                                                                                db_tx
+                                                                                            ).map_err(
+                                                                                                |e| loga::err(e.0)
+                                                                                            )?;
+                                                                                        if let Some(caller) = caller {
+                                                                                            let db_caller =
+                                                                                                DbIdentity(caller);
+                                                                                            for i in identities {
+                                                                                                let identity_owns =
+                                                                                                    good_ormning
+                                                                                                    ::sqlite
+                                                                                                    ::good_query_opt!(
+                                                                                                        db,
+                                                                                                        r#"select 1 as x from channel_member where account_id = ${account_id_t = &i.account_id} and identity = ${identity_id_t = &i.id} and member = ${identity_id_t = &db_caller}"#;
+                                                                                                        db_tx
+                                                                                                    ).map_err(
+                                                                                                        |e| loga::err(
+                                                                                                            e.0
+                                                                                                        )
+                                                                                                    )?;
+                                                                                                if identity_owns.is_some() {
+                                                                                                    return Ok(
+                                                                                                        i.account_id
+                                                                                                    );
+                                                                                                }
+                                                                                                let caller_owns =
+                                                                                                    good_ormning
+                                                                                                    ::sqlite
+                                                                                                    ::good_query_opt!(
+                                                                                                        db,
+                                                                                                        r#"select 1 as x from channel where account_id = ${account_id_t = &i.account_id} and identity = ${identity_id_t = &db_caller} and local_identity = ${identity_id_t = &i.id} and deleted is null"#;
+                                                                                                        db_tx
+                                                                                                    ).map_err(
+                                                                                                        |e| loga::err(
+                                                                                                            e.0
+                                                                                                        )
+                                                                                                    )?;
+                                                                                                if caller_owns.is_some() {
+                                                                                                    return Ok(
+                                                                                                        i.account_id
+                                                                                                    );
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                        let channels =
+                                                                                            good_ormning
+                                                                                            ::sqlite
+                                                                                            ::good_query_many!(
+                                                                                                db,
+                                                                                                r#"select account_id, identity, id, local_identity from channel where portrait = ${string = hash.0.as_str()} and deleted is null"#;
+                                                                                                db_tx
+                                                                                            ).map_err(
+                                                                                                |e| loga::err(e.0)
+                                                                                            )?;
+                                                                                        for c in channels {
+                                                                                            if c.identity.0 !=
+                                                                                                c.local_identity.0 {
+                                                                                                continue;
+                                                                                            }
+                                                                                            let Some(local) =
+                                                                                                local_channel_get(
+                                                                                                    db_tx,
+                                                                                                    c.account_id,
+                                                                                                    c.identity,
+                                                                                                    &c.id
+                                                                                                )? else {
+                                                                                                    continue;
+                                                                                                };
+                                                                                            if check_read_access(
                                                                                                 db_tx,
                                                                                                 c.account_id,
                                                                                                 c.identity,
-                                                                                                &c.id
-                                                                                            )? else {
-                                                                                                continue;
-                                                                                            };
-                                                                                        if check_read_access(
-                                                                                            db_tx,
-                                                                                            c.account_id,
-                                                                                            c.identity,
-                                                                                            &c.id,
-                                                                                            &local,
-                                                                                            caller
-                                                                                        ).is_ok() {
-                                                                                            return Ok(c.account_id);
+                                                                                                &c.id,
+                                                                                                &local,
+                                                                                                caller
+                                                                                            ).is_ok() {
+                                                                                                return Ok(
+                                                                                                    c.account_id
+                                                                                                );
+                                                                                            }
+                                                                                        }
+                                                                                        if caller.is_some() {
+                                                                                            return Err(
+                                                                                                S2sError::Forbidden(
+                                                                                                    "Caller has no access to this file".to_string()
+                                                                                                )
+                                                                                            );
+                                                                                        } else {
+                                                                                            return Err(
+                                                                                                S2sError::Unauthorized(
+                                                                                                    "File requires authentication".to_string()
+                                                                                                )
+                                                                                            );
                                                                                         }
                                                                                     }
-                                                                                    if caller.is_some() {
-                                                                                        return Err(
-                                                                                            S2sError::Forbidden(
-                                                                                                "Caller has no access to this file".to_string()
-                                                                                            )
-                                                                                        );
-                                                                                    } else {
-                                                                                        return Err(
-                                                                                            S2sError::Unauthorized(
-                                                                                                "File requires authentication".to_string()
-                                                                                            )
-                                                                                        );
-                                                                                    }
-                                                                                }
-                                                                            ).await?
-                                                                        },
-                                                                    };
-                                                                    return Ok(
-                                                                        not_found(
-                                                                            crate::subsystems::files::read_file(
-                                                                                state,
-                                                                                account,
-                                                                                &req.hash
-                                                                            ).await?,
-                                                                            "File not found"
-                                                                        )?
-                                                                    );
-                                                                }.await;
+                                                                                ).await?
+                                                                            },
+                                                                        };
+                                                                        return Ok(
+                                                                            not_found(
+                                                                                crate::subsystems::files::file_local(
+                                                                                    state,
+                                                                                    account,
+                                                                                    &req.hash,
+                                                                                    req.thumbnail
+                                                                                ).await?,
+                                                                                "File not found"
+                                                                            )?
+                                                                        );
+                                                                    }.await;
                                                                 ret
                                                             } {
-                                                                Ok((mime, bytes)) => {
-                                                                    return Response::builder()
-                                                                        .status(200)
-                                                                        .header(CONTENT_TYPE, mime)
-                                                                        .header(X_CONTENT_TYPE_OPTIONS, "nosniff")
-                                                                        .header(
-                                                                            CACHE_CONTROL,
-                                                                            crate
-                                                                            ::subsystems
-                                                                            ::s2s_error
-                                                                            ::CachePolicy
-                                                                            ::Immutable.header_value()
-                                                                        )
-                                                                        .body(body_full(bytes))
-                                                                        .unwrap();
+                                                                Ok((mime, path)) => {
+                                                                    let mut file_headers = HeaderMap::new();
+                                                                    file_headers.insert(
+                                                                        X_CONTENT_TYPE_OPTIONS,
+                                                                        http::HeaderValue::from_static("nosniff")
+                                                                    );
+                                                                    match htwrap::htserve::responses::response_file(
+                                                                        &head.headers,
+                                                                        &mime,
+                                                                        &path,
+                                                                        true,
+                                                                        &file_headers
+                                                                    ).await {
+                                                                        Ok(r) => return r,
+                                                                        Err(e) => return s2s_error_response(
+                                                                            state,
+                                                                            S2sError::Internal(
+                                                                                loga::err(
+                                                                                    e.to_string()
+                                                                                ).context("Error serving file")
+                                                                            )
+                                                                        ),
+                                                                    }
                                                                 },
                                                                 Err(e) => return s2s_error_response(state, e),
                                                             }
@@ -3860,6 +4186,704 @@ fn main() {
                                                                         state.public_url.to_string()
                                                                     )
                                                                     .body(body_empty())
+                                                                    .unwrap(),
+                                                            );
+                                                        }.await;
+                                                        ret
+                                                    }?);
+                                                },
+                                                c2s::PATH_FILE_UPLOAD => {
+                                                    if head.method != Method::POST {
+                                                        return Ok(response_404());
+                                                    }
+                                                    let Some(account) =
+                                                        identify_c2s(state, &head.headers).await.err_internal()? else {
+                                                            return Ok(response_401());
+                                                        };
+                                                    let Some(mime_type) =
+                                                        head
+                                                            .headers
+                                                            .get(CONTENT_TYPE)
+                                                            .and_then(|v| v.to_str().ok())
+                                                            .map(|v| v.to_string()) else {
+                                                            return Ok(response_400("Upload requires a content type"));
+                                                        };
+                                                    return Ok({
+                                                        use {
+                                                            crate::{
+                                                                fsutil::{
+                                                                    create_dirs,
+                                                                    remove_file_if_exists,
+                                                                },
+                                                                interface::db::DbAccountId,
+                                                                subsystems::files::{
+                                                                    account_files_dir,
+                                                                    finish_hash,
+                                                                    store_file_tmp,
+                                                                    tmp_path_in,
+                                                                },
+                                                            },
+                                                            http_body_util::BodyExt,
+                                                            loga::{
+                                                                DebugDisplay,
+                                                                ResultContext,
+                                                            },
+                                                            sha2::{
+                                                                Digest,
+                                                                Sha256,
+                                                            },
+                                                            shared::interface::{
+                                                                shared::FileHash,
+                                                                wire::c2s::FileUploadRes,
+                                                            },
+                                                            tokio::io::AsyncWriteExt,
+                                                        };
+
+                                                        let ret: Result<Response<Body>, VisErr<loga::Error>> = async {
+                                                            let account = DbAccountId(account);
+                                                            let dir = account_files_dir(state, account);
+                                                            create_dirs(&dir).await.err_internal()?;
+                                                            let tmp_path = tmp_path_in(&dir);
+                                                            let res = async {
+                                                                ta_return!(
+                                                                    Option <(FileHash, u64) >,
+                                                                    VisErr < loga:: Error >
+                                                                );
+                                                                let mut file =
+                                                                    tokio::fs::File::create(&tmp_path)
+                                                                        .await
+                                                                        .context_with(
+                                                                            "Error creating upload destination",
+                                                                            ea!(path = tmp_path.dbg_str())
+                                                                        )
+                                                                        .err_internal()?;
+                                                                let mut hasher = Sha256::new();
+                                                                let mut size = 0u64;
+                                                                let mut body = body;
+                                                                while let Some(frame) = body.frame().await {
+                                                                    let frame =
+                                                                        frame
+                                                                            .context("Error reading upload body")
+                                                                            .err_external()?;
+                                                                    let Ok(data) = frame.into_data() else {
+                                                                        continue;
+                                                                    };
+                                                                    size += data.len() as u64;
+                                                                    if size > state.max_file_size {
+                                                                        return Ok(None);
+                                                                    }
+                                                                    hasher.update(&data);
+                                                                    file
+                                                                        .write_all(&data)
+                                                                        .await
+                                                                        .context_with(
+                                                                            "Error writing upload",
+                                                                            ea!(path = tmp_path.dbg_str())
+                                                                        )
+                                                                        .err_internal()?;
+                                                                }
+                                                                file
+                                                                    .flush()
+                                                                    .await
+                                                                    .context_with(
+                                                                        "Error flushing upload",
+                                                                        ea!(path = tmp_path.dbg_str())
+                                                                    )
+                                                                    .err_internal()?;
+                                                                return Ok(Some((finish_hash(hasher), size)));
+                                                            }.await;
+                                                            let (hash, size) = match res {
+                                                                Ok(Some(r)) => r,
+                                                                Ok(None) => {
+                                                                    remove_file_if_exists(&tmp_path)
+                                                                        .await
+                                                                        .err_internal()?;
+                                                                    return Ok(
+                                                                        Response::builder()
+                                                                            .status(http::StatusCode::PAYLOAD_TOO_LARGE)
+                                                                            .body(
+                                                                                body_full(
+                                                                                    format!(
+                                                                                        "Files can be at most {} bytes",
+                                                                                        state.max_file_size
+                                                                                    ).into_bytes()
+                                                                                )
+                                                                            )
+                                                                            .unwrap(),
+                                                                    );
+                                                                },
+                                                                Err(e) => {
+                                                                    remove_file_if_exists(&tmp_path)
+                                                                        .await
+                                                                        .err_internal()?;
+                                                                    return Err(e);
+                                                                },
+                                                            };
+                                                            store_file_tmp(
+                                                                state,
+                                                                account,
+                                                                mime_type,
+                                                                &tmp_path,
+                                                                hash.clone(),
+                                                                size
+                                                            )
+                                                                .await
+                                                                .err_internal()?;
+                                                            return Ok(response_200_json(&FileUploadRes {
+                                                                hash: hash,
+                                                                size: size,
+                                                            }));
+                                                        }.await;
+                                                        ret
+                                                    }?);
+                                                },
+                                                "channel_file" => {
+                                                    if head.method != Method::GET {
+                                                        return Ok(response_404());
+                                                    }
+                                                    let Some(account) =
+                                                        identify_c2s(state, &head.headers).await.err_internal()? else {
+                                                            return Ok(response_401());
+                                                        };
+                                                    let req =
+                                                        match <c2s::GetChannelFile as c2s
+                                                        ::PathReqTrait>::deserialize_path(
+                                                            &path
+                                                        ) {
+                                                            Ok(r) => r,
+                                                            Err(e) => return Ok(response_400(e)),
+                                                        };
+                                                    return Ok({
+                                                        use {
+                                                            crate::{
+                                                                db,
+                                                                dbutil::tx,
+                                                                fsutil::{
+                                                                    create_dirs,
+                                                                    remove_file_if_exists,
+                                                                },
+                                                                interface::{
+                                                                    db::{
+                                                                        DbAccountId,
+                                                                        DbChannelId,
+                                                                        DbIdentity,
+                                                                        DbTimeMs,
+                                                                    },
+                                                                    s2s::{
+                                                                        FileAuth,
+                                                                        GetFile,
+                                                                    },
+                                                                },
+                                                                subsystems::{
+                                                                    files::{
+                                                                        file_cache_path,
+                                                                        file_path,
+                                                                        file_ref,
+                                                                        thumbnail_path,
+                                                                        tmp_path_in,
+                                                                        THUMBNAIL_MIME_TYPE,
+                                                                    },
+                                                                    messages::{
+                                                                        channel_signer,
+                                                                        local_channel_get,
+                                                                    },
+                                                                },
+                                                            },
+                                                            futures::TryStreamExt,
+                                                            http::{
+                                                                header::{
+                                                                    ACCEPT_RANGES,
+                                                                    CONTENT_LENGTH,
+                                                                    CONTENT_RANGE,
+                                                                    CONTENT_SECURITY_POLICY,
+                                                                    RANGE,
+                                                                },
+                                                                HeaderValue,
+                                                                StatusCode,
+                                                            },
+                                                            http_body_util::{
+                                                                BodyExt,
+                                                                Full,
+                                                                StreamBody,
+                                                            },
+                                                            htwrap::{
+                                                                htreq,
+                                                                htserve::responses::response_503,
+                                                            },
+                                                            hyper::body::Frame,
+                                                            jiff::Timestamp,
+                                                            loga::{
+                                                                DebugDisplay,
+                                                                ResultContext,
+                                                            },
+                                                            shared::interface::wire::c2s::PathReqTrait,
+                                                            tokio_util::io::ReaderStream,
+                                                        };
+
+                                                        let ret: Result<Response<Body>, VisErr<loga::Error>> = async {
+                                                            let account_id = DbAccountId(account);
+                                                            let db_owner = DbIdentity(req.channel.identity);
+                                                            let db_channel_id =
+                                                                DbChannelId(req.channel.channel.clone());
+                                                            let db_file_owner = DbIdentity(req.file.identity);
+                                                            let thumbnail = req.thumbnail;
+                                                            let mut file_headers = HeaderMap::new();
+                                                            file_headers.insert(
+                                                                X_CONTENT_TYPE_OPTIONS,
+                                                                HeaderValue::from_static("nosniff")
+                                                            );
+                                                            file_headers.insert(
+                                                                CONTENT_SECURITY_POLICY,
+                                                                HeaderValue::from_static("sandbox; default-src 'none'")
+                                                            );
+                                                            let Some((local, local_file, cached)) = tx(&state.db, {
+                                                                let hash = req.file.hash.0.clone();
+                                                                let db_channel_id = db_channel_id.clone();
+                                                                move |db_tx| {
+                                                                    let Some(local) =
+                                                                        local_channel_get(
+                                                                            db_tx,
+                                                                            account_id,
+                                                                            db_owner,
+                                                                            &db_channel_id
+                                                                        )? else {
+                                                                            return Ok(None);
+                                                                        };
+                                                                    let indexed = good_ormning::sqlite::good_query_opt!(
+                                                                        db,
+                                                                        r#"select 1 as x from message_file where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and hash = ${string = hash.as_str()} limit ${i64 = 1}"#;
+                                                                        db_tx
+                                                                    ).map_err(|e| loga::err(e.0))?.is_some();
+                                                                    let local_file = if indexed {
+                                                                        file_ref(
+                                                                            db_tx,
+                                                                            account_id,
+                                                                            Some(hash.clone())
+                                                                        )?
+                                                                    } else {
+                                                                        None
+                                                                    };
+                                                                    let access = good_ormning::sqlite::good_query_opt!(
+                                                                        db,
+                                                                        r#"select 1 as x from file_cache_access where account_id = ${account_id_t = &account_id} and owner = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and hash = ${string = hash.as_str()}"#;
+                                                                        db_tx
+                                                                    ).map_err(|e| loga::err(e.0))?.is_some();
+                                                                    let cached = if access {
+                                                                        let cached =
+                                                                            good_ormning::sqlite::good_query_opt!(
+                                                                                db,
+                                                                                r#"select mime_type from file_cache where owner = ${identity_id_t = &db_file_owner} and hash = ${string = hash.as_str()} and thumbnail = ${bool = thumbnail}"#;
+                                                                                db_tx
+                                                                            ).map_err(|e| loga::err(e.0))?;
+                                                                        if cached.is_some() {
+                                                                            good_ormning::sqlite::good_query!(
+                                                                                db,
+                                                                                r#"update file_cache set last_access = ${time_ms_t = &DbTimeMs(Timestamp::now())} where owner = ${identity_id_t = &db_file_owner} and hash = ${string = hash.as_str()} and thumbnail = ${bool = thumbnail}"#;
+                                                                                db_tx
+                                                                            ).map_err(|e| loga::err(e.0))?;
+                                                                        }
+                                                                        cached
+                                                                    } else {
+                                                                        None
+                                                                    };
+                                                                    return Ok(Some((local, local_file, cached)));
+                                                                }
+                                                            }).await.err_internal()? else {
+                                                                return Ok(response_404());
+                                                            };
+                                                            if let Some(local_file) = local_file {
+                                                                let path =
+                                                                    file_path(state, account_id, &req.file.hash);
+                                                                let (mime_type, path) = if thumbnail {
+                                                                    (
+                                                                        THUMBNAIL_MIME_TYPE.to_string(),
+                                                                        thumbnail_path(&path)
+                                                                    )
+                                                                } else {
+                                                                    (local_file.mime_type, path)
+                                                                };
+                                                                return Ok(
+                                                                    htwrap::htserve::responses::response_file(
+                                                                        &head.headers,
+                                                                        &mime_type,
+                                                                        &path,
+                                                                        true,
+                                                                        &file_headers
+                                                                    )
+                                                                        .await
+                                                                        .context_with(
+                                                                            "Error serving local file",
+                                                                            ea!(path = path.dbg_str())
+                                                                        )
+                                                                        .err_internal()?,
+                                                                );
+                                                            }
+                                                            if let Some(mime_type) = cached {
+                                                                let path =
+                                                                    file_cache_path(
+                                                                        state,
+                                                                        req.file.identity,
+                                                                        &req.file.hash.0,
+                                                                        thumbnail
+                                                                    );
+                                                                return Ok(
+                                                                    htwrap::htserve::responses::response_file(
+                                                                        &head.headers,
+                                                                        &mime_type,
+                                                                        &path,
+                                                                        true,
+                                                                        &file_headers
+                                                                    )
+                                                                        .await
+                                                                        .context_with(
+                                                                            "Error serving cached file",
+                                                                            ea!(path = path.dbg_str())
+                                                                        )
+                                                                        .err_internal()?,
+                                                                );
+                                                            }
+                                                            let signer =
+                                                                channel_signer(state, account, &local)
+                                                                    .await
+                                                                    .err_internal()?;
+                                                            let s2s_req = GetFile {
+                                                                auth: FileAuth::Channel(req.channel.clone()),
+                                                                hash: req.file.hash.clone(),
+                                                                thumbnail: thumbnail,
+                                                            };
+                                                            let auth_headers =
+                                                                state
+                                                                    .s2s_client
+                                                                    .opt_auth_headers(
+                                                                        req.file.identity,
+                                                                        signer.as_ref()
+                                                                    )
+                                                                    .await
+                                                                    .err_internal()?;
+                                                            let (conn, url) =
+                                                                state
+                                                                    .s2s_client
+                                                                    .connect(
+                                                                        req.file.identity,
+                                                                        &format!("/{}", s2s_req.serialize_path())
+                                                                    )
+                                                                    .await
+                                                                    .err_internal()?;
+                                                            let mut builder =
+                                                                Request::builder()
+                                                                    .method(Method::GET)
+                                                                    .uri(url.clone());
+                                                            for (k, v) in &auth_headers {
+                                                                builder = builder.header(k, v);
+                                                            }
+                                                            if let Some(range) = head.headers.get(RANGE) {
+                                                                builder = builder.header(RANGE, range.clone());
+                                                            }
+                                                            let s2s_request =
+                                                                builder.body(Full::new(Bytes::new())).unwrap();
+                                                            let (meta_tx, meta_rx) = tokio::sync::oneshot::channel();
+                                                            let (writer, reader) = tokio::io::duplex(64 * 1024);
+                                                            tokio::spawn({
+                                                                let log = state.log.clone();
+                                                                let limits = state.s2s_client.limits;
+                                                                async move {
+                                                                    let mut conn = conn;
+                                                                    match htreq::send(
+                                                                        &log,
+                                                                        limits,
+                                                                        &mut conn,
+                                                                        s2s_request
+                                                                    ).await {
+                                                                        Err(e) => {
+                                                                            _ = meta_tx.send(Err(e));
+                                                                        },
+                                                                        Ok((status, headers, continue_send)) => {
+                                                                            if meta_tx
+                                                                                .send(Ok((status, headers)))
+                                                                                .is_err() {
+                                                                                return;
+                                                                            }
+                                                                            if let Err(e) =
+                                                                                htreq::receive_stream(
+                                                                                    limits,
+                                                                                    continue_send,
+                                                                                    writer
+                                                                                ).await {
+                                                                                log.log_err(
+                                                                                    loga::DEBUG,
+                                                                                    e.context(
+                                                                                        "Error streaming proxied file"
+                                                                                    )
+                                                                                );
+                                                                            }
+                                                                        },
+                                                                    }
+                                                                }
+                                                            });
+                                                            let (status, resp_headers) =
+                                                                match meta_rx
+                                                                    .await
+                                                                    .context("Proxy task ended without a response")
+                                                                    .err_internal()? {
+                                                                    Ok(r) => r,
+                                                                    Err(e) => {
+                                                                        state
+                                                                            .log
+                                                                            .log_err(
+                                                                                loga::DEBUG,
+                                                                                e.context_with(
+                                                                                    "Error requesting file from owner",
+                                                                                    ea!(url = url)
+                                                                                )
+                                                                            );
+                                                                        return Ok(response_503());
+                                                                    },
+                                                                };
+                                                            if !status.is_success() {
+                                                                if let Some(signer) = &signer {
+                                                                    state
+                                                                        .s2s_client
+                                                                        .tokens
+                                                                        .invalidate(
+                                                                            &(
+                                                                                req.file.identity,
+                                                                                crate
+                                                                                ::subsystems
+                                                                                ::s2s_client
+                                                                                ::signer_identity(
+                                                                                    signer
+                                                                                ).err_internal()?
+                                                                            ),
+                                                                        )
+                                                                        .await;
+                                                                }
+                                                                state
+                                                                    .log
+                                                                    .log_with(
+                                                                        loga::DEBUG,
+                                                                        "Owner refused file request",
+                                                                        ea!(url = url, status = status)
+                                                                    );
+                                                                match status {
+                                                                    StatusCode::NOT_FOUND |
+                                                                    StatusCode::FORBIDDEN |
+                                                                    StatusCode::RANGE_NOT_SATISFIABLE => {
+                                                                        return Ok(
+                                                                            Response::builder()
+                                                                                .status(status)
+                                                                                .body(body_full(vec![]))
+                                                                                .unwrap()
+                                                                        );
+                                                                    },
+                                                                    _ => return Ok(response_503()),
+                                                                }
+                                                            }
+                                                            tx(&state.db, {
+                                                                let hash = req.file.hash.0.clone();
+                                                                let db_channel_id = db_channel_id.clone();
+                                                                move |db_tx| {
+                                                                    good_ormning::sqlite::good_query!(
+                                                                        db,
+                                                                        r#"insert into file_cache_access (account_id, owner, channel, hash) values (${account_id_t = &account_id}, ${identity_id_t = &db_owner}, ${channel_id_t = &db_channel_id}, ${string = hash.as_str()}) on conflict do nothing"#;
+                                                                        db_tx
+                                                                    ).map_err(|e| loga::err(e.0))?;
+                                                                    return Ok(());
+                                                                }
+                                                            }).await.err_internal()?;
+                                                            let fill_key =
+                                                                (
+                                                                    req.file.identity,
+                                                                    req.file.hash.0.clone(),
+                                                                    thumbnail
+                                                                );
+                                                            if state
+                                                                .file_cache_fills
+                                                                .lock()
+                                                                .unwrap()
+                                                                .insert(fill_key.clone()) {
+                                                                let state = state.clone();
+                                                                let mime_type =
+                                                                    resp_headers
+                                                                        .get(CONTENT_TYPE)
+                                                                        .and_then(|v| v.to_str().ok())
+                                                                        .context_with(
+                                                                            "Owner file response missing content type",
+                                                                            ea!(url = url)
+                                                                        )
+                                                                        .err_internal()?
+                                                                        .to_string();
+                                                                let file = req.file.clone();
+                                                                tokio::spawn(async move {
+                                                                    if let Err(e) = async {
+                                                                        ta_return!((), loga::Error);
+                                                                        let dest =
+                                                                            file_cache_path(
+                                                                                &state,
+                                                                                file.identity,
+                                                                                &file.hash.0,
+                                                                                thumbnail
+                                                                            );
+                                                                        let dir = dest.parent().unwrap().to_path_buf();
+                                                                        create_dirs(&dir).await?;
+                                                                        let tmp_path = tmp_path_in(&dir);
+                                                                        let downloaded =
+                                                                            state
+                                                                                .s2s_client
+                                                                                .get_file_to_disk(
+                                                                                    file.identity,
+                                                                                    signer.as_ref(),
+                                                                                    &s2s_req,
+                                                                                    &tmp_path,
+                                                                                    state.file_cache_size
+                                                                                )
+                                                                                .await;
+                                                                        let (hash, size) = match downloaded {
+                                                                            Ok(d) => d,
+                                                                            Err(e) => {
+                                                                                remove_file_if_exists(
+                                                                                    &tmp_path
+                                                                                ).await?;
+                                                                                return Err(e);
+                                                                            },
+                                                                        };
+                                                                        if !thumbnail && hash != file.hash {
+                                                                            remove_file_if_exists(&tmp_path).await?;
+                                                                            return Err(
+                                                                                loga::err_with(
+                                                                                    "Owner sent file contents that don't match the hash",
+                                                                                    ea!(want = file.hash, got = hash),
+                                                                                ),
+                                                                            );
+                                                                        }
+                                                                        tokio::fs::rename(&tmp_path, &dest)
+                                                                            .await
+                                                                            .context_with(
+                                                                                "Error moving cached file into place",
+                                                                                ea!(path = dest.dbg_str())
+                                                                            )?;
+                                                                        let size =
+                                                                            i64::try_from(
+                                                                                size
+                                                                            ).context(
+                                                                                "Cached file size out of range"
+                                                                            )?;
+                                                                        let cache_size =
+                                                                            i64::try_from(
+                                                                                state.file_cache_size
+                                                                            ).context("Cache size out of range")?;
+                                                                        let evicted =
+                                                                            tx(&state.db, move |db_tx| {
+                                                                                let db_file_owner =
+                                                                                    DbIdentity(file.identity);
+                                                                                good_ormning::sqlite::good_query!(
+                                                                                    db,
+                                                                                    r#"insert into file_cache (owner, hash, thumbnail, mime_type, size, last_access) values (${identity_id_t = &db_file_owner}, ${string = file.hash.0.as_str()}, ${bool = thumbnail}, ${string = mime_type.as_str()}, ${i64 = size}, ${time_ms_t = &DbTimeMs(Timestamp::now())}) on conflict do update set size = excluded.size, last_access = excluded.last_access"#;
+                                                                                    db_tx
+                                                                                ).map_err(|e| loga::err(e.0))?;
+                                                                                let mut total = 0i64;
+                                                                                let mut evicted = vec![];
+                                                                                for r in good_ormning
+                                                                                ::sqlite
+                                                                                ::good_query_many!(
+                                                                                    db,
+                                                                                    r#"select owner, hash, thumbnail, size from file_cache order by last_access desc"#;
+                                                                                    db_tx
+                                                                                ).map_err(|e| loga::err(e.0))? {
+                                                                                    total =
+                                                                                        total.saturating_add(r.size);
+                                                                                    if total <= cache_size {
+                                                                                        continue;
+                                                                                    }
+                                                                                    good_ormning::sqlite::good_query!(
+                                                                                        db,
+                                                                                        r#"delete from file_cache where owner = ${identity_id_t = &r.owner} and hash = ${string = r.hash.as_str()} and thumbnail = ${bool = r.thumbnail}"#;
+                                                                                        db_tx
+                                                                                    ).map_err(|e| loga::err(e.0))?;
+                                                                                    let remaining =
+                                                                                        good_ormning
+                                                                                        ::sqlite
+                                                                                        ::good_query_opt!(
+                                                                                            db,
+                                                                                            r#"select 1 as x from file_cache where owner = ${identity_id_t = &r.owner} and hash = ${string = r.hash.as_str()}"#;
+                                                                                            db_tx
+                                                                                        ).map_err(|e| loga::err(e.0))?;
+                                                                                    if remaining.is_none() {
+                                                                                        good_ormning
+                                                                                        ::sqlite
+                                                                                        ::good_query!(
+                                                                                            db,
+                                                                                            r#"delete from file_cache_access where owner = ${identity_id_t = &r.owner} and hash = ${string = r.hash.as_str()}"#;
+                                                                                            db_tx
+                                                                                        ).map_err(|e| loga::err(e.0))?;
+                                                                                    }
+                                                                                    evicted.push(
+                                                                                        (r.owner.0, r.hash, r.thumbnail)
+                                                                                    );
+                                                                                }
+                                                                                return Ok(evicted);
+                                                                            })
+                                                                                .await
+                                                                                .context(
+                                                                                    "Error recording cached file"
+                                                                                )?;
+                                                                        for (owner, hash, thumbnail) in evicted {
+                                                                            remove_file_if_exists(
+                                                                                &file_cache_path(
+                                                                                    &state,
+                                                                                    owner,
+                                                                                    &hash,
+                                                                                    thumbnail
+                                                                                )
+                                                                            ).await?;
+                                                                        }
+                                                                        return Ok(());
+                                                                    }.await {
+                                                                        state
+                                                                            .log
+                                                                            .log_err(
+                                                                                loga::DEBUG,
+                                                                                e.context("Error filling file cache")
+                                                                            );
+                                                                    }
+                                                                    state
+                                                                        .file_cache_fills
+                                                                        .lock()
+                                                                        .unwrap()
+                                                                        .remove(&fill_key);
+                                                                });
+                                                            }
+                                                            let mut resp = Response::builder().status(status);
+                                                            for h in [
+                                                                CONTENT_TYPE,
+                                                                CONTENT_LENGTH,
+                                                                CONTENT_RANGE,
+                                                                ACCEPT_RANGES
+                                                            ] {
+                                                                if let Some(v) = resp_headers.get(&h) {
+                                                                    resp = resp.header(h, v.clone());
+                                                                }
+                                                            }
+                                                            for (k, v) in &file_headers {
+                                                                resp = resp.header(k, v.clone());
+                                                            }
+                                                            resp =
+                                                                resp.header(
+                                                                    CACHE_CONTROL,
+                                                                    crate
+                                                                    ::subsystems
+                                                                    ::s2s_error
+                                                                    ::CachePolicy
+                                                                    ::Immutable.header_value()
+                                                                );
+                                                            return Ok(
+                                                                resp
+                                                                    .body(
+                                                                        StreamBody::new(
+                                                                            ReaderStream::new(
+                                                                                reader
+                                                                            ).map_ok(Frame::data)
+                                                                        ).boxed()
+                                                                    )
                                                                     .unwrap(),
                                                             );
                                                         }.await;
@@ -6778,6 +7802,8 @@ fn main() {
                                                                                 i64_to_u64,
                                                                                 ingest_message,
                                                                                 load_signer_tx,
+                                                                                message_store,
+                                                                                StoredMessage,
                                                                                 notify_remotes,
                                                                                 publish_local_notification,
                                                                             },
@@ -6811,7 +7837,8 @@ fn main() {
                                                                         let sender = req.identity;
                                                                         let owner = req.channel.identity;
                                                                         let channel = req.channel.clone();
-                                                                        let body_text = req.body.clone();
+                                                                        let blocks = req.blocks.clone();
+                                                                        let max_file_size = state.max_file_size;
                                                                         let result = tx(&state.db, move |db_tx| {
                                                                             let db_sender = DbIdentity(sender);
                                                                             let db_owner = DbIdentity(owner);
@@ -6833,6 +7860,55 @@ fn main() {
                                                                                         "Sender isn't this account's identity in the channel"
                                                                                     )
                                                                                 );
+                                                                            }
+                                                                            for block in &req.blocks {
+                                                                                let shared
+                                                                                ::interface
+                                                                                ::shared
+                                                                                ::MessageBlock
+                                                                                ::File(
+                                                                                    file
+                                                                                ) =
+                                                                                    block else {
+                                                                                        continue;
+                                                                                    };
+                                                                                if file.file.identity != owner {
+                                                                                    return Err(
+                                                                                        loga::err(
+                                                                                            "Message files must be addressed to the channel owner"
+                                                                                        )
+                                                                                    );
+                                                                                }
+                                                                                if file.size > max_file_size {
+                                                                                    return Err(
+                                                                                        loga::err(
+                                                                                            "Message file exceeds the size limit"
+                                                                                        )
+                                                                                    );
+                                                                                }
+                                                                                let hash = file.file.hash.0.clone();
+                                                                                if crate::subsystems::files::file_ref(
+                                                                                    db_tx,
+                                                                                    account_id,
+                                                                                    Some(hash.clone())
+                                                                                )?.is_some() {
+                                                                                    continue;
+                                                                                }
+                                                                                let indexed =
+                                                                                    good_ormning
+                                                                                    ::sqlite
+                                                                                    ::good_query_opt!(
+                                                                                        db,
+                                                                                        r#"select 1 as x from message_file where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and hash = ${string = hash.as_str()} limit ${i64 = 1}"#;
+                                                                                        db_tx
+                                                                                    ).map_err(|e| loga::err(e.0))?;
+                                                                                if indexed.is_none() {
+                                                                                    return Err(
+                                                                                        loga::err(
+                                                                                            "Message references a file that hasn't been uploaded"
+                                                                                        )
+                                                                                    );
+                                                                                }
                                                                             }
                                                                             let existing =
                                                                                 good_ormning::sqlite::good_query_opt!(
@@ -6879,7 +7955,7 @@ fn main() {
                                                                                     unique: i64_to_u64(sender_unique),
                                                                                 },
                                                                                 rel: req.rel.clone(),
-                                                                                body: req.body.clone(),
+                                                                                blocks: req.blocks.clone(),
                                                                             };
                                                                             let body_json =
                                                                                 serde_json::to_string(&body).unwrap();
@@ -6922,12 +7998,23 @@ fn main() {
                                                                                     )?,
                                                                                 }));
                                                                             } else {
-                                                                                let created = jiff::Timestamp::now();
-                                                                                good_ormning::sqlite::good_query!(
-                                                                                    db,
-                                                                                    r#"insert into outbox (account_id, identity, channel, sender, sender_unique, client_id, raw, created) values (${account_id_t = &account_id}, ${identity_id_t = &db_owner}, ${channel_id_t = &db_channel_id}, ${identity_id_t = &db_sender}, ${i64 = sender_unique}, ${string = req.client_id.0.as_str()}, ${string = raw.as_str()}, ${time_ms_t = &crate::interface::db::DbTimeMs(created)})"#;
-                                                                                    db_tx
-                                                                                ).map_err(|e| loga::err(e.0))?;
+                                                                                if !message_store(
+                                                                                    db_tx,
+                                                                                    account_id,
+                                                                                    db_owner,
+                                                                                    &db_channel_id,
+                                                                                    &raw,
+                                                                                    &body,
+                                                                                    StoredMessage::Outbox {
+                                                                                        created: jiff::Timestamp::now()
+                                                                                    }
+                                                                                )? {
+                                                                                    return Err(
+                                                                                        loga::err(
+                                                                                            "Message conflicted with an existing outbox message"
+                                                                                        )
+                                                                                    );
+                                                                                }
                                                                                 return Ok(Some(PushResult {
                                                                                     seq: None,
                                                                                     recipients: vec![owner],
@@ -6944,7 +8031,7 @@ fn main() {
                                                                                     account,
                                                                                     channel.clone(),
                                                                                     seq,
-                                                                                    body_text,
+                                                                                    blocks,
                                                                                     false
                                                                                 ).await;
                                                                             },
@@ -7031,6 +8118,7 @@ fn main() {
                                                                     local_channel_get,
                                                                     message_history_rows,
                                                                     member_fetch_snap_lookup,
+                                                                    parse_blocks,
                                                                     member_fetch_snap_page,
                                                                     member_refresh_info,
                                                                     snap_offset_containing_time,
@@ -7158,10 +8246,11 @@ fn main() {
                                                                             Err(e) => return Ok(response_400(e)),
                                                                         };
                                                                     let result =
-                                                                        match crate::subsystems::files::read_file(
+                                                                        match crate::subsystems::files::file_local(
                                                                             state,
                                                                             DbAccountId(account),
-                                                                            &req.hash
+                                                                            &req.hash,
+                                                                            false
                                                                         ).await {
                                                                             Ok(v) => v,
                                                                             Err(e) => {
@@ -7176,24 +8265,31 @@ fn main() {
                                                                                 return Ok(response_503());
                                                                             },
                                                                         };
-                                                                    let Some((mime, bytes)) = result else {
+                                                                    let Some((mime, path)) = result else {
                                                                         return Ok(response_404());
                                                                     };
+                                                                    let mut file_headers = http::HeaderMap::new();
+                                                                    file_headers.insert(
+                                                                        X_CONTENT_TYPE_OPTIONS,
+                                                                        http::HeaderValue::from_static("nosniff")
+                                                                    );
+                                                                    file_headers.insert(
+                                                                        CONTENT_SECURITY_POLICY,
+                                                                        http::HeaderValue::from_static(
+                                                                            "sandbox; default-src 'none'"
+                                                                        )
+                                                                    );
                                                                     return Ok(
-                                                                        Response::builder()
-                                                                            .status(200)
-                                                                            .header(CONTENT_TYPE, mime)
-                                                                            .header(X_CONTENT_TYPE_OPTIONS, "nosniff")
-                                                                            .header(
-                                                                                CONTENT_SECURITY_POLICY,
-                                                                                "sandbox; default-src 'none'"
-                                                                            )
-                                                                            .header(
-                                                                                CACHE_CONTROL,
-                                                                                CachePolicy::Immutable.header_value()
-                                                                            )
-                                                                            .body(body_full(bytes))
-                                                                            .unwrap(),
+                                                                        htwrap::htserve::responses::response_file(
+                                                                            &head.headers,
+                                                                            &mime,
+                                                                            &path,
+                                                                            true,
+                                                                            &file_headers
+                                                                        )
+                                                                            .await
+                                                                            .context("Error serving file")
+                                                                            .map_err(VisErr::Internal)?,
                                                                     );
                                                                 },
                                                                 "join_preview_file" => {
@@ -7994,7 +9090,11 @@ fn main() {
                                                                                                 )
                                                                                             ) {
                                                                                                 Some(e) => (
-                                                                                                    e.body_text.clone(),
+                                                                                                    parse_blocks(
+                                                                                                        &e.blocks
+                                                                                                    ).map_err(
+                                                                                                        GetErr::Local
+                                                                                                    )?,
                                                                                                     e
                                                                                                         .client_id
                                                                                                         .clone()
@@ -8006,7 +9106,11 @@ fn main() {
                                                                                                         ),
                                                                                                 ),
                                                                                                 None => (
-                                                                                                    r.body_text.clone(),
+                                                                                                    parse_blocks(
+                                                                                                        &r.blocks
+                                                                                                    ).map_err(
+                                                                                                        GetErr::Local
+                                                                                                    )?,
                                                                                                     origin_client_id.clone()
                                                                                                 ),
                                                                                             };
@@ -8088,7 +9192,7 @@ fn main() {
                                                                                                 client_id: origin_client_id,
                                                                                                 id: id,
                                                                                                 rel: rel,
-                                                                                                body: final_body,
+                                                                                                blocks: final_body,
                                                                                             },
                                                                                         });
                                                                                     }
@@ -8698,7 +9802,7 @@ fn main() {
                                                                                         created: r.created.0,
                                                                                         id: body.id,
                                                                                         rel: body.rel,
-                                                                                        body: body.body,
+                                                                                        blocks: body.blocks,
                                                                                     });
                                                                                 }
                                                                                 return Ok(out);
@@ -8816,7 +9920,7 @@ fn main() {
                                                                                                                     .created
                                                                                                                     .0,
                                                                                                                 client_id: r.client_id,
-                                                                                                                body: body.body,
+                                                                                                                blocks: body.blocks,
                                                                                                             }
                                                                                                         );
                                                                                                     }
@@ -8866,7 +9970,7 @@ fn main() {
                                                                                                 &message,
                                                                                                 rows,
                                                                                                 outbox_edits
-                                                                                            )
+                                                                                            )?
                                                                                         );
                                                                                     }
                                                                                     let Some(fetched) = remote({
@@ -9003,7 +10107,7 @@ fn main() {
                                                                                                 )
                                                                                                 .collect(),
                                                                                             outbox_edits
-                                                                                        )
+                                                                                        )?
                                                                                     );
                                                                                 }.await;
                                                                             ret

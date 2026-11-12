@@ -1,6 +1,11 @@
 use {
     crate::{
         api::req_get,
+        blocks::{
+            format_size,
+            order_blocks,
+            view_blocks,
+        },
         js::{
             el_async,
             style_export,
@@ -13,10 +18,7 @@ use {
     flowcontrol::ta_return,
     lunk::ProcessingContext,
     rooting::El,
-    shared::interface::wire::c2s::{
-        self,
-        MessageRevision,
-    },
+    shared::interface::wire::c2s,
     similar::{
         ChangeTag,
         TextDiff,
@@ -39,25 +41,43 @@ pub fn build(_pc: &mut ProcessingContext, m: &MinistateMessageHistory) -> El {
         let id = m.id.clone();
         async move {
             ta_return!(Vec < El >, String);
-            let Some(revisions) = req_get(c2s::MessageHistory { id: id }).await? else {
+            let Some(revisions) = req_get(c2s::MessageHistory { id: id.clone() }).await? else {
                 return Err(format!("Message not found"));
             };
             let mut out = vec![];
-            let mut previous: Option<&MessageRevision> = None;
-            for revision in &revisions {
-                match previous {
+            let mut previous: Option<String> = None;
+            for revision in revisions {
+                let ordered = order_blocks(&view_blocks(&id.channel, revision.blocks));
+                let mut text = ordered.texts.join("\n\n");
+                for file in ordered.media.iter().chain(ordered.files.iter()) {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(&format!("📎 {} ({})", file.download_name(), format_size(file.size)));
+                }
+                for extension in &ordered.extensions {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(&format!("{}: {}", extension.key, serde_json::to_string(&extension.data).unwrap()));
+                }
+                if text.is_empty() {
+                    text = format!("(deleted)");
+                }
+                match &previous {
                     None => {
                         out.push(
                             style_export::cont_message_history_revision_original(
                                 style_export::ContMessageHistoryRevisionOriginalArgs {
                                     date: revision.receive_time.to_string(),
-                                    text: revision.body.clone(),
+                                    text: text.clone(),
                                 },
                             ).root,
                         );
                     },
                     Some(previous) => {
-                        let diff = TextDiff::from_lines(&previous.body, &revision.body);
+                        let previous = previous.as_str();
+                        let diff = TextDiff::from_lines(previous, &text);
                         let mut cells = vec![];
                         for op in diff.ops() {
                             let mut removed = vec![];
@@ -135,7 +155,7 @@ pub fn build(_pc: &mut ProcessingContext, m: &MinistateMessageHistory) -> El {
                         );
                     },
                 }
-                previous = Some(revision);
+                previous = Some(text);
             }
             return Ok(out);
         }

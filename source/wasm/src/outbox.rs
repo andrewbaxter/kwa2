@@ -1,10 +1,16 @@
 use {
     crate::{
+        background::trigger_push,
+        blocks::{
+            ViewBlock,
+            ViewFileSource,
+        },
         opfs::{
             opfs_delete,
             opfs_ensure_dir,
             opfs_list_dir,
             opfs_root,
+            opfs_write_json,
         },
         state::state,
     },
@@ -22,8 +28,10 @@ use {
         Serialize,
     },
     shared::interface::shared::{
+        MessageBlockExtension,
         MessageClientId,
         QualifiedChannelId,
+        QualifiedFileId,
         QualifiedMessageId,
     },
     spaghettinuum::interface::identity::Identity,
@@ -32,7 +40,13 @@ use {
         str::FromStr,
     },
     wasm_bindgen::JsCast,
-    web_sys::FileSystemDirectoryHandle,
+    wasm_bindgen_futures::JsFuture,
+    web_sys::{
+        FileSystemDirectoryHandle,
+        FileSystemFileHandle,
+        FileSystemGetFileOptions,
+        FileSystemWritableFileStream,
+    },
 };
 
 pub const OPFS_FILENAME_MAIN: &str = "main";
@@ -69,11 +83,98 @@ pub enum OutboxMessageRel {
     EditOf(QualifiedMessageId),
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub enum OutboxFile {
+    Local(String),
+    Remote(QualifiedFileId),
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct OutboxBlockFile {
+    pub file: OutboxFile,
+    pub mime_type: String,
+    pub size: u64,
+    pub name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub enum OutboxBlock {
+    Text(String),
+    File(OutboxBlockFile),
+    Extension(MessageBlockExtension),
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct OutboxMessage {
     pub rel: OutboxMessageRel,
     pub client_id: MessageClientId,
-    pub body: String,
+    pub blocks: Vec<OutboxBlock>,
+}
+
+pub async fn opfs_write_outbox_message(
+    own_identity: &Identity,
+    channel: &QualifiedChannelId,
+    rel: OutboxMessageRel,
+    client_id: MessageClientId,
+    blocks: Vec<ViewBlock>,
+) -> Result<(), String> {
+    let opfs_channel_dir = opfs_outbox_channel_dir(own_identity, channel).await;
+    let opfs_message_dir = opfs_outbox_message_dir(&opfs_channel_dir, &client_id).await;
+    let mut out_blocks = vec![];
+    for (i, block) in blocks.into_iter().enumerate() {
+        match block {
+            ViewBlock::Text(t) => out_blocks.push(OutboxBlock::Text(t)),
+            ViewBlock::Extension(e) => out_blocks.push(OutboxBlock::Extension(e)),
+            ViewBlock::File(f) => {
+                let file = match f.source {
+                    ViewFileSource::Remote { channel: _, file } => OutboxFile::Remote(file),
+                    ViewFileSource::Local(local) => {
+                        let seg = format!("file{}", i);
+                        let handle =
+                            FileSystemFileHandle::from(
+                                JsFuture::from(opfs_message_dir.get_file_handle_with_options(&seg, &{
+                                    let x = FileSystemGetFileOptions::new();
+                                    x.set_create(true);
+                                    x
+                                })).await.map_err(|e| format!("Error creating outbox file [{}]: {:?}", seg, e))?,
+                            );
+                        let w =
+                            FileSystemWritableFileStream::from(
+                                JsFuture::from(handle.create_writable())
+                                    .await
+                                    .map_err(
+                                        |e| format!("Error opening outbox file [{}] for writing: {:?}", seg, e),
+                                    )?,
+                            );
+                        JsFuture::from(
+                            w
+                                .write_with_blob(&local.blob)
+                                .map_err(|e| format!("Error writing outbox file [{}]: {:?}", seg, e))?,
+                        )
+                            .await
+                            .map_err(|e| format!("Error writing outbox file [{}] (2): {:?}", seg, e))?;
+                        JsFuture::from(w.close())
+                            .await
+                            .map_err(|e| format!("Error closing outbox file [{}]: {:?}", seg, e))?;
+                        OutboxFile::Local(seg)
+                    },
+                };
+                out_blocks.push(OutboxBlock::File(OutboxBlockFile {
+                    file: file,
+                    mime_type: f.mime_type,
+                    size: f.size,
+                    name: f.name,
+                }));
+            },
+        }
+    }
+    opfs_write_json(&opfs_message_dir, OPFS_FILENAME_MAIN, OutboxMessage {
+        rel: rel,
+        client_id: client_id,
+        blocks: out_blocks,
+    }).await.map_err(|e| format!("Error writing message to opfs: [{}]", e))?;
+    trigger_push();
+    return Ok(());
 }
 
 pub async fn opfs_outbox() -> FileSystemDirectoryHandle {

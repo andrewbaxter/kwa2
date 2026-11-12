@@ -55,3 +55,7 @@ pub mod util;
 pub mod outbox;
 pub mod background;
 pub mod opfs;
+pub mod blocks;
+pub mod modal;
+pub mod media_viewer;
+pub mod camera;

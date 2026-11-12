@@ -1,6 +1,10 @@
 use {
     crate::{
-        js::style_export,
+        js::{
+            js_err,
+            style_export,
+            StopStream,
+        },
         page_channel_join_url::FormKwaUrlInvite,
         state::{
             ChannelJoinSource,
@@ -43,23 +47,8 @@ use {
         HtmlVideoElement,
         MediaStream,
         MediaStreamConstraints,
-        MediaStreamTrack,
     },
 };
-
-struct StopStream(MediaStream);
-
-impl Drop for StopStream {
-    fn drop(&mut self) {
-        for track in self.0.get_tracks() {
-            track.dyn_into::<MediaStreamTrack>().unwrap().stop();
-        }
-    }
-}
-
-fn js_err(prefix: &str, e: JsValue) -> String {
-    return format!("{}: {}", prefix, e.as_string().unwrap_or_else(|| format!("{:?}", e)));
-}
 
 pub fn build(pc: &mut ProcessingContext) -> El {
     let eg = pc.eg();

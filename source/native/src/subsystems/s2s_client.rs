@@ -1,21 +1,29 @@
 use {
-    crate::interface::s2s::{
-        s2sv1,
-        ChannelInfoRes,
-        GetActivity,
-        GetChannelInfo,
-        GetJoinPreview,
-        JoinPreviewRes,
-        Identify,
-        IdentifyChallenge,
-        IdentifyRes,
-        PulledMessages,
-        S2sErrorBody,
-        SpaghRecord,
-        SPAGH_RECORD_KEY,
-        StartIdentify,
-        StartIdentifyRes,
+    crate::{
+        interface::s2s::{
+            s2sv1,
+            ChannelInfoRes,
+            GetFile,
+            GetActivity,
+            GetChannelInfo,
+            GetJoinPreview,
+            JoinPreviewRes,
+            Identify,
+            IdentifyChallenge,
+            IdentifyRes,
+            PulledMessages,
+            S2sErrorBody,
+            SpaghRecord,
+            SPAGH_RECORD_KEY,
+            StartIdentify,
+            StartIdentifyRes,
+        },
+        subsystems::files::{
+            finish_hash,
+            HashingWriter,
+        },
     },
+    flowcontrol::ta_return,
     http::{
         header::CONTENT_TYPE,
         Method,
@@ -32,12 +40,20 @@ use {
     hyper::body::Bytes,
     loga::{
         ea,
+        DebugDisplay,
         Log,
         ResultContext,
     },
     moka::future::Cache,
     serde::de::DeserializeOwned,
-    shared::interface::wire::c2s::PathReqTrait,
+    sha2::{
+        Digest,
+        Sha256,
+    },
+    shared::interface::{
+        shared::FileHash,
+        wire::c2s::PathReqTrait,
+    },
     spaghettinuum::{
         byteszb32::BytesZb32,
         interface::identity::Identity,
@@ -64,12 +80,14 @@ use {
             HashMap,
             HashSet,
         },
+        path::Path,
         str::FromStr,
         sync::{
             Arc,
             Mutex,
         },
     },
+    tokio::io::AsyncWriteExt,
 };
 
 pub const S2SV1_PATH: &str = "/s/1";
@@ -112,14 +130,7 @@ impl S2sClient {
         );
     }
 
-    pub async fn request_raw(
-        &self,
-        target: Identity,
-        method: Method,
-        path: &str,
-        headers: &HashMap<String, String>,
-        body: Vec<u8>,
-    ) -> Result<(String, Vec<u8>, Uri), loga::Error> {
+    pub async fn connect(&self, target: Identity, path: &str) -> Result<(htreq::Conn, Uri), loga::Error> {
         let key_record = vec![SPAGH_RECORD_KEY.to_string()];
         let key_tls = vec![tls_record::KEY_SUFFIX_TLS.to_string()];
         let mut found =
@@ -160,7 +171,7 @@ impl S2sClient {
         }
         let host = format!("{}{}", target, DNS_DOT_SUFFIX);
         let url = Uri::from_str(&format!("https://{}:{}{}{}", host, record.port, S2SV1_PATH, path)).unwrap();
-        let mut conn =
+        let conn =
             htreq::connect_ips(
                 self.limits,
                 ips,
@@ -174,6 +185,18 @@ impl S2sClient {
             )
                 .await
                 .context_with("Error connecting to peer", ea!(url = url))?;
+        return Ok((conn, url));
+    }
+
+    pub async fn request_raw(
+        &self,
+        target: Identity,
+        method: Method,
+        path: &str,
+        headers: &HashMap<String, String>,
+        body: Vec<u8>,
+    ) -> Result<(String, Vec<u8>, Uri), loga::Error> {
+        let (mut conn, url) = self.connect(target, path).await?;
         let mut builder = Request::builder().method(method).uri(url.clone());
         if !body.is_empty() {
             builder = builder.header(CONTENT_TYPE, "application/json");
@@ -212,6 +235,63 @@ impl S2sClient {
                 .context_with("Peer response missing content type", ea!(url = url))?
                 .to_string();
         return Ok((content_type, body, url));
+    }
+
+    pub async fn opt_auth_headers(
+        &self,
+        target: Identity,
+        signer: Option<&Signer>,
+    ) -> Result<HashMap<String, String>, loga::Error> {
+        let Some(signer) = signer else {
+            return Ok(HashMap::new());
+        };
+        return Ok(auth_headers(&self.authenticate(target, signer).await?));
+    }
+
+    pub async fn get_file_to_disk(
+        &self,
+        target: Identity,
+        signer: Option<&Signer>,
+        req: &GetFile,
+        path: &Path,
+        limit: u64,
+    ) -> Result<(FileHash, u64), loga::Error> {
+        let headers = self.opt_auth_headers(target, signer).await?;
+        let (mut conn, url) = self.connect(target, &format!("/{}", req.serialize_path())).await?;
+        let mut builder = Request::builder().method(Method::GET).uri(url.clone());
+        for (k, v) in &headers {
+            builder = builder.header(k, v);
+        }
+        let request = builder.body(Full::new(Bytes::new())).unwrap();
+        let res = async {
+            ta_return!((FileHash, u64), loga::Error);
+            let (status, _, continue_send) =
+                htreq::send(&self.log, self.limits, &mut conn, request)
+                    .await
+                    .context_with("Error sending s2s file request", ea!(url = url))?;
+            if !status.is_success() {
+                return Err(loga::err_with("Peer returned error for file request", ea!(url = url, status = status)));
+            }
+            let mut writer = HashingWriter {
+                inner: tokio::fs::File::create(path)
+                    .await
+                    .context_with("Error creating file download destination", ea!(path = path.dbg_str()))?,
+                hasher: Sha256::new(),
+                size: 0,
+                limit: limit,
+            };
+            htreq::receive_stream(self.limits, continue_send, &mut writer)
+                .await
+                .context_with("Error downloading s2s file", ea!(url = url))?;
+            writer.flush().await.context_with("Error flushing downloaded file", ea!(path = path.dbg_str()))?;
+            return Ok((finish_hash(writer.hasher), writer.size));
+        }.await;
+        if res.is_err() {
+            if let Some(signer) = signer {
+                self.tokens.invalidate(&(target, signer_identity(signer)?)).await;
+            }
+        }
+        return res;
     }
 
     pub async fn post<

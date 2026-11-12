@@ -660,3 +660,17 @@ pub fn configure_async_button_once(button: &El, cb: impl 'static + Clone + Async
         }
     });
 }
+
+pub struct StopStream(pub web_sys::MediaStream);
+
+impl Drop for StopStream {
+    fn drop(&mut self) {
+        for track in self.0.get_tracks() {
+            track.dyn_into::<web_sys::MediaStreamTrack>().unwrap().stop();
+        }
+    }
+}
+
+pub fn js_err(prefix: &str, e: JsValue) -> String {
+    return format!("{}: {}", prefix, e.as_string().unwrap_or_else(|| format!("{:?}", e)));
+}

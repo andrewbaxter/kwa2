@@ -201,6 +201,7 @@ pub async fn fetch_join_portrait(
                 (&(state.s2s_client), host, None, GetFile {
                     auth: auth,
                     hash: hash,
+                    thumbnail: false,
                 });
             let path = format!("/{}", req.serialize_path());
             let Some(signer) = signer else {

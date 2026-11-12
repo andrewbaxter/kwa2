@@ -1,5 +1,6 @@
 use {
     crate::{
+        blocks::view_blocks,
         api::{
             req_get_retry,
         },
@@ -232,7 +233,7 @@ impl ChannelFeed {
                                         match &*e_int {
                                             ChatEntryMessageInternal::Deleted => { },
                                             ChatEntryMessageInternal::Message(m) => {
-                                                m.body.set(pc, entry1.body.clone());
+                                                m.blocks.set(pc, view_blocks(&self1.0.id, entry1.blocks.clone()));
                                             },
                                         }
                                     },
@@ -290,7 +291,8 @@ async fn create_entries(
                 offset_pos: e.offset_pos,
             }),
         };
-        let body = chat_state.overlay_body(&e.original_id, e.message.body);
+        let blocks =
+            chat_state.overlay_blocks(&e.original_id, view_blocks(&e.original_id.channel, e.message.blocks));
         match e.client_id {
             Some(client_id) => {
                 out.push(
@@ -300,7 +302,7 @@ async fn create_entries(
                         (e.original_id.channel.clone(), e.original_id.message.identity.clone(), client_id.clone()),
                         Some(e.original_id.clone()),
                         time,
-                        body,
+                        blocks,
                     ),
                 );
                 arrived.push((client_id, e.original_id));
@@ -312,7 +314,7 @@ async fn create_entries(
                         e.original_id.message.identity.clone(),
                         Some(e.original_id.clone()),
                         time,
-                        Prim::new(body),
+                        Prim::new(blocks),
                         false,
                         None,
                         scope_any(defer({

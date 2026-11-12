@@ -1,5 +1,6 @@
 use {
     crate::{
+        blocks::ViewBlock,
         chat::{
             ChatMode,
             ChatState,
@@ -75,7 +76,7 @@ impl Default for ChatTime {
 #[derive(Clone)]
 pub struct ChatEntryInternalMessage {
     pub time: Timestamp,
-    pub body: Prim<String>,
+    pub blocks: Prim<Vec<ViewBlock>>,
 }
 
 #[derive(Clone)]
@@ -116,7 +117,7 @@ impl ChatEntry {
         sender: Identity,
         message_id: Option<QualifiedMessageId>,
         time: ChatTime,
-        body: Prim<String>,
+        blocks: Prim<Vec<ViewBlock>>,
         hidden: bool,
         client_key: Option<ClientIdKey>,
         cleanup: ScopeValue,
@@ -132,7 +133,7 @@ impl ChatEntry {
                 hidden: Prim::new(hidden),
                 internal: Prim::new(ChatEntryMessageInternal::Message(ChatEntryInternalMessage {
                     time: time.stamp,
-                    body: body,
+                    blocks: blocks,
                 })),
             }),
             el: Default::default(),

@@ -1,5 +1,6 @@
 use {
     crate::{
+        blocks::view_blocks,
         api::req_get_retry,
         chat::{
             ChatState,
@@ -92,7 +93,7 @@ impl ServerOutboxFeed {
                 edits.push((QualifiedMessageId {
                     channel: self.0.id.clone(),
                     message: target.clone(),
-                }, e.client_id, e.body));
+                }, e.client_id, view_blocks(&self.0.id, e.blocks)));
                 continue;
             }
             out.insert(ChatTime {
@@ -102,8 +103,8 @@ impl ServerOutboxFeed {
         }
         if !edits.is_empty() {
             self.0.chat_state.eg.event(|pc| {
-                for (target, client_id, body) in &edits {
-                    self.0.chat_state.apply_edit_overlay(pc, target.clone(), client_id, body.clone());
+                for (target, client_id, blocks) in &edits {
+                    self.0.chat_state.apply_edit_overlay(pc, target.clone(), client_id, blocks.clone());
                 }
             }).unwrap();
             for (_, client_id, _) in &edits {
@@ -126,7 +127,7 @@ impl ServerOutboxFeed {
                     (self.0.id.clone(), self.0.sender.clone(), e.client_id.clone()),
                     None,
                     time.clone(),
-                    e.body.clone(),
+                    view_blocks(&self.0.id, e.blocks.clone()),
                 ),
             );
             client_ids.push(e.client_id.clone());

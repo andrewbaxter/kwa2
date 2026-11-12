@@ -64,28 +64,28 @@ pub async fn opfs_list_dir(parent: &FileSystemDirectoryHandle) -> Vec<(String, J
     return entries;
 }
 
+pub async fn opfs_read_file(parent: &FileSystemDirectoryHandle, seg: &str) -> Result<web_sys::File, String> {
+    return Ok(
+        web_sys::File::from(
+            JsFuture::from(
+                FileSystemFileHandle::from(
+                    JsFuture::from(parent.get_file_handle(seg))
+                        .await
+                        .map_err(|e| format!("Error getting file handle at seg [{}]: {:?}", seg, e.as_string()))?,
+                ).get_file(),
+            )
+                .await
+                .map_err(|e| format!("Error getting file from file handle at seg [{}]: {:?}", seg, e.as_string()))?,
+        ),
+    );
+}
+
 pub async fn opfs_read_json<
     T: DeserializeOwned,
 >(parent: &FileSystemDirectoryHandle, seg: &str) -> Result<T, String> {
     return Ok(
         serde_json::from_str::<T>(
-            &JsFuture::from(
-                web_sys::File::from(
-                    JsFuture::from(
-                        FileSystemFileHandle::from(
-                            JsFuture::from(parent.get_file_handle(seg))
-                                .await
-                                .map_err(
-                                    |e| format!("Error getting file handle at seg [{}]: {:?}", seg, e.as_string()),
-                                )?,
-                        ).get_file(),
-                    )
-                        .await
-                        .map_err(
-                            |e| format!("Error getting file from file handle at seg [{}]: {:?}", seg, e.as_string()),
-                        )?,
-                ).text(),
-            )
+            &JsFuture::from(opfs_read_file(parent, seg).await?.text())
                 .await
                 .map_err(|e| format!("Error getting string contents of file at seg [{}]: {:?}", seg, e.as_string()))?
                 .as_string()

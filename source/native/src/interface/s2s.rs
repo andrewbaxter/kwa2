@@ -221,6 +221,9 @@ pub mod s2sv1t {
     pub const GET_PREFIX_JOIN_PREVIEW: &str = "join_preview";
     pub const GET_PREFIX_FILE: &str = "file";
     const FILE_AUTH_KIND_CALLER: &str = "t";
+    const FILE_AUTH_KIND_CHANNEL: &str = "m";
+    const FILE_VARIANT_ORIGINAL: &str = "o";
+    const FILE_VARIANT_THUMBNAIL: &str = "t";
     const JOIN_PREVIEW_KIND_IDENTITY_INVITE: &str = "i";
     const JOIN_PREVIEW_KIND_CHANNEL_INVITE: &str = "c";
     const JOIN_PREVIEW_KIND_CHANNEL: &str = "p";
@@ -243,6 +246,7 @@ pub mod s2sv1t {
 
     pub enum FileAuth {
         Caller,
+        Channel(QualifiedChannelId),
         IdentityInvite {
             identity: Identity,
             code: String,
@@ -256,6 +260,7 @@ pub mod s2sv1t {
     pub struct GetFile {
         pub auth: FileAuth,
         pub hash: FileHash,
+        pub thumbnail: bool,
     }
 
     impl PathReqTrait for GetFile {
@@ -264,9 +269,16 @@ pub mod s2sv1t {
         fn deserialize_path(path: &str) -> Result<Self, String> {
             let mut parts = deserialize_path(path);
             confirm_path_const(&mut parts, GET_PREFIX_FILE)?;
+            let variant: String = confirm_path_element(&mut parts, "variant")?;
+            let thumbnail = match variant.as_str() {
+                FILE_VARIANT_ORIGINAL => false,
+                FILE_VARIANT_THUMBNAIL => true,
+                _ => return Err(format!("Unknown file variant [{}]", variant)),
+            };
             let kind: String = confirm_path_element(&mut parts, "auth kind")?;
             let auth = match kind.as_str() {
                 FILE_AUTH_KIND_CALLER => FileAuth::Caller,
+                FILE_AUTH_KIND_CHANNEL => FileAuth::Channel(channel_from_path(&mut parts)?),
                 JOIN_PREVIEW_KIND_IDENTITY_INVITE => FileAuth::IdentityInvite {
                     identity: confirm_path_element(&mut parts, "identity")?,
                     code: confirm_path_element(&mut parts, "code")?,
@@ -282,12 +294,16 @@ pub mod s2sv1t {
             return Ok(GetFile {
                 auth: auth,
                 hash: hash,
+                thumbnail: thumbnail,
             });
         }
 
         fn serialize_path(&self) -> String {
             let auth: Vec<String> = match &self.auth {
                 FileAuth::Caller => vec![FILE_AUTH_KIND_CALLER.to_string()],
+                FileAuth::Channel(channel) => {
+                    [FILE_AUTH_KIND_CHANNEL.to_string()].into_iter().chain(channel_segments(channel)).collect()
+                },
                 FileAuth::IdentityInvite { identity, code } => vec![
                     JOIN_PREVIEW_KIND_IDENTITY_INVITE.to_string(),
                     identity.to_string(),
@@ -301,9 +317,11 @@ pub mod s2sv1t {
                         .collect()
                 },
             };
-            return serialize_path(
-                [GET_PREFIX_FILE.to_string()].into_iter().chain(auth).chain([self.hash.to_string()]),
-            );
+            return serialize_path([GET_PREFIX_FILE.to_string(), if self.thumbnail {
+                FILE_VARIANT_THUMBNAIL
+            } else {
+                FILE_VARIANT_ORIGINAL
+            }.to_string()].into_iter().chain(auth).chain([self.hash.to_string()]));
         }
     }
 

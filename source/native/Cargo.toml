@@ -14,7 +14,8 @@ loga = "0.5"
 schemars = { version = "1", features = ["jiff02"] }
 serde = { version = "1", features = ["derive"] }
 taskmanager = "0.6"
-tokio = { version = "1", features = ["rt", "sync", "macros", "fs"] }
+tokio = { version = "1", features = ["rt", "sync", "macros", "fs", "process", "io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
 tokio-stream = { version = "0.1" }
 rust-embed-for-web = { version = "11", features = ["always-embed"] }
 serde_json = "1"

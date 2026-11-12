@@ -1,5 +1,11 @@
 use {
     crate::{
+        blocks::{
+            LocalBlob,
+            ViewBlock,
+            ViewFile,
+            ViewFileSource,
+        },
         chat::{
             ChatState,
             CopyStage,
@@ -15,9 +21,14 @@ use {
             Feed,
             WeakInfinite,
         },
-        opfs::opfs_read_json,
+        opfs::{
+            opfs_read_file,
+            opfs_read_json,
+        },
         outbox::{
             OPFS_FILENAME_MAIN,
+            OutboxBlock,
+            OutboxFile,
             OutboxMessage,
             OutboxMessageRel,
             opfs_channel_dir_entries,
@@ -28,6 +39,7 @@ use {
             state,
         },
     },
+    flowcontrol::ta_return,
     futures::channel::oneshot,
     jiff::Timestamp,
     lunk::EventGraph,
@@ -75,7 +87,7 @@ impl OutboxFeed {
         return ChatFeedId::Outbox((self.0.sender.clone(), self.0.id.clone()));
     }
 
-    pub fn add_sent(&self, client_id: MessageClientId, body: String) {
+    pub fn add_sent(&self, client_id: MessageClientId, blocks: Vec<ViewBlock>) {
         let parent = self.0.parent.borrow().as_ref().unwrap().upgrade().unwrap();
         let Some(pivot) = parent.want_after(self.feed_id()) else {
             return;
@@ -84,12 +96,12 @@ impl OutboxFeed {
         parent.respond_entries_after(
             &self.feed_id(),
             &pivot,
-            vec![self.create_entry(&stamp, client_id, body)],
+            vec![self.create_entry(&stamp, client_id, blocks)],
             true,
         );
     }
 
-    fn create_entry(&self, k: &Timestamp, client_id: MessageClientId, body: String) -> Rc<ChatEntry> {
+    fn create_entry(&self, k: &Timestamp, client_id: MessageClientId, blocks: Vec<ViewBlock>) -> Rc<ChatEntry> {
         return new_message_copy(
             &self.0.chat_state,
             CopyStage::Device,
@@ -99,22 +111,48 @@ impl OutboxFeed {
                 stamp: *k,
                 id: ChatTimeId::Outbox(client_id),
             },
-            body,
+            blocks,
         );
     }
 
-    async fn load_sources(&self) -> BTreeMap<Timestamp, OutboxMessage> {
+    async fn load_sources(&self) -> BTreeMap<Timestamp, (MessageClientId, Vec<ViewBlock>)> {
         let entries = opfs_channel_dir_entries(&opfs_outbox_channel_dir(&self.0.sender, &self.0.id).await).await;
         let mut out = BTreeMap::new();
         let mut edits = vec![];
         for (k, v) in entries {
-            match opfs_read_json::<OutboxMessage>(&v, OPFS_FILENAME_MAIN).await {
-                Ok(main) => match &main.rel {
+            let res = async {
+                ta_return!((OutboxMessage, Vec < ViewBlock >), String);
+                let main = opfs_read_json::<OutboxMessage>(&v, OPFS_FILENAME_MAIN).await?;
+                let mut blocks = vec![];
+                for block in &main.blocks {
+                    match block {
+                        OutboxBlock::Text(t) => blocks.push(ViewBlock::Text(t.clone())),
+                        OutboxBlock::Extension(e) => blocks.push(ViewBlock::Extension(e.clone())),
+                        OutboxBlock::File(f) => blocks.push(ViewBlock::File(ViewFile {
+                            source: match &f.file {
+                                OutboxFile::Local(seg) => ViewFileSource::Local(
+                                    LocalBlob::new(opfs_read_file(&v, seg).await?.into()),
+                                ),
+                                OutboxFile::Remote(file) => ViewFileSource::Remote {
+                                    channel: self.0.id.clone(),
+                                    file: file.clone(),
+                                },
+                            },
+                            mime_type: f.mime_type.clone(),
+                            size: f.size,
+                            name: f.name.clone(),
+                        })),
+                    }
+                }
+                return Ok((main, blocks));
+            }.await;
+            match res {
+                Ok((main, blocks)) => match &main.rel {
                     OutboxMessageRel::EditOf(target) => {
-                        edits.push((target.clone(), main.client_id, main.body));
+                        edits.push((target.clone(), main.client_id, blocks));
                     },
                     OutboxMessageRel::None | OutboxMessageRel::ReplyTo(_) => {
-                        out.insert(k, main);
+                        out.insert(k, (main.client_id, blocks));
                     },
                 },
                 Err(e) => {
@@ -124,8 +162,8 @@ impl OutboxFeed {
         }
         if !edits.is_empty() {
             self.0.chat_state.eg.event(|pc| {
-                for (target, client_id, body) in edits {
-                    self.0.chat_state.apply_edit_overlay(pc, target, &client_id, body);
+                for (target, client_id, blocks) in edits {
+                    self.0.chat_state.apply_edit_overlay(pc, target, &client_id, blocks);
                 }
             }).unwrap();
         }
@@ -136,12 +174,12 @@ impl OutboxFeed {
         'a,
     >(
         &self,
-        sources: impl Iterator<Item = (&'a Timestamp, &'a OutboxMessage)>,
+        sources: impl Iterator<Item = (&'a Timestamp, &'a (MessageClientId, Vec<ViewBlock>))>,
         limit: usize,
     ) -> Vec<Rc<ChatEntry>> {
         return sources
             .take(limit)
-            .map(|(k, m)| self.create_entry(k, m.client_id.clone(), m.body.clone()))
+            .map(|(k, (client_id, blocks))| self.create_entry(k, client_id.clone(), blocks.clone()))
             .collect();
     }
 }

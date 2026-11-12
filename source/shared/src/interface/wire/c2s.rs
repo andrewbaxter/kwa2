@@ -5,11 +5,13 @@ use {
         ChannelInviteId,
         IdentityInviteId,
         Message,
+        MessageBlock,
         MessageBody,
         MessageClientId,
         MessageId,
         QualifiedChannelId,
         QualifiedChannelInviteToken,
+        QualifiedFileId,
         QualifiedIdentityInviteToken,
         QualifiedMessageId,
     },
@@ -447,7 +449,7 @@ pub struct MessagePush {
     pub identity: Identity,
     #[serde(default = "message_rel_default")]
     pub rel: crate::interface::shared::MessageRel,
-    pub body: String,
+    pub blocks: Vec<MessageBlock>,
 }
 
 fn message_rel_default() -> crate::interface::shared::MessageRel {
@@ -685,7 +687,7 @@ impl PathReqTrait for SnapById {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageRevision {
     pub receive_time: Timestamp,
-    pub body: String,
+    pub blocks: Vec<MessageBlock>,
 }
 
 pub struct MessageHistory {
@@ -773,7 +775,7 @@ pub struct OutboxEntry {
     pub created: Timestamp,
     pub id: MessageId,
     pub rel: crate::interface::shared::MessageRel,
-    pub body: String,
+    pub blocks: Vec<MessageBlock>,
 }
 
 pub struct OutboxList {
@@ -1007,6 +1009,71 @@ impl PathReqTrait for GetFile {
     fn serialize_path(&self) -> String {
         return serialize_path([PATH_PREFIX_FILE.to_string(), self.hash.to_string()]);
     }
+}
+
+pub struct GetChannelFile {
+    pub channel: QualifiedChannelId,
+    pub file: QualifiedFileId,
+    pub thumbnail: bool,
+}
+
+const PATH_PREFIX_CHANNEL_FILE: &str = "channel_file";
+const CHANNEL_FILE_VARIANT_ORIGINAL: &str = "o";
+const CHANNEL_FILE_VARIANT_THUMBNAIL: &str = "t";
+
+impl PathReqTrait for GetChannelFile {
+    type Resp = Vec<u8>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_CHANNEL_FILE)?;
+        let variant: String = confirm_path_element(&mut parts, "variant")?;
+        let thumbnail = match variant.as_str() {
+            CHANNEL_FILE_VARIANT_ORIGINAL => false,
+            CHANNEL_FILE_VARIANT_THUMBNAIL => true,
+            _ => return Err(format!("Unknown file variant [{}]", variant)),
+        };
+        let out = GetChannelFile {
+            channel: QualifiedChannelId {
+                identity: confirm_path_element(&mut parts, "channel identity")?,
+                channel: ChannelId(confirm_path_element(&mut parts, "channel")?),
+            },
+            file: QualifiedFileId {
+                identity: confirm_path_element(&mut parts, "file identity")?,
+                hash: confirm_path_element(&mut parts, "file hash")?,
+            },
+            thumbnail: thumbnail,
+        };
+        confirm_path_empty(&mut parts)?;
+        return Ok(out);
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path(
+            [
+                PATH_PREFIX_CHANNEL_FILE.to_string(),
+                if self.thumbnail {
+                    CHANNEL_FILE_VARIANT_THUMBNAIL
+                } else {
+                    CHANNEL_FILE_VARIANT_ORIGINAL
+                }.to_string(),
+                self.channel.identity.to_string(),
+                self.channel.channel.0.to_string(),
+                self.file.identity.to_string(),
+                self.file.hash.to_string(),
+            ],
+        );
+    }
+}
+
+pub const PATH_FILE_UPLOAD: &str = "file_upload";
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct FileUploadRes {
+    pub hash: crate::interface::shared::FileHash,
+    pub size: u64,
 }
 
 pub struct GetJoinPreviewFile {

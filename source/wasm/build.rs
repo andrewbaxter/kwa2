@@ -109,6 +109,21 @@ fn main() {
             returns: vec![("value", &string_)],
         },
         Func {
+            name: "classStateControlsHidden",
+            args: vec![],
+            returns: vec![("value", &string_)],
+        },
+        Func {
+            name: "classStateRecording",
+            args: vec![],
+            returns: vec![("value", &string_)],
+        },
+        Func {
+            name: "classStateVideo",
+            args: vec![],
+            returns: vec![("value", &string_)],
+        },
+        Func {
             name: "classCode",
             args: vec![],
             returns: vec![("value", &string_)],
@@ -324,8 +339,33 @@ fn main() {
             returns: vec![("root", &el_)],
         },
         Func {
-            name: "leafChatEntryModeMessageTextBlock",
-            args: vec![("text", &string_)],
+            name: "leafChatEntryMessageText",
+            args: vec![("content", &el_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafMediaThumb",
+            args: vec![("src", &string_), ("video", &bool_), ("srcIsVideo", &bool_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contChatEntryMessageMedia",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEntryMessageMediaSquare",
+            args: vec![("content", &el_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEntryMessageExtension",
+            args: vec![("key", &string_), ("json", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEntryMessageFile",
+            args: vec![("name", &string_), ("size", &string_), ("link", &string_)],
             returns: vec![("root", &el_)],
         },
         // Controls - menu
@@ -341,14 +381,146 @@ fn main() {
         },
         // Controls - message
         Func {
-            name: "leafChatControlsBarModeMessage",
+            name: "leafChatEditorModeMessage",
             args: vec![],
-            returns: vec![("root", &el_), ("send", &el_), ("text", &el_), ("close", &el_)],
+            returns: vec![("root", &el_), ("rows", &el_), ("send", &el_)],
         },
         Func {
-            name: "leafChatControlsBarModeEdit",
+            name: "leafChatEditorModeEdit",
             args: vec![],
-            returns: vec![("root", &el_), ("send", &el_), ("text", &el_), ("close", &el_)],
+            returns: vec![("root", &el_), ("rows", &el_), ("send", &el_)],
+        },
+        Func {
+            name: "contChatEditorRow",
+            args: vec![("left", &arrel_), ("middle", &el_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorButtonClose",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorButtonDelete",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorButtonPlus",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contChatEditorToolbox",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorToolboxButtonText",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorToolboxButtonCamera",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorToolboxButtonDelete",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorToolboxButtonFile",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorText",
+            args: vec![("editor", &el_)],
+            returns: vec![("root", &el_), ("plusSlot", &el_)],
+        },
+        Func {
+            name: "contChatEditorMedia",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorMediaSquare",
+            args: vec![("content", &el_)],
+            returns: vec![("root", &el_), ("delete", &el_)],
+        },
+        Func {
+            name: "leafChatEditorFile",
+            args: vec![("name", &string_), ("size", &string_)],
+            returns: vec![("root", &el_), ("name", &el_)],
+        },
+        Func {
+            name: "contModalRoot",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contChatEditorModalConfirm",
+            args: vec![("text", &string_)],
+            returns: vec![("root", &el_), ("ok", &el_), ("cancel", &el_)],
+        },
+        Func {
+            name: "contChatModalMediaViewer",
+            args: vec![],
+            returns: vec![
+                ("root", &el_),
+                ("stage", &el_),
+                ("download", &el_),
+                ("close", &el_),
+                ("prev", &el_),
+                ("next", &el_),
+                ("counter", &el_),
+            ],
+        },
+        Func {
+            name: "leafChatModalMediaViewerImage",
+            args: vec![("src", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatModalMediaViewerVideo",
+            args: vec![("src", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "contChatEditorModalCamera",
+            args: vec![],
+            returns: vec![
+                ("root", &el_),
+                ("video", &el_),
+                ("status", &el_),
+                ("close", &el_),
+                ("flip", &el_),
+                ("modePhoto", &el_),
+                ("modeVideo", &el_),
+                ("shutter", &el_),
+            ],
+        },
+        Func {
+            name: "contChatEditorModalCameraPreview",
+            args: vec![("media", &el_), ("options", &optel_)],
+            returns: vec![("root", &el_), ("retake", &el_), ("accept", &el_)],
+        },
+        Func {
+            name: "leafChatEditorModalCameraPreviewImage",
+            args: vec![("src", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorModalCameraPreviewVideo",
+            args: vec![("src", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatEditorModalCameraPreviewSelect",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
         },
         Func {
             name: "contPageMessageHistory",

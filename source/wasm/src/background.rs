@@ -3,14 +3,18 @@ use {
         api::{
             req_get,
             req_post_json,
+            req_upload_file,
         },
         opfs::{
             opfs_delete,
             opfs_list_dir,
+            opfs_read_file,
             opfs_read_json,
         },
         outbox::{
             OPFS_FILENAME_MAIN,
+            OutboxBlock,
+            OutboxFile,
             OutboxMessage,
             OutboxMessageRel,
             OutboxMessageReplyTo,
@@ -35,9 +39,12 @@ use {
     shared::interface::{
         shared::{
             ChannelId,
+            MessageBlock,
+            MessageBlockFile,
             MessageClientId,
             MessageRel,
             QualifiedChannelId,
+            QualifiedFileId,
         },
         wire::{
             c2s::{
@@ -151,6 +158,35 @@ pub fn trigger_push() {
                                                 &message_dir,
                                                 OPFS_FILENAME_MAIN,
                                             ).await?;
+                                        let mut blocks = vec![];
+                                        for block in &message.blocks {
+                                            match block {
+                                                OutboxBlock::Text(t) => blocks.push(MessageBlock::Text(t.clone())),
+                                                OutboxBlock::Extension(e) => blocks.push(
+                                                    MessageBlock::Extension(e.clone()),
+                                                ),
+                                                OutboxBlock::File(f) => {
+                                                    let file = match &f.file {
+                                                        OutboxFile::Remote(file) => file.clone(),
+                                                        OutboxFile::Local(seg) => {
+                                                            let file = opfs_read_file(&message_dir, seg).await?;
+                                                            QualifiedFileId {
+                                                                identity: channel.identity.clone(),
+                                                                hash: req_upload_file(&file, &f.mime_type)
+                                                                    .await?
+                                                                    .hash,
+                                                            }
+                                                        },
+                                                    };
+                                                    blocks.push(MessageBlock::File(MessageBlockFile {
+                                                        file: file,
+                                                        mime_type: f.mime_type.clone(),
+                                                        size: f.size,
+                                                        name: f.name.clone(),
+                                                    }));
+                                                },
+                                            }
+                                        }
                                         let client_id = MessageClientId::from_timestamp(timestamp);
                                         let rel = match &message.rel {
                                             OutboxMessageRel::None => MessageRel::None,
@@ -184,7 +220,7 @@ pub fn trigger_push() {
                                             channel: channel.clone(),
                                             identity: ident.clone(),
                                             rel: rel,
-                                            body: message.body,
+                                            blocks: blocks,
                                         })
                                             .await
                                             .map_err(

@@ -627,6 +627,7 @@ impl<E: 'static + Entry> Infinite<E> {
             s.set_property("position", "sticky").unwrap();
             s.set_property("top", "0px").unwrap();
             s.set_property("bottom", "0px").unwrap();
+            s.set_property("z-index", "1").unwrap();
             s.set_property("display", "flex").unwrap();
             s.set_property("flex-direction", "column").unwrap();
             return e;
