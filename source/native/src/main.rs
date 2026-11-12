@@ -2430,15 +2430,6 @@ fn main() {
                                                                                                 )?;
                                                                                             let account_id =
                                                                                                 invite_row.account_id;
-                                                                                            good_ormning
-                                                                                            ::sqlite
-                                                                                            ::good_query!(
-                                                                                                db,
-                                                                                                r#"insert into contact (account_id, id, name, description) values (${account_id_t = &account_id}, ${identity_id_t = &db_caller}, ${string = ""}, ${string = ""}) on conflict do nothing"#;
-                                                                                                db_tx
-                                                                                            ).map_err(
-                                                                                                |e| loga::err(e.0)
-                                                                                            )?;
                                                                                             let dm_idem =
                                                                                                 format!(
                                                                                                     "dm:{}:{}",
@@ -3637,6 +3628,92 @@ fn main() {
                                                                 ret
                                                             });
                                                         },
+                                                        GET_PREFIX_MEMBER_INFO => {
+                                                            let req =
+                                                                match <GetMemberInfo as c2s
+                                                                ::PathReqTrait>::deserialize_path(
+                                                                    rest
+                                                                ) {
+                                                                    Ok(r) => r,
+                                                                    Err(e) => return s2s_error_response(
+                                                                        state,
+                                                                        S2sError::BadRequest(e)
+                                                                    ),
+                                                                };
+                                                            return s2s_respond_get::<GetMemberInfo>(state, {
+                                                                use {
+                                                                    crate::{
+                                                                        interface::{
+                                                                            db::{
+                                                                                DbChannelId,
+                                                                                DbIdentity,
+                                                                            },
+                                                                            s2s::GetMemberInfo,
+                                                                        },
+                                                                        subsystems::s2s_error::{
+                                                                            not_found,
+                                                                            s2s_tx,
+                                                                            Cached,
+                                                                            S2sError,
+                                                                        },
+                                                                        State,
+                                                                    },
+                                                                    shared::interface::wire::c2s::MemberInfoRes,
+                                                                    std::sync::Arc,
+                                                                };
+                                                                use crate::subsystems::messages::*;
+
+                                                                let ret:
+                                                                    Result<Cached<Option<MemberInfoRes>>, S2sError> =
+                                                                    async {
+                                                                        let (state, token, req,):
+                                                                            (&Arc<State>, &str, GetMemberInfo,) =
+                                                                            (state, &auth_token, req,);
+                                                                        let caller =
+                                                                            resolve_caller(state, token).await?;
+                                                                        let db_owner =
+                                                                            DbIdentity(req.channel.identity);
+                                                                        let db_channel_id =
+                                                                            DbChannelId(req.channel.channel);
+                                                                        let db_member = DbIdentity(req.member);
+                                                                        return s2s_tx(
+                                                                            &state.db,
+                                                                            "reading member info",
+                                                                            move |db_tx| {
+                                                                                let (account, local) =
+                                                                                    not_found(
+                                                                                        owner_channel_get(
+                                                                                            db_tx,
+                                                                                            db_owner,
+                                                                                            &db_channel_id
+                                                                                        )?,
+                                                                                        "Channel not found on this server"
+                                                                                    )?;
+                                                                                check_read_access(
+                                                                                    db_tx,
+                                                                                    account,
+                                                                                    db_owner,
+                                                                                    &db_channel_id,
+                                                                                    &local,
+                                                                                    caller
+                                                                                )?;
+                                                                                return Ok(
+                                                                                    Cached::no_store(
+                                                                                        member_info(
+                                                                                            db_tx,
+                                                                                            account,
+                                                                                            db_owner,
+                                                                                            &db_channel_id,
+                                                                                            db_member
+                                                                                        )?,
+                                                                                    ),
+                                                                                );
+                                                                            }
+                                                                        ).await;
+                                                                    }.await;
+                                                                ret
+                                                            });
+                                                        },
                                                         GET_PREFIX_FILE => {
                                                             let req =
                                                                 match <GetFile as c2s::PathReqTrait>::deserialize_path(
@@ -3810,6 +3887,58 @@ fn main() {
                                                                                                     caller
                                                                                                 ).is_ok() {
                                                                                                 return Ok(account);
+                                                                                            }
+                                                                                        }
+                                                                                        if let Some((account, local)) =
+                                                                                            owner_channel_get(
+                                                                                                db_tx,
+                                                                                                db_owner,
+                                                                                                &db_channel_id
+                                                                                            )? {
+                                                                                            if caller ==
+                                                                                                Some(db_owner.0) ||
+                                                                                                check_read_access(
+                                                                                                    db_tx,
+                                                                                                    account,
+                                                                                                    db_owner,
+                                                                                                    &db_channel_id,
+                                                                                                    &local,
+                                                                                                    caller
+                                                                                                ).is_ok() {
+                                                                                                let owner_portrait =
+                                                                                                    good_ormning
+                                                                                                    ::sqlite
+                                                                                                    ::good_query_opt!(
+                                                                                                        db,
+                                                                                                        r#"select 1 as x from identity where account_id = ${account_id_t = &account} and id = ${identity_id_t = &db_owner} and portrait = ${string = hash.0.as_str()} and soft_deleted_at is null"#;
+                                                                                                        db_tx
+                                                                                                    ).map_err(
+                                                                                                        |e| loga::err(
+                                                                                                            e.0
+                                                                                                        )
+                                                                                                    )?;
+                                                                                                if owner_portrait.is_some() {
+                                                                                                    return Ok(
+                                                                                                        account
+                                                                                                    );
+                                                                                                }
+                                                                                                let member_portrait =
+                                                                                                    good_ormning
+                                                                                                    ::sqlite
+                                                                                                    ::good_query_opt!(
+                                                                                                        db,
+                                                                                                        r#"select 1 as x from contact where account_id = ${account_id_t = &account} and portrait = ${string = hash.0.as_str()} and exists (select 1 from channel_member where channel_member.account_id = contact.account_id and channel_member.identity = ${identity_id_t = &db_owner} and channel_member.channel = ${channel_id_t = &db_channel_id} and channel_member.member = contact.id)"#;
+                                                                                                        db_tx
+                                                                                                    ).map_err(
+                                                                                                        |e| loga::err(
+                                                                                                            e.0
+                                                                                                        )
+                                                                                                    )?;
+                                                                                                if member_portrait.is_some() {
+                                                                                                    return Ok(
+                                                                                                        account
+                                                                                                    );
+                                                                                                }
                                                                                             }
                                                                                         }
                                                                                         if caller.is_some() {
@@ -7999,7 +8128,7 @@ fn main() {
                                                                                         ::sqlite
                                                                                         ::good_query_many!(
                                                                                             db,
-                                                                                            r#"select id, name, description, portrait from contact where account_id = ${account_id_t = &account_id} order by id"#;
+                                                                                            r#"select id, name, description, shown_name, shown_description, portrait from contact where account_id = ${account_id_t = &account_id} order by id"#;
                                                                                             db_tx
                                                                                         ).map_err(|e| loga::err(e.0))?;
                                                                                     let mut out = vec![];
@@ -8008,6 +8137,8 @@ fn main() {
                                                                                             id: r.id.0,
                                                                                             name: r.name,
                                                                                             description: r.description,
+                                                                                            shown_name: r.shown_name,
+                                                                                            shown_description: r.shown_description,
                                                                                             portrait: file_ref(
                                                                                                 db_tx,
                                                                                                 account_id,
@@ -8080,6 +8211,20 @@ fn main() {
                                                                                     db_tx
                                                                                 ).map_err(|e| loga::err(e.0))?;
                                                                             }
+                                                                            if let Some(v) = &req.shown_name {
+                                                                                good_ormning::sqlite::good_query!(
+                                                                                    db,
+                                                                                    r#"update contact set shown_name = ${opt string = v.value.as_deref()} where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_id}"#;
+                                                                                    db_tx
+                                                                                ).map_err(|e| loga::err(e.0))?;
+                                                                            }
+                                                                            if let Some(v) = &req.shown_description {
+                                                                                good_ormning::sqlite::good_query!(
+                                                                                    db,
+                                                                                    r#"update contact set shown_description = ${opt string = v.value.as_deref()} where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_id}"#;
+                                                                                    db_tx
+                                                                                ).map_err(|e| loga::err(e.0))?;
+                                                                            }
                                                                             if !matches!(
                                                                                 portrait,
                                                                                 PortraitChange::Keep
@@ -8104,7 +8249,7 @@ fn main() {
                                                                             let row =
                                                                                 good_ormning::sqlite::good_query_opt!(
                                                                                     db,
-                                                                                    r#"select id, name, description, portrait from contact where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_id}"#;
+                                                                                    r#"select id, name, description, shown_name, shown_description, portrait from contact where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_id}"#;
                                                                                     db_tx
                                                                                 )
                                                                                     .map_err(|e| loga::err(e.0))?
@@ -8115,6 +8260,8 @@ fn main() {
                                                                                 id: row.id.0,
                                                                                 name: row.name,
                                                                                 description: row.description,
+                                                                                shown_name: row.shown_name,
+                                                                                shown_description: row.shown_description,
                                                                                 portrait: file_ref(
                                                                                     db_tx,
                                                                                     account_id,
@@ -8123,6 +8270,44 @@ fn main() {
                                                                             });
                                                                         }).await.context("Error modifying contact")?;
                                                                         return Ok(row);
+                                                                    }.await;
+                                                                    ret
+                                                                });
+                                                            },
+                                                            c2s::proto::ServerReq::ContactDelete(_, r) => {
+                                                                return api_resp(state, {
+                                                                    use {
+                                                                        crate::{
+                                                                            db,
+                                                                            dbutil::tx,
+                                                                            interface::db::{
+                                                                                DbAccountId,
+                                                                                DbIdentity,
+                                                                            },
+                                                                            State,
+                                                                        },
+                                                                        loga::ResultContext,
+                                                                        shared::interface::{
+                                                                            shared::AccountId,
+                                                                            wire::c2s::ContactDelete,
+                                                                        },
+                                                                    };
+
+                                                                    let ret: Result<(), loga::Error> = async {
+                                                                        let (state, account, req,):
+                                                                            (&State, AccountId, ContactDelete,) =
+                                                                            (state, account, r,);
+                                                                        let account_id = DbAccountId(account);
+                                                                        let db_id = DbIdentity(req.id);
+                                                                        tx(&state.db, move |db_tx| {
+                                                                            good_ormning::sqlite::good_query!(
+                                                                                db,
+                                                                                r#"delete from contact where account_id = ${account_id_t = &account_id} and id = ${identity_id_t = &db_id}"#;
+                                                                                db_tx
+                                                                            ).map_err(|e| loga::err(e.0))?;
+                                                                            return Ok(());
+                                                                        }).await.context("Error deleting contact")?;
+                                                                        return Ok(());
                                                                     }.await;
                                                                     ret
                                                                 });
@@ -8450,6 +8635,9 @@ fn main() {
                                                             "outbox",
                                                             "message_history",
                                                             "message_id_by_client_id",
+                                                            "channel_member_info",
+                                                            "contact_channels",
+                                                            "contact_posts",
                                                         ];
                                                     value
                                                 }.contains(&p) => {
@@ -8475,7 +8663,9 @@ fn main() {
                                                                 subsystems::messages::{
                                                                     earliest_snap_offset,
                                                                     i64_to_u64,
+                                                                    channel_signer,
                                                                     local_channel_get,
+                                                                    member_info,
                                                                     message_history_rows,
                                                                     member_fetch_snap_lookup,
                                                                     parse_blocks,
@@ -8542,6 +8732,14 @@ fn main() {
                                                                     GetJoinPreviewFile,
                                                                     GetResp,
                                                                     GetSnapPage,
+                                                                    ContactChannel,
+                                                                    ContactPost,
+                                                                    ContactPostsRes,
+                                                                    GetChannelMemberInfo,
+                                                                    GetContactChannels,
+                                                                    GetContactPosts,
+                                                                    MemberInfoRes,
+                                                                    CONTACT_POSTS_PAGE_SIZE,
                                                                     MessageHistory,
                                                                     MessageIdByClientId,
                                                                     MessageRevision,
@@ -10475,6 +10673,346 @@ fn main() {
                                                                             }.await;
                                                                         ret
                                                                     }.map_err(GetErr::Local)),),);
+                                                                },
+                                                                "channel_member_info" => {
+                                                                    let req =
+                                                                        match GetChannelMemberInfo::deserialize_path(
+                                                                            remainder
+                                                                        ) {
+                                                                            Ok(r) => r,
+                                                                            Err(e) => return Ok(response_400(e)),
+                                                                        };
+                                                                    return Ok(
+                                                                        json_or_err(
+                                                                            state,
+                                                                            "channel_member_info",
+                                                                            no_store({
+                                                                                let ret:
+                                                                                    Result<
+                                                                                        Option<MemberInfoRes>,
+                                                                                        GetErr
+                                                                                    > =
+                                                                                    async {
+                                                                                        let ctx =
+                                                                                            ChannelCtx::new(
+                                                                                                account,
+                                                                                                req.channel.clone()
+                                                                                            );
+                                                                                        let member = req.member;
+                                                                                        let Some((local, info)) =
+                                                                                            tx(&state.db, {
+                                                                                                let account =
+                                                                                                    ctx.account;
+                                                                                                let db_owner =
+                                                                                                    ctx.db_owner;
+                                                                                                let db_channel_id =
+                                                                                                    ctx
+                                                                                                        .db_channel_id
+                                                                                                        .clone();
+                                                                                                move |db_tx| {
+                                                                                                    let Some(local) =
+                                                                                                        local_channel_get(
+                                                                                                            db_tx,
+                                                                                                            account,
+                                                                                                            db_owner,
+                                                                                                            &db_channel_id
+                                                                                                        )? else {
+                                                                                                            return Ok(
+                                                                                                                None
+                                                                                                            );
+                                                                                                        };
+                                                                                                    if !local.is_owner(
+                                                                                                        db_owner.0
+                                                                                                    ) {
+                                                                                                        return Ok(
+                                                                                                            Some(
+                                                                                                                (
+                                                                                                                    local,
+                                                                                                                    None
+                                                                                                                )
+                                                                                                            )
+                                                                                                        );
+                                                                                                    }
+                                                                                                    let info =
+                                                                                                        member_info(
+                                                                                                            db_tx,
+                                                                                                            account,
+                                                                                                            db_owner,
+                                                                                                            &db_channel_id,
+                                                                                                            DbIdentity(
+                                                                                                                member
+                                                                                                            )
+                                                                                                        )?;
+                                                                                                    return Ok(
+                                                                                                        Some(
+                                                                                                            (
+                                                                                                                local,
+                                                                                                                Some(
+                                                                                                                    info
+                                                                                                                )
+                                                                                                            )
+                                                                                                        )
+                                                                                                    );
+                                                                                                }
+                                                                                            })
+                                                                                                .await
+                                                                                                .context(
+                                                                                                    "Error reading member info"
+                                                                                                )? else {
+                                                                                                return Ok(None);
+                                                                                            };
+                                                                                        if let Some(info) = info {
+                                                                                            return Ok(info);
+                                                                                        }
+                                                                                        let signer =
+                                                                                            channel_signer(
+                                                                                                state,
+                                                                                                account,
+                                                                                                &local
+                                                                                            ).await?;
+                                                                                        return remote(
+                                                                                            {
+                                                                                                use {
+                                                                                                    crate::interface::s2s::GetMemberInfo,
+                                                                                                    spaghettinuum::interface::identity::Identity,
+                                                                                                };
+                                                                                                use crate::subsystems::s2s_client::*;
+
+                                                                                                let ret:
+                                                                                                    Result<
+                                                                                                        Option<
+                                                                                                            MemberInfoRes
+                                                                                                        >,
+                                                                                                        loga::Error,
+                                                                                                    > =
+                                                                                                    async {
+                                                                                                        let (
+                                                                                                            s2s_client,
+                                                                                                            target,
+                                                                                                            signer,
+                                                                                                            req,
+                                                                                                        ):
+                                                                                                            (
+                                                                                                                &S2sClient,
+                                                                                                                Identity,
+                                                                                                                Option<
+                                                                                                                    &Signer
+                                                                                                                >,
+                                                                                                                GetMemberInfo,
+                                                                                                            ) =
+                                                                                                            (
+                                                                                                                &(state.s2s_client),
+                                                                                                                ctx
+                                                                                                                    .channel
+                                                                                                                    .identity,
+                                                                                                                signer.as_ref(),
+                                                                                                                GetMemberInfo {
+                                                                                                                    channel: ctx
+                                                                                                                        .channel
+                                                                                                                        .clone(),
+                                                                                                                    member: member,
+                                                                                                                },
+                                                                                                            );
+                                                                                                        return s2s_client
+                                                                                                            .get_opt_authed(
+                                                                                                                target,
+                                                                                                                signer,
+                                                                                                                &req,
+                                                                                                            )
+                                                                                                            .await;
+                                                                                                    }.await;
+                                                                                                ret
+                                                                                            }.context(
+                                                                                                "Error fetching member info from channel owner"
+                                                                                            )
+                                                                                        );
+                                                                                    }.await;
+                                                                                ret
+                                                                            })
+                                                                        ),
+                                                                    );
+                                                                },
+                                                                "contact_channels" => {
+                                                                    let req =
+                                                                        match GetContactChannels::deserialize_path(
+                                                                            remainder
+                                                                        ) {
+                                                                            Ok(r) => r,
+                                                                            Err(e) => return Ok(response_400(e)),
+                                                                        };
+                                                                    return Ok(
+                                                                        json_or_err(
+                                                                            state,
+                                                                            "contact_channels",
+                                                                            no_store({
+                                                                                let ret:
+                                                                                    Result<
+                                                                                        Vec<ContactChannel>,
+                                                                                        GetErr
+                                                                                    > =
+                                                                                    async {
+                                                                                        let account_id =
+                                                                                            DbAccountId(account);
+                                                                                        let db_identity =
+                                                                                            DbIdentity(req.identity);
+                                                                                        return Ok(
+                                                                                            tx(&state.db, move |db_tx| {
+                                                                                                let rows =
+                                                                                                    good_ormning
+                                                                                                    ::sqlite
+                                                                                                    ::good_query_many!(
+                                                                                                        db,
+                                                                                                        r#"select identity, id, local_identity from channel where account_id = ${account_id_t = &account_id} and deleted is null and (identity = ${identity_id_t = &db_identity} or exists (select 1 from channel_member where channel_member.account_id = channel.account_id and channel_member.identity = channel.identity and channel_member.channel = channel.id and channel_member.member = ${identity_id_t = &db_identity}) or exists (select 1 from message where message.account_id = channel.account_id and message.identity = channel.identity and message.channel = channel.id and message.sender = ${identity_id_t = &db_identity})) order by identity, id"#;
+                                                                                                        db_tx
+                                                                                                    ).map_err(
+                                                                                                        |e| loga::err(
+                                                                                                            e.0
+                                                                                                        )
+                                                                                                    )?;
+                                                                                                let mut out = vec![];
+                                                                                                for r in rows {
+                                                                                                    out.push(
+                                                                                                        ContactChannel {
+                                                                                                            channel: QualifiedChannelId {
+                                                                                                                identity: r
+                                                                                                                    .identity
+                                                                                                                    .0,
+                                                                                                                channel: r
+                                                                                                                    .id
+                                                                                                                    .0,
+                                                                                                            },
+                                                                                                            own_identity: r
+                                                                                                                .local_identity
+                                                                                                                .0,
+                                                                                                        },
+                                                                                                    );
+                                                                                                }
+                                                                                                return Ok(out);
+                                                                                            })
+                                                                                                .await
+                                                                                                .context(
+                                                                                                    "Error listing contact channels"
+                                                                                                )?,
+                                                                                        );
+                                                                                    }.await;
+                                                                                ret
+                                                                            })
+                                                                        ),
+                                                                    );
+                                                                },
+                                                                "contact_posts" => {
+                                                                    let req =
+                                                                        match GetContactPosts::deserialize_path(
+                                                                            remainder
+                                                                        ) {
+                                                                            Ok(r) => r,
+                                                                            Err(e) => return Ok(response_400(e)),
+                                                                        };
+                                                                    return Ok(
+                                                                        json_or_err(state, "contact_posts", no_store({
+                                                                            use crate::subsystems::calendar::stored_body;
+
+                                                                            let ret: Result<ContactPostsRes, GetErr> =
+                                                                                async {
+                                                                                    let account_id =
+                                                                                        DbAccountId(account);
+                                                                                    let db_identity =
+                                                                                        DbIdentity(req.identity);
+                                                                                    let limit =
+                                                                                        CONTACT_POSTS_PAGE_SIZE as
+                                                                                            i64 +
+                                                                                            1;
+                                                                                    let offset =
+                                                                                        u64_to_i64(
+                                                                                            (req.page *
+                                                                                                CONTACT_POSTS_PAGE_SIZE) as
+                                                                                                u64,
+                                                                                        );
+                                                                                    return Ok(
+                                                                                        tx(&state.db, move |db_tx| {
+                                                                                            let rows =
+                                                                                                good_ormning
+                                                                                                ::sqlite
+                                                                                                ::good_query_many!(
+                                                                                                    db,
+                                                                                                    r#"select message.identity as owner, message.channel as channel, channel.local_identity as local_identity, message.sender_unique as sender_unique, message.receive_time as receive_time, message.raw as raw from message join channel on channel.account_id = message.account_id and channel.identity = message.identity and channel.id = message.channel where message.account_id = ${account_id_t = &account_id} and message.sender = ${identity_id_t = &db_identity} and message.snap_offset is not null and (message.rel_type is null or message.rel_type = ${string = REL_REPLY_TO}) and channel.deleted is null order by message.receive_time desc, message.identity, message.channel, message.sender_unique desc limit ${i64 = limit} offset ${i64 = offset}"#;
+                                                                                                    db_tx
+                                                                                                ).map_err(
+                                                                                                    |e| loga::err(e.0)
+                                                                                                )?;
+                                                                                            let last =
+                                                                                                rows.len() <=
+                                                                                                    CONTACT_POSTS_PAGE_SIZE;
+                                                                                            let mut posts = vec![];
+                                                                                            for r in rows
+                                                                                                .into_iter()
+                                                                                                .take(
+                                                                                                    CONTACT_POSTS_PAGE_SIZE,
+                                                                                                ) {
+                                                                                                let edit =
+                                                                                                    good_ormning
+                                                                                                    ::sqlite
+                                                                                                    ::good_query_opt!(
+                                                                                                        db,
+                                                                                                        r#"select raw from message where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &r.owner} and channel = ${channel_id_t = &r.channel} and rel_type = ${string = REL_EDIT_OF} and rel_target_sender = ${identity_id_t = &db_identity} and rel_target_unique = ${i64 = r.sender_unique} order by seq desc limit ${i64 = 1}"#;
+                                                                                                        db_tx
+                                                                                                    ).map_err(
+                                                                                                        |e| loga::err(
+                                                                                                            e.0
+                                                                                                        )
+                                                                                                    )?;
+                                                                                                let original =
+                                                                                                    stored_body(
+                                                                                                        &r.raw
+                                                                                                    )?;
+                                                                                                let blocks =
+                                                                                                    match edit {
+                                                                                                        Some(
+                                                                                                            e
+                                                                                                        ) => stored_body(
+                                                                                                            &e,
+                                                                                                        )?.blocks,
+                                                                                                        None => original
+                                                                                                            .blocks
+                                                                                                            .clone(),
+                                                                                                    };
+                                                                                                posts.push(
+                                                                                                    ContactPost {
+                                                                                                        own_identity: r
+                                                                                                            .local_identity
+                                                                                                            .0,
+                                                                                                        original_id: QualifiedMessageId {
+                                                                                                            channel: original
+                                                                                                                .channel
+                                                                                                                .clone(),
+                                                                                                            message: original
+                                                                                                                .id
+                                                                                                                .clone(),
+                                                                                                        },
+                                                                                                        original_receive_time: r
+                                                                                                            .receive_time
+                                                                                                            .0,
+                                                                                                        message: MessageBody {
+                                                                                                            blocks: blocks,
+                                                                                                            ..original
+                                                                                                        },
+                                                                                                    }
+                                                                                                );
+                                                                                            }
+                                                                                            return Ok(ContactPostsRes {
+                                                                                                posts: posts,
+                                                                                                last: last,
+                                                                                            });
+                                                                                        })
+                                                                                            .await
+                                                                                            .context(
+                                                                                                "Error listing contact posts"
+                                                                                            )?,
+                                                                                    );
+                                                                                }.await;
+                                                                            ret
+                                                                        })),
+                                                                    );
                                                                 },
                                                                 "message_history" => {
                                                                     let req =

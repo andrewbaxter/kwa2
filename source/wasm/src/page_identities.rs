@@ -10,10 +10,13 @@ use {
         },
         localdata::{
             get_stored_api_channels,
+            get_stored_api_contacts,
             get_stored_api_identities,
             req_api_channels,
+            req_api_contacts,
             req_api_identities,
             LocalChannel,
+            LocalContact,
             LocalIdentity,
         },
         state::{
@@ -21,6 +24,7 @@ use {
             state,
             Ministate,
             MinistateChannel,
+            MinistateContact,
         },
     },
     flowcontrol::ta_return,
@@ -73,8 +77,52 @@ fn combine_local_values(
     return out;
 }
 
+fn build_contacts(mut contacts: Vec<LocalContact>) -> Vec<El> {
+    contacts.sort_by_cached_key(|x| (std::cmp::Reverse(x.last_used), x.res.name.clone()));
+    let mut out = vec![];
+    for contact in contacts {
+        let img = identity_image(&contact.res.id, &contact.res.portrait);
+        out.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
+            image: img.image,
+            generated_image: img.generated_image,
+            text: if contact.res.name.is_empty() {
+                contact.res.id.to_string()
+            } else {
+                contact.res.name.clone()
+            },
+            link: ministate_octothorpe(&Ministate::Contact(MinistateContact {
+                identity: contact.res.id.clone(),
+                channel: None,
+                back: Box::new(Ministate::Identities),
+            })),
+        }).root);
+    }
+    return out;
+}
+
 pub fn build(_pc: &mut ProcessingContext) -> El {
     let identity_elements = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
+    let contact_elements =
+        style_export::cont_group(
+            style_export::ContGroupArgs { children: build_contacts(get_stored_api_contacts(None)) },
+        ).root;
+    contact_elements.ref_own(|contact_elements| spawn_rooted({
+        let contact_elements = contact_elements.weak();
+        async move {
+            match req_api_contacts(None).await {
+                Ok(contacts) => {
+                    let Some(contact_elements) = contact_elements.upgrade() else {
+                        return;
+                    };
+                    contact_elements.ref_clear();
+                    contact_elements.ref_extend(build_contacts(contacts));
+                },
+                Err(e) => {
+                    state().log.log(&format!("Refreshing contacts failed: {}", e));
+                },
+            }
+        }
+    }));
     let old_identities = combine_local_values(get_stored_api_identities(None), get_stored_api_channels(None));
     let lookup_el_identities = Rc::new(RefCell::new(HashMap::new()));
     let lookup_el_identity_children = Rc::new(RefCell::new(HashMap::new()));
@@ -229,7 +277,12 @@ pub fn build(_pc: &mut ProcessingContext) -> El {
                 ).root,
             ),
         }).root,
-        children: vec![identity_elements],
+        children: vec![
+            style_export::leaf_list_heading(style_export::LeafListHeadingArgs { text: format!("Self") }).root,
+            identity_elements,
+            style_export::leaf_list_heading(style_export::LeafListHeadingArgs { text: format!("Others") }).root,
+            contact_elements,
+        ],
     });
 
     // Assemble and return

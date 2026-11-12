@@ -46,6 +46,7 @@ use {
             c2s::{
                 ActivityOffset,
                 ChannelRetention,
+                MemberInfoRes,
             },
             s2c::{
                 Notification,
@@ -1563,6 +1564,51 @@ pub fn owner_identity_meta(
         shown_description: row.shown_description,
         portrait: row.portrait,
     });
+}
+
+pub fn member_info(
+    db_tx: &mut db::Db<Transaction<'_>>,
+    account: DbAccountId,
+    owner: DbIdentity,
+    channel: &DbChannelId,
+    member: DbIdentity,
+) -> Result<Option<MemberInfoRes>, loga::Error> {
+    if member.0 == owner.0 {
+        let Some(row) = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select name, description, shown_name, shown_description, portrait from identity where account_id = ${account_id_t = &account} and id = ${identity_id_t = &owner} and soft_deleted_at is null"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))? else {
+            return Ok(None);
+        };
+        return Ok(Some(MemberInfoRes {
+            name: Some(row.shown_name.unwrap_or(row.name)),
+            description: Some(row.shown_description.unwrap_or(row.description)),
+            portrait: crate::subsystems::files::file_ref(db_tx, account, row.portrait)?,
+        }));
+    }
+    if good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select 1 as x from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and member = ${identity_id_t = &member}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))?.is_none() {
+        return Ok(None);
+    }
+    let Some(row) = good_ormning::sqlite::good_query_opt!(
+        db,
+        r#"select shown_name, shown_description, portrait from contact where account_id = ${account_id_t = &account} and id = ${identity_id_t = &member}"#;
+        db_tx
+    ).map_err(|e| loga::err(e.0))? else {
+        return Ok(None);
+    };
+    if row.shown_name.is_none() && row.shown_description.is_none() && row.portrait.is_none() {
+        return Ok(None);
+    }
+    return Ok(Some(MemberInfoRes {
+        name: row.shown_name,
+        description: row.shown_description,
+        portrait: crate::subsystems::files::file_ref(db_tx, account, row.portrait)?,
+    }));
 }
 
 pub struct BackfillCandidate {

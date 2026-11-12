@@ -5,7 +5,10 @@ use {
             bg_val,
         },
         chat::ChatState2,
-        chat_entry::ChatEntry,
+        chat_entry::{
+            ChatEntry,
+            ChatTime,
+        },
         infinite::Infinite,
         js::{
             Env,
@@ -54,7 +57,6 @@ use {
         page_identities,
         page_identity,
         page_identity_delete,
-        page_identity_edit,
         page_identity_new,
         page_identityinvite,
         page_identityinvite_delete,
@@ -62,6 +64,10 @@ use {
         page_identityinvite_new,
         page_identityinvites,
         page_message_history,
+        page_contact,
+        page_contact_channels,
+        page_contact_delete,
+        page_contact_posts,
         page_settings,
         page_top_add,
     },
@@ -74,6 +80,7 @@ use {
     gloo::{
         storage::{
             LocalStorage,
+            SessionStorage,
             Storage,
         },
         timers::callback::Interval,
@@ -222,6 +229,14 @@ pub struct MinistateMessageHistory {
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MinistateContact {
+    pub identity: Identity,
+    pub channel: Option<QualifiedChannelId>,
+    pub back: Box<Ministate>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Ministate {
     Top,
     Settings,
@@ -234,7 +249,6 @@ pub enum Ministate {
     Identities,
     IdentitiesNew,
     Identity(Identity),
-    IdentityEdit(Identity),
     IdentityDelete(Identity),
     IdentityInvites(Identity),
     IdentityInviteNew(Identity),
@@ -261,6 +275,10 @@ pub enum Ministate {
     ChannelGroupEdit(ChannelGroupId),
     ChannelGroupDelete(ChannelGroupId),
     MessageHistory(MinistateMessageHistory),
+    Contact(MinistateContact),
+    ContactDelete(MinistateContact),
+    ContactChannels(MinistateContact),
+    ContactPosts(MinistateContact),
 }
 
 pub fn ministate_octothorpe(s: &Ministate) -> String {
@@ -313,7 +331,8 @@ pub fn read_ministate(log: &Rc<dyn Log>) -> Ministate {
     return Ministate::Top;
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum CurrentChatSource {
     Channel(QualifiedChannelId),
     Group(ChannelGroupId),
@@ -420,9 +439,6 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
         },
         Ministate::Identity(id) => {
             body = page_identity::build(pc, id);
-        },
-        Ministate::IdentityEdit(id) => {
-            body = page_identity_edit::build(pc, id);
         },
         Ministate::IdentityDelete(id) => {
             body = page_identity_delete::build(pc, id);
@@ -532,6 +548,18 @@ pub fn build_ministate(pc: &mut ProcessingContext, s: &Ministate) {
         Ministate::MessageHistory(s) => {
             body = page_message_history::build(pc, s);
         },
+        Ministate::Contact(s) => {
+            body = page_contact::build(pc, s);
+        },
+        Ministate::ContactDelete(s) => {
+            body = page_contact_delete::build(pc, s);
+        },
+        Ministate::ContactChannels(s) => {
+            body = page_contact_channels::build(pc, s);
+        },
+        Ministate::ContactPosts(s) => {
+            body = page_contact_posts::build(pc, s);
+        },
     }
     set_page(body);
 }
@@ -600,6 +628,31 @@ pub struct SessionStorageChatResetChannelGroup {
 pub enum SessionStorageChatReset {
     Channel(QualifiedMessageId),
     ChannelGroup(SessionStorageChatResetChannelGroup),
+}
+
+pub const SESSIONSTORAGE_CHAT_ANCHOR: &str = "chat_anchor";
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct SessionStorageChatAnchor {
+    pub source: CurrentChatSource,
+    pub time: ChatTime,
+}
+
+pub fn restore_track_chat_anchor(inf: &Infinite<ChatEntry>, source: CurrentChatSource, restore: bool) {
+    if restore {
+        if let Ok(anchor) = SessionStorage::get::<SessionStorageChatAnchor>(SESSIONSTORAGE_CHAT_ANCHOR) {
+            if anchor.source == source {
+                inf.jump_to(&anchor.time);
+            }
+        }
+    }
+    inf.on_anchor(move |time| {
+        SessionStorage::set(SESSIONSTORAGE_CHAT_ANCHOR, SessionStorageChatAnchor {
+            source: source.clone(),
+            time: time.clone(),
+        }).log(&state().log, &"Error storing chat anchor");
+    });
 }
 
 #[derive(Serialize, Deserialize)]

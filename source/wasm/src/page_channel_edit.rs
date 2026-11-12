@@ -32,14 +32,15 @@ use {
     std::rc::Rc,
 };
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form)]
 struct MemberForm_ {
+    #[title("Portrait")]
+    portrait: FormPortrait,
     #[title("Name")]
     name: String,
     #[title("Description")]
     description: String,
-    #[title("Portrait")]
-    portrait: FormPortrait,
     #[title("Group")]
     group: FormOptChannelGroup,
     #[title("Keep history")]
@@ -50,18 +51,19 @@ struct MemberForm_ {
     reminder_lead_minutes: u64,
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form)]
 struct OwnerForm_ {
-    #[title("Name")]
-    name: String,
-    #[title("Description")]
-    description: String,
-    #[title("Shown name")]
-    shown_name: Option<String>,
-    #[title("Shown description")]
-    shown_description: Option<String>,
     #[title("Portrait")]
     portrait: FormPortrait,
+    #[title("Name")]
+    name: String,
+    #[title("Shown name")]
+    shown_name: Option<String>,
+    #[title("Description")]
+    description: String,
+    #[title("Shown description")]
+    shown_description: Option<String>,
     #[title("Group")]
     group: FormOptChannelGroup,
     #[title("Keep history")]

@@ -347,6 +347,7 @@ impl<C> FormWith<C> for FormWeekdays {
     }
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form, Clone)]
 struct FormRangeTimed {
     #[title("Start date")]
@@ -359,6 +360,7 @@ struct FormRangeTimed {
     end_time: FormTime,
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form, Clone)]
 struct FormRangeAllDay {
     #[title("Start")]
@@ -367,6 +369,7 @@ struct FormRangeAllDay {
     end: FormPickDate,
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form, Clone)]
 enum FormRange {
     #[title("At a time")]
@@ -375,6 +378,7 @@ enum FormRange {
     AllDay(FormRangeAllDay),
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form, Clone)]
 enum FormMonthly {
     #[title("Same day of the month")]
@@ -385,6 +389,7 @@ enum FormMonthly {
     LastWeekday,
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form, Clone)]
 enum FormRepeatEnd {
     #[title("Never")]
@@ -395,6 +400,7 @@ enum FormRepeatEnd {
     Count(u32),
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form, Clone)]
 struct FormRepeatSimple {
     #[title("Every")]
@@ -403,6 +409,7 @@ struct FormRepeatSimple {
     end: FormRepeatEnd,
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form, Clone)]
 struct FormRepeatWeeks {
     #[title("Every")]
@@ -413,6 +420,7 @@ struct FormRepeatWeeks {
     end: FormRepeatEnd,
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form, Clone)]
 struct FormRepeatMonths {
     #[title("Every")]
@@ -423,6 +431,7 @@ struct FormRepeatMonths {
     end: FormRepeatEnd,
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form, Clone)]
 enum FormRepeat {
     #[title("Doesn't repeat")]
@@ -437,6 +446,7 @@ enum FormRepeat {
     Years(FormRepeatSimple),
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form, Clone)]
 struct EventForm_ {
     #[title("When")]

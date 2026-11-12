@@ -441,6 +441,15 @@ pub fn get_or_req_api_contact(id: &Identity, touch: bool) -> NowOrLater<LocalCon
     return get_or_req_api_value(LOCALSTORAGE_CONTACTS, c2s::ContactList, |x| x.id.clone(), id.clone(), touch);
 }
 
+pub fn get_or_req_api_contact_opt(id: &Identity, touch: bool) -> NowOrLater<Option<LocalContact>> {
+    match get_or_req_api_contact(id, touch) {
+        NowOrLater::Now(v) => return NowOrLater::Now(Some(v)),
+        NowOrLater::Later(v) => return NowOrLater::Later(bg_val(async move {
+            return Ok(Some(v.get().await?));
+        })),
+    }
+}
+
 pub async fn ensure_contact(v: ContactRes) {
     ensure_api_value(LOCALSTORAGE_CONTACTS, |x| x.id, v).await;
 }

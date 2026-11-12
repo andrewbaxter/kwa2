@@ -56,6 +56,7 @@ use {
     rooting::{
         El,
         WeakEl,
+        el,
     },
     serde::{
         Deserialize,
@@ -92,7 +93,10 @@ use {
     },
     spaghettinuum::interface::identity::Identity,
     std::{
-        cell::RefCell,
+        cell::{
+            Cell,
+            RefCell,
+        },
         collections::{
             BTreeSet,
             HashMap,
@@ -102,7 +106,9 @@ use {
             Weak,
         },
     },
+    wasm_bindgen::JsCast,
     wasm_bindgen_futures::spawn_local,
+    web_sys::HtmlSelectElement,
 };
 
 pub const LOCALSTORAGE_WEEK_START: &str = "week_start";
@@ -201,6 +207,7 @@ pub struct Calendar_ {
     action: DayAction,
     months: RefCell<HashMap<CalendarMonth, Weak<CalMonth_>>>,
     activity: RefCell<HashMap<QualifiedChannelId, oneshot::Receiver<()>>>,
+    focused: Cell<Option<MonthIndex>>,
 }
 
 #[derive(Clone)]
@@ -321,6 +328,16 @@ impl Entry for MonthEntry {
                 m
             },
         };
+        m
+            .el
+            .ref_modify_classes(
+                &[
+                    (
+                        &style_export::class_calendar_month_dim().value,
+                        cal.focused.get().is_some_and(|f| f != self.index),
+                    ),
+                ],
+            );
         let out = rooting::el("div").push(m.el.clone());
         out.ref_own(|_| m);
         return out;
@@ -337,6 +354,7 @@ struct MonthFeed {
 }
 
 const MONTH_FEED_BATCH: i64 = 4;
+const YEAR_SELECT_RANGE: i16 = 10;
 
 impl Feed<MonthEntry> for MonthFeed {
     fn set_parent(&self, parent: WeakInfinite<MonthEntry>) {
@@ -594,7 +612,11 @@ fn render_month(pc: &mut ProcessingContext, cal: &Rc<Calendar_>, m: &CalMonth_) 
                         children.push(m_el.root);
                     }
                     if children.is_empty() {
-                        children.push(style_export::leaf_calendar_day_empty().root);
+                        children.push(
+                            style_export::leaf_calendar_day_empty(
+                                style_export::LeafCalendarDayEmptyArgs { text: format!("No events") },
+                            ).root,
+                        );
                     }
                     let head = style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
                         back_link: ministate_octothorpe(&state().ministate.borrow()),
@@ -828,6 +850,7 @@ pub fn build_calendar(
     channels: Vec<CalChannel>,
     action: DayAction,
     start: Date,
+    pre: Vec<El>,
 ) -> (Calendar, Infinite<MonthEntry>) {
     let tz = local_tz();
     let cal = Rc::new(Calendar_ {
@@ -840,6 +863,7 @@ pub fn build_calendar(
         action: action,
         months: RefCell::new(HashMap::new()),
         activity: RefCell::new(HashMap::new()),
+        focused: Cell::new(None),
     });
     state().calendars.borrow_mut().push(Rc::downgrade(&cal));
     let inf = Infinite::new(&pc.eg(), InfiniteEls {
@@ -852,6 +876,89 @@ pub fn build_calendar(
         cal: Rc::downgrade(&cal),
         parent: Rc::new(RefCell::new(None)),
     });
+    let year_select =
+        style_export::leaf_calendar_month_select_select(
+            style_export::LeafCalendarMonthSelectSelectArgs { children: vec![] },
+        ).root;
+    let month_select =
+        style_export::leaf_calendar_month_select_select(
+            style_export::LeafCalendarMonthSelectSelectArgs {
+                children: (1 ..= 12i8)
+                    .map(
+                        |m| el("option")
+                            .attr("value", &m.to_string())
+                            .text(&crate::js::intl_date(Date::new(2000, m, 1).unwrap(), &[("month", "long")])),
+                    )
+                    .collect(),
+            },
+        ).root;
+    let on_select_change = Rc::new({
+        let inf = inf.weak();
+        let year_select = year_select.weak();
+        let month_select = month_select.weak();
+        move || {
+            let Some(inf) = inf.upgrade() else {
+                return;
+            };
+            let Some(year_select) = year_select.upgrade() else {
+                return;
+            };
+            let Some(month_select) = month_select.upgrade() else {
+                return;
+            };
+            let year = year_select.raw().dyn_into::<HtmlSelectElement>().unwrap().value().parse::<i64>().unwrap();
+            let month = month_select.raw().dyn_into::<HtmlSelectElement>().unwrap().value().parse::<i64>().unwrap();
+            inf.jump_to(&MonthIndex(year * 12 + month - 1));
+        }
+    });
+    for select in [&year_select, &month_select] {
+        select.ref_on("change", {
+            let on_select_change = on_select_change.clone();
+            move |_| on_select_change()
+        });
+    }
+    let month_select_root = style_export::cont_calendar_month_select(style_export::ContCalendarMonthSelectArgs {
+        year: year_select.clone(),
+        month: month_select.clone(),
+    }).root;
+    inf.on_anchor({
+        let cal = Rc::downgrade(&cal);
+        let year_select = year_select.weak();
+        let month_select = month_select.weak();
+        let dim_class = style_export::class_calendar_month_dim().value;
+        let year_options_center = Cell::new(None);
+        move |focused: &MonthIndex| {
+            let Some(cal) = cal.upgrade() else {
+                return;
+            };
+            let Some(year_select) = year_select.upgrade() else {
+                return;
+            };
+            let Some(month_select) = month_select.upgrade() else {
+                return;
+            };
+            cal.focused.set(Some(*focused));
+            let focused_month = focused.month();
+            for m in cal.months.borrow().values() {
+                let Some(m) = m.upgrade() else {
+                    continue;
+                };
+                m.el.ref_modify_classes(&[(&dim_class, m.month != focused_month)]);
+            }
+            if year_options_center.get() != Some(focused_month.year) {
+                year_options_center.set(Some(focused_month.year));
+                year_select.ref_replace(
+                    (focused_month.year - YEAR_SELECT_RANGE ..= focused_month.year + YEAR_SELECT_RANGE)
+                        .map(|y| el("option").attr("value", &y.to_string()).text(&y.to_string()))
+                        .collect(),
+                );
+            }
+            year_select.raw().dyn_into::<HtmlSelectElement>().unwrap().set_value(&focused_month.year.to_string());
+            month_select.raw().dyn_into::<HtmlSelectElement>().unwrap().set_value(&focused_month.month.to_string());
+        }
+    });
+    inf.padding_pre_el().ref_extend(pre);
+    inf.overlay_middle_el().ref_push(month_select_root);
     inf.jump_to(&MonthIndex::of(start));
     return (Calendar(cal), inf);
 }
@@ -917,7 +1024,8 @@ pub fn open_date_picker(
         center: head_center,
         right: Some(select_calendar.clone()),
     });
-    let (cal, inf) = build_calendar(pc, DayLayer::Modal, vec![channel], DayAction::Select(select), initial);
+    let (cal, inf) =
+        build_calendar(pc, DayLayer::Modal, vec![channel], DayAction::Select(select), initial, vec![]);
     on_head_back(&head.back, {
         let handle = handle.clone();
         move || handle.close()

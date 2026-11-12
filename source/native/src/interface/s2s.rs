@@ -77,6 +77,7 @@ pub mod s2sv1t {
                 calendar_path_segments,
                 CalendarMonth,
                 CalendarToken,
+                MemberInfoRes,
                 confirm_path_const,
                 confirm_path_element,
                 confirm_path_empty,
@@ -222,6 +223,7 @@ pub mod s2sv1t {
     pub const GET_PREFIX_SNAP_PAGE_CONTAINING_TIME: &str = "snap_page_containing_time";
     pub const GET_PREFIX_SNAP_LOOKUP: &str = "snap_lookup";
     pub const GET_PREFIX_MESSAGE_HISTORY: &str = "message_history";
+    pub const GET_PREFIX_MEMBER_INFO: &str = "member_info";
     pub const GET_PREFIX_CALENDAR_PAGE: &str = "calendar_page";
     pub const GET_PREFIX_JOIN_PREVIEW: &str = "join_preview";
     pub const GET_PREFIX_FILE: &str = "file";
@@ -609,6 +611,35 @@ pub mod s2sv1t {
                 [GET_PREFIX_CALENDAR_PAGE.to_string()]
                     .into_iter()
                     .chain(calendar_path_segments(&self.channel, self.month, self.page, self.token)),
+            );
+        }
+    }
+
+    pub struct GetMemberInfo {
+        pub channel: QualifiedChannelId,
+        pub member: Identity,
+    }
+
+    impl PathReqTrait for GetMemberInfo {
+        type Resp = Option<MemberInfoRes>;
+
+        fn deserialize_path(path: &str) -> Result<Self, String> {
+            let mut parts = deserialize_path(path);
+            confirm_path_const(&mut parts, GET_PREFIX_MEMBER_INFO)?;
+            let out = GetMemberInfo {
+                channel: channel_from_path(&mut parts)?,
+                member: confirm_path_element(&mut parts, "member")?,
+            };
+            confirm_path_empty(&mut parts)?;
+            return Ok(out);
+        }
+
+        fn serialize_path(&self) -> String {
+            return serialize_path(
+                [GET_PREFIX_MEMBER_INFO.to_string()]
+                    .into_iter()
+                    .chain(channel_segments(&self.channel))
+                    .chain([self.member.to_string()]),
             );
         }
     }

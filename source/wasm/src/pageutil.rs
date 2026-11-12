@@ -531,6 +531,66 @@ pub fn build_nol_form<
     return form.root;
 }
 
+#[derive(Clone)]
+pub struct EditPage<SEND> {
+    pub center: El,
+    pub submit_text: String,
+    pub form_error: Option<El>,
+    pub form: Vec<El>,
+    pub menu: Vec<El>,
+    pub send: SEND,
+}
+
+pub fn build_nol_edit_page<
+    SEND: 'static + Clone + AsyncFn(f64) -> Result<(), String>,
+>(pc: &mut ProcessingContext, back_link: &Ministate, v: NowOrLater<EditPage<SEND>>) -> El {
+    let center = match &v {
+        NowOrLater::Now(p) => p.center.clone(),
+        NowOrLater::Later(_) => style_export::leaf_nonchat_head_bar_center_placeholder().root,
+    };
+    let head_bar = style_export::cont_nonchat_head_bar(style_export::ContNonchatHeadBarArgs {
+        back_link: ministate_octothorpe(&back_link),
+        center: center.clone(),
+        right: None,
+    });
+    head_bar
+        .back_unread
+        .ref_own(|el_| link!((_pc = pc), (unread = state().unread_any.clone()), (), (el_ = el_.weak()), {
+            let el_ = el_.upgrade()?;
+            el_.ref_modify_classes(&[(&style_export::class_state_hidden().value, !*unread.borrow())]);
+        }));
+    let form = style_export::cont_page_form(style_export::ContPageFormArgs {
+        head_bar: head_bar.root,
+        children: vec![],
+    });
+    let fill = {
+        let submit = form.submit.clone();
+        let errors = form.errors.clone();
+        let menu = form.menu.clone();
+        move |p: EditPage<SEND>| -> El {
+            submit.ref_text(&p.submit_text);
+            errors.ref_extend(p.form_error.into_iter().collect());
+            menu.ref_extend(p.menu);
+            return build_form_inner(&submit, errors, p.form, p.send);
+        }
+    };
+    match v {
+        NowOrLater::Now(p) => {
+            form.body.ref_push(fill(p));
+        },
+        NowOrLater::Later(v) => {
+            form.body.ref_push(el_async(async move {
+                let Some(p) = v.get().await.map_err(|e| e.to_string())? else {
+                    return Err(format!("Could not find object"));
+                };
+                center.ref_replace(vec![p.center.clone()]);
+                return Ok(vec![fill(p)]);
+            }));
+        },
+    }
+    return form.root;
+}
+
 pub struct LazyPage {
     pub center: El,
     pub body: Vec<El>,

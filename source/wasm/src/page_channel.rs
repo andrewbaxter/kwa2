@@ -37,6 +37,7 @@ use {
             MinistateChannelSub,
             SESSIONSTORAGE_CHAT_RESET,
             SessionStorageChatReset,
+            restore_track_chat_anchor,
             get_or_req_channel,
             ministate_octothorpe,
             record_replace_ministate,
@@ -188,6 +189,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
                 own_identity: m.own_identity.clone(),
             }));
         }
+        restore_track_chat_anchor(&inf, CurrentChatSource::Channel(m.id.clone()), reset_id.is_none());
 
         // Event handling
         own.push(

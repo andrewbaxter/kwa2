@@ -45,8 +45,14 @@ fn assemble(
 ) -> El {
     let stack = style_export::cont_calendar_stack().root;
     let (cal, inf) =
-        build_calendar(pc, DayLayer::Page(stack.clone()), channels, DayAction::GoTo, Zoned::now().date());
-    inf.padding_pre_el().ref_push(head_bar);
+        build_calendar(
+            pc,
+            DayLayer::Page(stack.clone()),
+            channels,
+            DayAction::GoTo,
+            Zoned::now().date(),
+            vec![head_bar],
+        );
     stack.ref_push(inf.el());
     stack.ref_own(|_| (cal, inf, own));
     return stack;

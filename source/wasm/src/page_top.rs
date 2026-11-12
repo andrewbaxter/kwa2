@@ -214,13 +214,16 @@ pub fn build(pc: &mut ProcessingContext) -> El {
         Ministate::Identities |
         Ministate::IdentitiesNew |
         Ministate::Identity(_) |
-        Ministate::IdentityEdit(_) |
         Ministate::IdentityDelete(_) |
         Ministate::IdentityInvites(_) |
         Ministate::IdentityInviteNew(_) |
         Ministate::IdentityInvite(_) |
         Ministate::IdentityInviteEdit(_) |
-        Ministate::IdentityInviteDelete(_) => true,
+        Ministate::IdentityInviteDelete(_) |
+        Ministate::Contact(_) |
+        Ministate::ContactDelete(_) |
+        Ministate::ContactChannels(_) |
+        Ministate::ContactPosts(_) => true,
         _ => false,
     });
     link_selected(pc, &out.settings_link, |s| match s {

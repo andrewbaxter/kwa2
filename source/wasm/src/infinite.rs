@@ -277,6 +277,7 @@ struct Infiniscroll_<E: Entry> {
     padding_pre: El,
     padding_post: El,
     outer_stack: El,
+    overlay_middle: El,
     scroll_outer: El,
     cached_frame_height: Cell<f64>,
     content: El,
@@ -313,6 +314,8 @@ struct Infiniscroll_<E: Entry> {
     // After human-volitional scrolling, more scrolling may soon come so push back
     // shake for this number of ms.
     delay_shake: Cell<u32>,
+    on_anchor: RefCell<Option<Rc<dyn Fn(&E::Time)>>>,
+    notified_anchor: RefCell<Option<E::Time>>,
 }
 
 fn calc_anchor_offset(real_origin_y: f64, anchor_top: f64, anchor_height: f64, anchor_alignment: f64) -> f64 {
@@ -670,15 +673,22 @@ impl<E: 'static + Entry> Infinite<E> {
             return e;
         }
 
-        outer_stack.ref_extend(vec![set_el_col(scroll_outer.clone(), "1"), set_el_col({
-            let overlay =
-                el("div").extend(vec![padding_pre.clone(), center_spinner.clone(), padding_post.clone()]);
+        let overlay_middle = el("div").push(set_el_col(center_spinner.clone(), "1"));
+        {
+            let s = el_style(&overlay_middle);
+            s.set_property("flex-grow", "1").unwrap();
+            s.set_property("min-height", "0").unwrap();
+            s.set_property("display", "grid").unwrap();
+            s.set_property("grid-template-columns", "minmax(0, 1fr)").unwrap();
+            s.set_property("grid-template-rows", "minmax(0, 1fr)").unwrap();
+        }
+        let overlay = el("div").extend(vec![padding_pre.clone(), overlay_middle.clone(), padding_post.clone()]);
+        {
             let s = el_style(&overlay);
             s.set_property("display", "flex").unwrap();
             s.set_property("flex-direction", "column").unwrap();
-            s.set_property("justify-content", "space-between").unwrap();
-            overlay
-        }, "1")]);
+        }
+        outer_stack.ref_extend(vec![set_el_col(scroll_outer.clone(), "1"), set_el_col(overlay, "1")]);
         scroll_outer.ref_push(scroll_inner.clone());
         scroll_inner.ref_push(content_layout.clone());
         content_layout.ref_extend(
@@ -692,6 +702,7 @@ impl<E: 'static + Entry> Infinite<E> {
             eg: eg.clone(),
             reset_time: Default::default(),
             outer_stack: outer_stack,
+            overlay_middle: overlay_middle,
             scroll_outer: scroll_outer.clone(),
             cached_frame_height: Cell::new(0.),
             padding_pre: padding_pre.clone(),
@@ -718,6 +729,8 @@ impl<E: 'static + Entry> Infinite<E> {
             entry_resize_observer: RefCell::new(None),
             mute_scroll: Cell::new(js_sys::Date::now() + 300.),
             delay_shake: Cell::new(0),
+            on_anchor: RefCell::new(None),
+            notified_anchor: RefCell::new(None),
         }));
         {
             *state.0.entry_resize_observer.borrow_mut() = Some(ResizeObserver::new({
@@ -753,6 +766,7 @@ impl<E: 'static + Entry> Infinite<E> {
                     state.0.anchor_offset.set(0.);
                 }
                 state.0.transition_alignment_reanchor();
+                state.notify_anchor();
                 state.0.delay_shake.set(200);
                 state.shake();
             }
@@ -847,6 +861,31 @@ impl<E: 'static + Entry> Infinite<E> {
 
     pub fn el(&self) -> El {
         return self.0.outer_stack.clone();
+    }
+
+    pub fn overlay_middle_el(&self) -> El {
+        return self.0.overlay_middle.clone();
+    }
+
+    pub fn on_anchor(&self, f: impl 'static + Fn(&E::Time)) {
+        *self.0.on_anchor.borrow_mut() = Some(Rc::new(f));
+        *self.0.notified_anchor.borrow_mut() = None;
+        self.notify_anchor();
+    }
+
+    fn notify_anchor(&self) {
+        let Some(anchor_i) = self.0.anchor_i.get() else {
+            return;
+        };
+        let time = self.0.real.borrow().get(anchor_i).unwrap().entry.time();
+        if self.0.notified_anchor.borrow().as_ref() == Some(&time) {
+            return;
+        }
+        *self.0.notified_anchor.borrow_mut() = Some(time.clone());
+        let Some(f) = self.0.on_anchor.borrow().clone() else {
+            return;
+        };
+        f(&time);
     }
 
     pub fn padding_pre_el(&self) -> El {
@@ -1257,6 +1296,7 @@ impl<E: 'static + Entry> Infinite<E> {
             self.0.scroll_outer.raw().set_scroll_top(self.0.logical_scroll_top.get().round());
             self.0.mute_scroll.set(js_sys::Date::now() + 50.);
         });
+        self.notify_anchor();
     }
 
     fn shake(&self) {

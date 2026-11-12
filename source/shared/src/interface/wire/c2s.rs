@@ -428,6 +428,8 @@ pub struct ContactRes {
     pub id: Identity,
     pub name: String,
     pub description: String,
+    pub shown_name: Option<String>,
+    pub shown_description: Option<String>,
     pub portrait: Option<crate::interface::shared::FileRef>,
 }
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -443,7 +445,25 @@ pub struct ContactModify {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
+    pub shown_name: Option<ModifyOption<String>>,
+    #[serde(default)]
+    pub shown_description: Option<ModifyOption<String>>,
+    #[serde(default)]
     pub portrait: Option<ModifyOption<crate::interface::shared::Portrait>>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ContactDelete {
+    pub id: Identity,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct MemberInfoRes {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub portrait: Option<crate::interface::shared::FileRef>,
 }
 
 // Message
@@ -494,6 +514,7 @@ reqresp!(pub proto {
     ChannelInviteList(ChannelInviteList) => Vec < ChannelInviteRes >,
     ContactList(ContactList) => Vec < ContactRes >,
     ContactModify(ContactModify) => ContactRes,
+    ContactDelete(ContactDelete) =>(),
     MessagePush(MessagePush) =>(),
 });
 
@@ -1253,6 +1274,120 @@ impl PathReqTrait for GetCalendarPage {
             [PATH_PREFIX_CALENDAR_PAGE.to_string()]
                 .into_iter()
                 .chain(calendar_path_segments(&self.channel, self.month, self.page, self.token)),
+        );
+    }
+}
+
+pub struct GetChannelMemberInfo {
+    pub channel: QualifiedChannelId,
+    pub member: Identity,
+}
+
+const PATH_PREFIX_CHANNEL_MEMBER_INFO: &str = "channel_member_info";
+
+impl PathReqTrait for GetChannelMemberInfo {
+    type Resp = Option<MemberInfoRes>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_CHANNEL_MEMBER_INFO)?;
+        let out = GetChannelMemberInfo {
+            channel: QualifiedChannelId {
+                identity: confirm_path_element(&mut parts, "channel identity")?,
+                channel: ChannelId(confirm_path_element(&mut parts, "channel")?),
+            },
+            member: confirm_path_element(&mut parts, "member")?,
+        };
+        confirm_path_empty(&mut parts)?;
+        return Ok(out);
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path(
+            [
+                PATH_PREFIX_CHANNEL_MEMBER_INFO.to_string(),
+                self.channel.identity.to_string(),
+                self.channel.channel.0.to_string(),
+                self.member.to_string(),
+            ],
+        );
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ContactChannel {
+    pub channel: QualifiedChannelId,
+    pub own_identity: Identity,
+}
+
+pub struct GetContactChannels {
+    pub identity: Identity,
+}
+
+const PATH_PREFIX_CONTACT_CHANNELS: &str = "contact_channels";
+
+impl PathReqTrait for GetContactChannels {
+    type Resp = Vec<ContactChannel>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_CONTACT_CHANNELS)?;
+        let out = GetContactChannels { identity: confirm_path_element(&mut parts, "identity")? };
+        confirm_path_empty(&mut parts)?;
+        return Ok(out);
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path([PATH_PREFIX_CONTACT_CHANNELS.to_string(), self.identity.to_string()]);
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ContactPost {
+    pub own_identity: Identity,
+    pub original_id: QualifiedMessageId,
+    pub original_receive_time: Timestamp,
+    pub message: MessageBody,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ContactPostsRes {
+    pub posts: Vec<ContactPost>,
+    pub last: bool,
+}
+
+pub const CONTACT_POSTS_PAGE_SIZE: usize = 50;
+
+pub struct GetContactPosts {
+    pub identity: Identity,
+    pub page: usize,
+}
+
+const PATH_PREFIX_CONTACT_POSTS: &str = "contact_posts";
+
+impl PathReqTrait for GetContactPosts {
+    type Resp = ContactPostsRes;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_CONTACT_POSTS)?;
+        let out = GetContactPosts {
+            identity: confirm_path_element(&mut parts, "identity")?,
+            page: confirm_path_element(&mut parts, "page")?,
+        };
+        confirm_path_empty(&mut parts)?;
+        return Ok(out);
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path(
+            [PATH_PREFIX_CONTACT_POSTS.to_string(), self.identity.to_string(), self.page.to_string()],
         );
     }
 }

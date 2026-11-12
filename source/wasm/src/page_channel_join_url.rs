@@ -92,6 +92,7 @@ impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormKwaUrlInvite {
     }
 }
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form)]
 struct Form_ {
     #[title("URL")]

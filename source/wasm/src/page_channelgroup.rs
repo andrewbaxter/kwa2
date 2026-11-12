@@ -46,6 +46,8 @@ use {
             MinistateChannelGroupResetId,
             SESSIONSTORAGE_CHAT_RESET,
             SessionStorageChatReset,
+            SessionStorageChatResetChannelGroup,
+            restore_track_chat_anchor,
             get_or_req_channelgroup,
             ministate_octothorpe,
             record_replace_ministate,
@@ -322,6 +324,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                 own_identity: reset_id.own_identity.clone(),
             }));
         }
+        restore_track_chat_anchor(&inf, CurrentChatSource::Group(m.id.clone()), reset_id.is_none());
 
         // Event handling
         own.push(
@@ -447,7 +450,11 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
                             if let Some(reset_id) = &new_reset_id {
                                 SessionStorage::set(
                                     SESSIONSTORAGE_CHAT_RESET,
-                                    SessionStorageChatReset::Channel(reset_id.message.clone()),
+                                    SessionStorageChatReset::ChannelGroup(SessionStorageChatResetChannelGroup {
+                                        channel_group: id.clone(),
+                                        own_identity: reset_id.own_identity.clone(),
+                                        reset_id: reset_id.message.clone(),
+                                    }),
                                 ).log(&state().log, &"Error storing chat reset");
                             } else {
                                 SessionStorage::delete(SESSIONSTORAGE_CHAT_RESET);

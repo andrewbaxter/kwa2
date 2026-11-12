@@ -27,7 +27,9 @@ use {
             MinistateChannel,
             MinistateChannelGroup,
             MinistateChannelGroupResetId,
+            MinistateContact,
             MinistateMessageHistory,
+            goto_replace_ministate,
             identity_portrait,
             ministate_octothorpe,
             state,
@@ -101,6 +103,31 @@ pub fn build_chat_entry_message(pc: &mut ProcessingContext, m: &ChatEntryMessage
                                     }
                                 ),
                             );
+                        m_el.portrait.ref_on("click", {
+                            let eg = pc.eg();
+                            let sender = sender.clone();
+                            let left = *left;
+                            let channel = match (&message_id, &client_key) {
+                                (Some(message_id), _) => message_id.channel.clone(),
+                                (None, Some((channel, _, _))) => channel.clone(),
+                                (None, None) => unreachable!(),
+                            };
+                            move |ev| {
+                                ev.stop_propagation();
+                                let target = if left {
+                                    Ministate::Contact(MinistateContact {
+                                        identity: sender.clone(),
+                                        channel: Some(channel.clone()),
+                                        back: Box::new(state().ministate.borrow().clone()),
+                                    })
+                                } else {
+                                    Ministate::Identity(sender.clone())
+                                };
+                                eg.event(|pc| {
+                                    goto_replace_ministate(pc, &state().log, &target);
+                                }).unwrap();
+                            }
+                        });
                         shed!{
                             let Some(message_id) = message_id else {
                                 break;

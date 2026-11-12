@@ -44,14 +44,15 @@ use {
     std::rc::Rc,
 };
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form)]
 struct DetailsForm_ {
+    #[title("Portrait")]
+    portrait: FormPortrait,
     #[title("Name")]
     name: String,
     #[title("Description")]
     description: String,
-    #[title("Portrait")]
-    portrait: FormPortrait,
 }
 
 pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelJoinConfirm) -> El {
@@ -80,10 +81,10 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelJoinConfirm) -> El 
         let identity_state = Rc::new(identity_state);
         let details_state = Rc::new(details_state);
         let mut elements = vec![];
+        elements.extend(details_els.elements);
         elements.extend(identity_els.error);
         elements.push(el("span").classes(&[CSS_CLASS_LABEL]).text(identity_title));
         elements.extend(identity_els.elements);
-        elements.extend(details_els.elements);
         return Ok(Some((details_els.error, elements, async move |_idem| {
             let identity = identity_state.parse();
             let details = details_state.parse();

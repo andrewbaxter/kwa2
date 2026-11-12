@@ -132,6 +132,59 @@
         ],
       }).root;
     };
+    const buildIdentities = /** @type {() => HTMLElement} */ () => {
+      const head = presentation.contNonchatHeadBar({
+        backLink: "abcd",
+        center: presentation.leafNonchatHeadBarCenter({
+          text: "Identities",
+          link: undefined,
+        }).root,
+        right: presentation.leafMenuHeadBarRightAdd({ link: "abcd" }).root,
+      });
+      return presentation.contPageMenu({
+        headBar: head.root,
+        children: [
+          presentation.leafListHeading({ text: "Self" }).root,
+          presentation.leafMenuGroup({
+            text: "Me",
+            link: "abcd",
+            image: "testportrait.jpg",
+            children: [
+              presentation.leafMenuLink({
+                text: "Family",
+                link: "abcd",
+                image: "testportrait.jpg",
+              }).root,
+              presentation.leafMenuLink({ text: "Climbing", link: "abcd" })
+                .root,
+            ],
+          }).root,
+          presentation.leafMenuGroup({
+            text: "Work me",
+            link: "abcd",
+            children: [
+              presentation.leafMenuLink({ text: "Standup", link: "abcd" }).root,
+            ],
+          }).root,
+          presentation.leafListHeading({ text: "Others" }).root,
+          presentation.leafMenuLink({
+            text: "Bob Bobson",
+            link: "abcd",
+            image: "testportrait.jpg",
+          }).root,
+          presentation.leafMenuLink({
+            text: "Alice",
+            link: "abcd",
+            generatedImage: "testqr.svg",
+          }).root,
+          presentation.leafMenuLink({
+            text: "yryyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+            link: "abcd",
+            generatedImage: "testqr.svg",
+          }).root,
+        ],
+      }).root;
+    };
     const buildMenuInvite = /** @type {() => Promise<HTMLElement>} */ async () => {
       const head = presentation.contNonchatHeadBar({
         backLink: "abcd",
@@ -336,8 +389,8 @@
     const buildFormConfirm = /** @type {() => HTMLElement} */ () => {
       return buildFormPage("Join by URL", [
         rfError(),
-        rfLabel("Join as"),
-        rf.select("Join as", ["Personal", "Work"], 0),
+        rfLabel("Portrait"),
+        rf.file("Portrait", "testportrait.jpg"),
         rfError(),
         rfLabel("Name"),
         rf.text("Name", "Almonds"),
@@ -345,9 +398,118 @@
         rfLabel("Description"),
         rf.text("Description", "A channel about almonds and almond adjacent nuts."),
         rfError(),
-        rfLabel("Portrait"),
-        rf.file("Portrait", "testportrait.jpg"),
+        rfLabel("Join as"),
+        rf.select("Join as", ["Personal", "Work"], 0),
       ]);
+    };
+    /** @type {(label: string, enabled: boolean, value: string) => HTMLElement[]} */
+    const rfOptText = (label, enabled, value) => {
+      /** @type { Record<string, string> } */
+      const attrs = { "aria-label": `${label} - Enabled`, type: "checkbox" };
+      if (enabled) {
+        attrs.checked = "checked";
+      }
+      const text = rf.text(label, value);
+      if (!enabled) {
+        text.classList.add("disable_hide");
+      }
+      return [
+        rfLabel(label),
+        rf.el("input", attrs, ["rf_input_option"]),
+        rf.el("div", {}, enabled ? ["rf_error"] : ["rf_error", "disable_hide"]),
+        text,
+      ];
+    };
+    /** @type {(title: string, submitText: string, formChildren: HTMLElement[], menuChildren: HTMLElement[]) => HTMLElement} */
+    const buildEditPage = (title, submitText, formChildren, menuChildren) => {
+      const page = presentation.contPageForm({
+        headBar: presentation.contNonchatHeadBar({
+          backLink: "abcd",
+          center: presentation.leafNonchatHeadBarCenter({
+            text: title,
+            link: undefined,
+          }).root,
+          right: undefined,
+        }).root,
+        children: [],
+      });
+      page.submit.textContent = submitText;
+      page.body.appendChild(rf.el("form", {}, [], formChildren));
+      for (const child of menuChildren) {
+        page.menu.appendChild(child);
+      }
+      return page.root;
+    };
+    const buildContact = /** @type {(_:{saved: boolean}) => HTMLElement} */ (
+      args,
+    ) => {
+      /** @type { HTMLElement[] } */
+      const menu = [
+        presentation.leafMenuLink({ text: "Channels", link: "abcd" }).root,
+        presentation.leafMenuLink({ text: "Posts", link: "abcd" }).root,
+      ];
+      if (args.saved) {
+        menu.push(presentation.leafMenuLink({ text: "Delete", link: "abcd" }).root);
+        return buildEditPage(
+          "Bob Bobson",
+          "Save",
+          [
+            rfError(),
+            rfLabel("Portrait"),
+            rf.file("Portrait", "testportrait.jpg"),
+            rfError(),
+            rfLabel("Name"),
+            rf.text("Name", "Bob Bobson"),
+            ...rfOptText("Shown name", true, "Bob"),
+            rfError(),
+            rfLabel("Description"),
+            rf.text("Description", "Bob from the climbing gym, brings the good rope."),
+            ...rfOptText("Shown description", false, ""),
+          ],
+          menu,
+        );
+      }
+      return buildEditPage(
+        "yryyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+        "Save as contact",
+        [
+          rfError(),
+          rfLabel("Portrait"),
+          rf.file("Portrait"),
+          rfError(),
+          rfLabel("Name"),
+          rf.text("Name", ""),
+          ...rfOptText("Shown name", false, ""),
+          rfError(),
+          rfLabel("Description"),
+          rf.text("Description", ""),
+          ...rfOptText("Shown description", false, ""),
+        ],
+        menu,
+      );
+    };
+    const buildIdentity = /** @type {() => HTMLElement} */ () => {
+      return buildEditPage(
+        "Me",
+        "Save",
+        [
+          rfError(),
+          rfLabel("Portrait"),
+          rf.file("Portrait", "testportrait.jpg"),
+          rfError(),
+          rfLabel("Name"),
+          rf.text("Name", "Me"),
+          ...rfOptText("Shown name", true, "Andrew"),
+          rfError(),
+          rfLabel("Description"),
+          rf.text("Description", "My main identity"),
+          ...rfOptText("Shown description", true, "Hi, it's me."),
+        ],
+        [
+          presentation.leafMenuLink({ text: "Invitations", link: "abcd" }).root,
+          presentation.leafMenuLink({ text: "Delete", link: "abcd" }).root,
+        ],
+      );
     };
     // Every element kind rooting_forms can produce, in one page.
     const buildFormAll = /** @type {() => HTMLElement} */ () => {
@@ -433,7 +595,7 @@
       );
     };
     const buildInfiniteShell =
-      /** @type {(pageClass: string) => {infinite: HTMLElement, paddingPre: HTMLElement, paddingPost: HTMLElement, earlySticky: HTMLElement, real: HTMLElement, lateSpinner: HTMLElement}} */ (
+      /** @type {(pageClass: string) => {infinite: HTMLElement, overlayMiddle: HTMLElement, paddingPre: HTMLElement, paddingPost: HTMLElement, earlySticky: HTMLElement, real: HTMLElement, lateSpinner: HTMLElement}} */ (
         pageClass,
       ) => {
         const infinite = document.createElement("div");
@@ -522,14 +684,22 @@
 
         scrollOuter.style.gridColumn = "1";
         scrollOuter.style.gridRow = "1";
+        centerSpinner.style.gridColumn = "1";
+        centerSpinner.style.gridRow = "1";
+        const overlayMiddle = document.createElement("div");
+        overlayMiddle.style.flexGrow = "1";
+        overlayMiddle.style.minHeight = "0";
+        overlayMiddle.style.display = "grid";
+        overlayMiddle.style.gridTemplateColumns = "minmax(0, 1fr)";
+        overlayMiddle.style.gridTemplateRows = "minmax(0, 1fr)";
+        overlayMiddle.appendChild(centerSpinner);
         const overlay = document.createElement("div");
         overlay.style.display = "flex";
         overlay.style.flexDirection = "column";
-        overlay.style.justifyContent = "space-between";
         overlay.style.gridColumn = "1";
         overlay.style.gridRow = "1";
         overlay.appendChild(paddingPre);
-        overlay.appendChild(centerSpinner);
+        overlay.appendChild(overlayMiddle);
         overlay.appendChild(paddingPost);
         infinite.appendChild(scrollOuter);
         infinite.appendChild(overlay);
@@ -551,6 +721,7 @@
         }).observe(contentLayout);
         return {
           infinite: infinite,
+          overlayMiddle: overlayMiddle,
           paddingPre: paddingPre,
           paddingPost: paddingPost,
           earlySticky: earlySticky,
@@ -972,6 +1143,28 @@
         const shell = buildInfiniteShell(presentation.classPageChat({}).value);
         shell.paddingPre.appendChild(args.head);
         const today = new Date();
+        const option = /** @type {(text: string) => HTMLElement} */ (text) => {
+          const o = document.createElement("option");
+          o.textContent = text;
+          return o;
+        };
+        const years = [];
+        for (let y = today.getFullYear() - 10; y <= today.getFullYear() + 10; y += 1) {
+          years.push(option(`${y}`));
+        }
+        const yearSelect = presentation.leafCalendarMonthSelectSelect({ children: years }).root;
+        /** @type { HTMLSelectElement } */ (yearSelect).value = `${today.getFullYear()}`;
+        const months = [];
+        for (let m = 0; m < 12; m += 1) {
+          months.push(
+            option(new Date(2000, m, 1).toLocaleDateString(undefined, { month: "long" })),
+          );
+        }
+        const monthSelect = presentation.leafCalendarMonthSelectSelect({ children: months }).root;
+        /** @type { HTMLSelectElement } */ (monthSelect).selectedIndex = today.getMonth();
+        shell.overlayMiddle.appendChild(
+          presentation.contCalendarMonthSelect({ year: yearSelect, month: monthSelect }).root,
+        );
         for (let offset = -3; offset <= 4; offset += 1) {
           const first = new Date(today.getFullYear(), today.getMonth() + offset, 1);
           /** @type {{[day: number]: [boolean, boolean]}} */
@@ -984,15 +1177,17 @@
           for (let day = 10; day <= 13; day += 1) {
             marks[day] = [true, (marks[day] ?? [false, false])[1]];
           }
-          shell.real.appendChild(
-            buildCalendarMonth(
-              first.getFullYear(),
-              first.getMonth(),
-              args.weekStart,
-              today,
-              marks,
-            ),
+          const month = buildCalendarMonth(
+            first.getFullYear(),
+            first.getMonth(),
+            args.weekStart,
+            today,
+            marks,
           );
+          if (offset != 0) {
+            month.classList.add(presentation.classCalendarMonthDim({}).value);
+          }
+          shell.real.appendChild(month);
         }
         shell.real.appendChild(shell.lateSpinner);
         return shell.infinite;
@@ -1043,7 +1238,7 @@
       ) => {
         const children = [];
         if (args.empty) {
-          children.push(presentation.leafCalendarDayEmpty({}).root);
+          children.push(presentation.leafCalendarDayEmpty({ text: "No events" }).root);
         } else {
           children.push(buildEventMessage(true));
           const selected = buildEventMessage(false);
@@ -1192,6 +1387,18 @@
       },
       "#menu_invite": async () => {
         buildRoot(await buildMenuInvite());
+      },
+      "#contact": async () => {
+        buildRoot(buildContact({ saved: true }));
+      },
+      "#contact_unsaved": async () => {
+        buildRoot(buildContact({ saved: false }));
+      },
+      "#identities": async () => {
+        buildRoot(buildIdentities());
+      },
+      "#identity": async () => {
+        buildRoot(buildIdentity());
       },
       "#form": async () => {
         buildRoot(buildForm());

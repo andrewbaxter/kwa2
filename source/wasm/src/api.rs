@@ -27,6 +27,7 @@ use {
         shared::{
             FileRef,
             QualifiedChannelId,
+            QualifiedFileId,
         },
         wire::{
             c2s::{
@@ -239,5 +240,16 @@ pub fn join_preview_file_url(url: &KwaUrl, file: &FileRef) -> String {
     return format!("{}{}", state().env.base_url, c2s::GetJoinPreviewFile {
         url: url.clone(),
         hash: file.hash.clone(),
+    }.serialize_path());
+}
+
+pub fn channel_owner_file_url(channel: &QualifiedChannelId, file: &FileRef) -> String {
+    return format!("{}{}", state().env.base_url, c2s::GetChannelFile {
+        channel: channel.clone(),
+        file: QualifiedFileId {
+            identity: channel.identity.clone(),
+            hash: file.hash.clone(),
+        },
+        thumbnail: false,
     }.serialize_path());
 }

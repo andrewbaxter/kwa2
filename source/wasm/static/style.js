@@ -208,7 +208,6 @@
     staticStyles.add(id1);
     return id1;
   };
-
   ///////////////////////////////////////////////////////////////////////////////
   // xx Constants
 
@@ -1575,6 +1574,12 @@ svg.spinner4 path {
       },
     }),
   ];
+  const pageMenuInnerStyle = s("cont_page_menu_inner", {
+    "": (s) => {
+      s.width = varSPageNarrow;
+      s.alignSelf = "center";
+    },
+  });
   presentation.contPageMenu = /** @type { Presentation["contPageMenu"] } */ (
     args,
   ) => {
@@ -1593,12 +1598,7 @@ svg.spinner4 path {
                 styles_: [
                   nonchatPageStyleInner,
                   ...menuGridStyles,
-                  s("cont_page_menu_inner", {
-                    "": (s) => {
-                      s.width = varSPageNarrow;
-                      s.alignSelf = "center";
-                    },
-                  }),
+                  pageMenuInnerStyle,
                 ],
                 children_: args.children,
               },
@@ -1780,8 +1780,8 @@ svg.spinner4 path {
     s,
   ) => {
     s.display = "grid";
-    s.gridTemplateColumns = "minmax(0, max-content) minmax(60%, 1fr)";
-    s.columnGap = varPSmall;
+    s.gridTemplateColumns = "minmax(0, max-content) auto minmax(60%, 1fr)";
+    s.columnGap = "0";
     s.rowGap = varPSmall;
     s.alignItems = "center";
   };
@@ -1836,10 +1836,18 @@ svg.spinner4 path {
             },
             ">form": formGridStyle,
             " :where(form, .rf_subform, .group) > *": (s) => {
-              s.gridColumn = "2";
+              s.gridColumn = "2 / -1";
             },
             " .rf_label": (s) => {
               s.gridColumn = "1";
+              s.marginRight = varPSmall;
+            },
+            " .rf_input_option": (s) => {
+              s.gridColumn = "2";
+              s.marginRight = varPSmall;
+            },
+            " :is(.rf_input_option + .rf_input_small, .rf_input_option + .rf_error + .rf_input_small)": (s) => {
+              s.gridColumn = "3";
             },
             " .rf_vec_item_header": (s) => {
               s.gridColumn = "1 / -1";
@@ -1905,11 +1913,22 @@ svg.spinner4 path {
             },
             " input[type=checkbox]": (s) => {
               s.appearance = "none";
+              s.border = "none";
               s.minWidth = varSMenuIcon;
               s.minHeight = varSMenuIcon;
               s.padding = "0";
               s.verticalAlign = "middle";
               s.cursor = "pointer";
+              s.justifySelf = "start";
+            },
+            " input[type=checkbox]:not(label > input)": (s) => {
+              s.display = "inline-grid";
+              s.placeItems = "center";
+              s.paddingLeft = varPSmall;
+              s.paddingRight = varPSmall;
+            },
+            " input[type=checkbox]:not(label > input)::before": (s) => {
+              s.content = JSON.stringify("On");
             },
             " input[type=checkbox]:hover": (s) => {
               s.backgroundColor = varCBackgroundDark;
@@ -1951,7 +1970,6 @@ svg.spinner4 path {
               s.height = "0";
               s.minWidth = "0";
               s.minHeight = "0";
-              s.border = "none";
             },
             " .rf_error": (s) => {
               s.display = "block";
@@ -1975,6 +1993,22 @@ svg.spinner4 path {
         children_: [...args.children],
       },
     );
+    const menu = e(
+      "div",
+      {},
+      {
+        styles_: [
+          nonchatPageStyleInner,
+          ...menuGridStyles,
+          pageMenuInnerStyle,
+          s("cont_page_form_menu", {
+            ":empty": (s) => {
+              s.display = "none";
+            },
+          }),
+        ],
+      },
+    );
     return {
       root: e(
         "div",
@@ -1984,6 +2018,7 @@ svg.spinner4 path {
           children_: [
             args.headBar,
             body,
+            menu,
             spacer(),
             e(
               "div",
@@ -2012,6 +2047,7 @@ svg.spinner4 path {
       submit: submit,
       errors: errors,
       body: body,
+      menu: menu,
     };
   };
 
@@ -2020,6 +2056,29 @@ svg.spinner4 path {
   ) => {
     return { root: e("div", { textContent: args.text }, {}) };
   };
+
+  presentation.leafListHeading =
+    /** @type { Presentation["leafListHeading"] } */ (args) => {
+      return {
+        root: e(
+          "h2",
+          { textContent: args.text },
+          {
+            styles_: [
+              s("leaf_list_heading", {
+                "": (s) => {
+                  s.gridColumn = "1 / 3";
+                  s.fontSize = varFMenu;
+                  s.fontWeight = "600";
+                  s.color = varCForegroundVeryLight;
+                  s.padding = `${varPPage} ${varPSmall} 0 ${varPSmall}`;
+                },
+              }),
+            ],
+          },
+        ),
+      };
+    };
 
   // /////////////////////////////////////////////////////////////////////////////
   // xx Components, styles: chat
@@ -2447,6 +2506,8 @@ svg.spinner4 path {
                 s.flexShrink = "0";
                 s.width = varSPortrait;
                 s.height = varSPortrait;
+                s.cursor = "pointer";
+                s.pointerEvents = "initial";
               },
             }),
           ],
@@ -3789,6 +3850,7 @@ svg.spinner4 path {
                   s.marginRight = "auto";
                   s.pointerEvents = "none";
                   s.position = "relative";
+                  s.transition = "opacity 0.15s";
                 },
               }),
               args.overlapNext
@@ -3809,6 +3871,157 @@ svg.spinner4 path {
       };
     };
 
+  const classCalendarMonthDim = s("calendar_month_dim", {
+    " > *": (s) => {
+      s.opacity = "0.35";
+    },
+  });
+  presentation.classCalendarMonthDim =
+    /** @type { Presentation["classCalendarMonthDim"]} */ () => ({
+      value: classCalendarMonthDim,
+    });
+
+  presentation.contCalendarMonthSelect =
+    /** @type { Presentation["contCalendarMonthSelect"] } */ (args) => {
+      return {
+        root: e(
+          "div",
+          {},
+          {
+            styles_: [
+              s("cont_calendar_month_select", {
+                "": (s) => {
+                  s.gridColumn = "1";
+                  s.gridRow = "1";
+                  s.position = "relative";
+                  s.containerType = "inline-size";
+                  s.display = "flex";
+                  s.flexWrap = "wrap";
+                  s.justifyContent = "flex-end";
+                  s.alignItems = "center";
+                  s.alignContent = "flex-start";
+                },
+              }),
+            ],
+            children_: [
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    s("cont_calendar_month_select_slot", {
+                      "": (s) => {
+                        s.flexGrow = "1";
+                        s.flexShrink = "1";
+                        s.minWidth = "0";
+                        s.display = "flex";
+                      },
+                      "::before": (s) => {
+                        s.content = '""';
+                        s.flexGrow = "1";
+                      },
+                      "::after": (s) => {
+                        s.content = '""';
+                        s.flexGrow = "1";
+                        s.maxWidth = "max(0px, (100% - 50cqw) * 1000)";
+                      },
+                    }),
+                  ],
+                  children_: [
+                    e(
+                      "div",
+                      {},
+                      {
+                        styles_: [
+                          s("cont_calendar_month_select_selects", {
+                            "": (s) => {
+                              s.flexShrink = "0";
+                              s.maxWidth = "100%";
+                              s.display = "flex";
+                              s.gap = varPSmall;
+                              s.padding = `${varPSmall} ${varPPage}`;
+                            },
+                          }),
+                        ],
+                        children_: [args.year, args.month],
+                      },
+                    ),
+                  ],
+                },
+              ),
+              e(
+                "div",
+                {},
+                {
+                  styles_: [
+                    s("cont_calendar_month_select_calendar", {
+                      "": (s) => {
+                        s.width = varSCalendarWidth;
+                        s.height = "100%";
+                        s.marginRight = `calc(50% - ${varSCalendarWidth} / 2)`;
+                      },
+                    }),
+                  ],
+                },
+              ),
+            ],
+          },
+        ),
+      };
+    };
+
+  presentation.leafCalendarMonthSelectSelect =
+    /** @type { Presentation["leafCalendarMonthSelectSelect"] } */ (args) => {
+      return {
+        root: e(
+          "select",
+          {},
+          {
+            styles_: [
+              s("leaf_calendar_month_select_select", {
+                "": (s) => {
+                  s.border = `${varLThin} solid ${varCBackgroundGlass}`;
+                  s.borderRadius = varRInput;
+                  s.padding = varPSmall;
+                  s.backgroundColor = varCBackground;
+                  s.color = varCForeground;
+                  s.fontSize = varFMenu;
+                  s.fontWeight = varWHead;
+                  s.cursor = "pointer";
+                },
+                ":hover": (s) => {
+                  s.backgroundColor = varCBackgroundDark;
+                },
+              }),
+            ],
+            children_: args.children,
+          },
+        ),
+      };
+    };
+
+  const leafCalendarDayPastStyle = s("leaf_calendar_day_past", {});
+  const leafCalendarDayBarStyle = s("leaf_calendar_day_bar", {
+    "": (s) => {
+      s.position = "absolute";
+      s.left = "0";
+      s.right = "0";
+      s.top = "0";
+      s.height = `calc(${varSCalendarMark} / 2)`;
+      s.backgroundColor = varCForeground;
+    },
+  });
+  const leafCalendarDayDotStyle = s("leaf_calendar_day_dot", {
+    "": (s) => {
+      s.position = "absolute";
+      s.right = varPIconButton;
+      s.bottom = varPIconButton;
+      s.width = varSCalendarMark;
+      s.height = varSCalendarMark;
+      s.borderRadius = "999cm";
+      s.backgroundColor = varCForeground;
+    },
+  });
   presentation.leafCalendarDay =
     /** @type { Presentation["leafCalendarDay"] } */ (args) => {
       const styles = [
@@ -3831,9 +4044,17 @@ svg.spinner4 path {
             s.outline = `${varLThin} solid ${varCNotifyBright}`;
             s.zIndex = "1";
           },
+          [`.${leafCalendarDayPastStyle}`]: (s) => {
+            s.borderColor = varCForegroundUltraLight;
+          },
+          [`.${leafCalendarDayPastStyle} > :is(.${leafCalendarDayBarStyle}, .${leafCalendarDayDotStyle})`]: (s) => {
+            s.backgroundColor = varCForegroundUltraLight;
+          },
         }),
       ];
-      if (!args.past) {
+      if (args.past) {
+        styles.push(leafCalendarDayPastStyle);
+      } else {
         styles.push(
           s("leaf_calendar_day_future", {
             "": (s) => {
@@ -3867,18 +4088,7 @@ svg.spinner4 path {
             "div",
             {},
             {
-              styles_: [
-                s("leaf_calendar_day_bar", {
-                  "": (s) => {
-                    s.position = "absolute";
-                    s.left = "0";
-                    s.right = "0";
-                    s.top = "0";
-                    s.height = `calc(${varSCalendarMark} / 2)`;
-                    s.backgroundColor = varCNotifyBright;
-                  },
-                }),
-              ],
+              styles_: [leafCalendarDayBarStyle],
             },
           ),
         );
@@ -3889,19 +4099,7 @@ svg.spinner4 path {
             "div",
             {},
             {
-              styles_: [
-                s("leaf_calendar_day_dot", {
-                  "": (s) => {
-                    s.position = "absolute";
-                    s.right = varPIconButton;
-                    s.bottom = varPIconButton;
-                    s.width = varSCalendarMark;
-                    s.height = varSCalendarMark;
-                    s.borderRadius = "999cm";
-                    s.backgroundColor = varCNotifyBright;
-                  },
-                }),
-              ],
+              styles_: [leafCalendarDayDotStyle],
             },
           ),
         );
@@ -4050,7 +4248,7 @@ svg.spinner4 path {
       return {
         root: e(
           "div",
-          { textContent: "No events" },
+          { textContent: args.text },
           {
             styles_: [
               s("leaf_calendar_day_empty", {

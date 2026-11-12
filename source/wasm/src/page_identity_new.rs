@@ -24,14 +24,15 @@ use {
     },
 };
 
+//# genemichaels-norm-skip
 #[derive(rooting_forms::Form)]
 struct Form_ {
     #[title("Name")]
     name: String,
-    #[title("Description")]
-    description: String,
     #[title("Shown name")]
     shown_name: Option<String>,
+    #[title("Description")]
+    description: String,
     #[title("Shown description")]
     shown_description: Option<String>,
 }

@@ -251,7 +251,12 @@ fn main() {
         Func {
             name: "contPageForm",
             args: vec![("headBar", &el_), ("children", &arrel_)],
-            returns: vec![("root", &el_), ("body", &el_), ("errors", &el_), ("submit", &el_)],
+            returns: vec![("root", &el_), ("body", &el_), ("errors", &el_), ("submit", &el_), ("menu", &el_)],
+        },
+        Func {
+            name: "leafListHeading",
+            args: vec![("text", &string_)],
+            returns: vec![("root", &el_)],
         },
         Func {
             name: "leafFormText",
@@ -607,6 +612,21 @@ fn main() {
             returns: vec![("root", &el_)],
         },
         Func {
+            name: "classCalendarMonthDim",
+            args: vec![],
+            returns: vec![("value", &string_)],
+        },
+        Func {
+            name: "contCalendarMonthSelect",
+            args: vec![("year", &el_), ("month", &el_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafCalendarMonthSelectSelect",
+            args: vec![("children", &arrel_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
             name: "contCalendarStack",
             args: vec![],
             returns: vec![("root", &el_)],
@@ -633,7 +653,7 @@ fn main() {
         },
         Func {
             name: "leafCalendarDayEmpty",
-            args: vec![],
+            args: vec![("text", &string_)],
             returns: vec![("root", &el_)],
         },
         Func {
