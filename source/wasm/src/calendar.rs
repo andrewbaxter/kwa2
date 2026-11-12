@@ -841,6 +841,7 @@ pub fn build_calendar(
         months: RefCell::new(HashMap::new()),
         activity: RefCell::new(HashMap::new()),
     });
+    state().calendars.borrow_mut().push(Rc::downgrade(&cal));
     let inf = Infinite::new(&pc.eg(), InfiniteEls {
         center_spinner: style_export::leaf_chat_spinner_center().root,
         early_spinner: style_export::leaf_chat_spinner_early().root,

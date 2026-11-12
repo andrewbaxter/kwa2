@@ -91,7 +91,6 @@ struct EditorFile {
 struct EditorEvent {
     event: RefCell<MessageBlockEvent>,
     row: El,
-    editor: malarkdowney::Editor,
 }
 
 struct MessageEditor {
@@ -353,8 +352,6 @@ impl MessageEditor {
     }
 
     fn add_event(self: &Rc<Self>, event: MessageBlockEvent) {
-        let (editor_el, md_editor) =
-            malarkdowney::build(&event.text, malarkdowney::Options { newline_on_enter: true });
         let delete = style_export::leaf_chat_editor_button_delete().root;
         let middle = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
         let row = style_export::cont_chat_editor_row(style_export::ContChatEditorRowArgs {
@@ -364,23 +361,21 @@ impl MessageEditor {
         let entry = Rc::new(EditorEvent {
             event: RefCell::new(event),
             row: row.clone(),
-            editor: md_editor,
         });
 
-        fn build_middle(editor: &Rc<MessageEditor>, entry: &Rc<EditorEvent>, middle: &El, editor_el: &El) {
+        fn build_middle(editor: &Rc<MessageEditor>, entry: &Rc<EditorEvent>, middle: &El) {
             let timeline_text = match event_timeline_text(&entry.event.borrow()) {
                 Ok(t) => t,
                 Err(e) => format!("Invalid event time: {}", e),
             };
-            let ev = style_export::leaf_chat_editor_event(style_export::LeafChatEditorEventArgs {
-                timeline: timeline_text,
-                editor: editor_el.clone(),
-            });
-            ev.timeline.ref_on("click", {
+            let ev =
+                style_export::leaf_chat_editor_event(
+                    style_export::LeafChatEditorEventArgs { timeline: timeline_text },
+                ).root;
+            ev.ref_on("click", {
                 let editor = Rc::downgrade(editor);
                 let entry = Rc::downgrade(entry);
                 let middle = middle.weak();
-                let editor_el = editor_el.clone();
                 move |_| {
                     let Some(editor) = editor.upgrade() else {
                         return;
@@ -388,13 +383,11 @@ impl MessageEditor {
                     let Some(entry) = entry.upgrade() else {
                         return;
                     };
-                    let mut current = entry.event.borrow().clone();
-                    current.text = entry.editor.get_text();
+                    let current = entry.event.borrow().clone();
                     let on_done = Rc::new({
                         let editor = Rc::downgrade(&editor);
                         let entry = Rc::downgrade(&entry);
                         let middle = middle.clone();
-                        let editor_el = editor_el.clone();
                         move |event: MessageBlockEvent| {
                             let Some(editor) = editor.upgrade() else {
                                 return;
@@ -406,17 +399,17 @@ impl MessageEditor {
                                 return;
                             };
                             *entry.event.borrow_mut() = event;
-                            build_middle(&editor, &entry, &middle, &editor_el);
+                            build_middle(&editor, &entry, &middle);
                         }
                     });
                     open_event_editor(editor.channel.clone(), &current, on_done);
                 }
             });
             middle.ref_clear();
-            middle.ref_push(ev.root);
+            middle.ref_push(ev);
         }
 
-        build_middle(self, &entry, &middle, &editor_el);
+        build_middle(self, &entry, &middle);
         delete.ref_on("click", {
             let editor = Rc::downgrade(self);
             let row = row.weak();
@@ -653,9 +646,7 @@ impl MessageEditor {
             out.push(ViewBlock::File(file));
         }
         for event in &*self.events.borrow() {
-            let mut e = event.event.borrow().clone();
-            e.text = event.editor.get_text();
-            out.push(ViewBlock::Event(e));
+            out.push(ViewBlock::Event(event.event.borrow().clone()));
         }
         for (extension, _) in &*self.extensions.borrow() {
             out.push(ViewBlock::Extension(extension.clone()));

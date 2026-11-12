@@ -797,7 +797,7 @@ fn main() {
                 ffmpeg: config.ffmpeg,
                 max_file_size: config.max_file_size,
                 file_cache_size: config.file_cache_size,
-                calendar_cache: moka::future::Cache::builder()
+                calendar_cache: moka::sync::Cache::builder()
                     .max_capacity(4096)
                     .time_to_idle(std::time::Duration::from_secs(60 * 60))
                     .build(),
@@ -1717,11 +1717,25 @@ fn main() {
                                         let root_sender = crate::interface::db::DbIdentity(e.root_sender);
                                         good_ormning::sqlite::good_query!(
                                             db,
-                                            r#"insert into reminder_sent (account_id, identity, channel, root_sender, root_unique, block_index, occurrence_start) values (${account_id_t = &c.account_id}, ${identity_id_t = &c.identity}, ${channel_id_t = &c.id}, ${identity_id_t = &root_sender}, ${i64 = e.root_unique}, ${i64 = e.block_index}, ${time_ms_t = &DbTimeMs(start)}) on conflict do nothing"#;
+                                            r#"insert into reminder_log (account_id, identity, channel, root_sender, root_unique, occurrence_start) values (${account_id_t = &c.account_id}, ${identity_id_t = &c.identity}, ${channel_id_t = &c.id}, ${identity_id_t = &root_sender}, ${i64 = e.root_unique}, ${time_ms_t = &DbTimeMs(start)}) on conflict do nothing"#;
                                             db_tx
                                         ).map_err(|e| loga::err(e.0))?;
                                         if db_tx.0.changes() == 0 {
                                             continue;
+                                        }
+                                        let version =
+                                            good_ormning::sqlite::good_query_opt!(
+                                                db,
+                                                r#"select blocks from message where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and seq = ${i64 = e.version_seq}"#;
+                                                db_tx
+                                            )
+                                                .map_err(|e| loga::err(e.0))?
+                                                .expect("Indexed event's message version is missing");
+                                        let mut texts = vec![];
+                                        for block in crate::subsystems::messages::parse_blocks(&version)? {
+                                            if let shared::interface::shared::MessageBlock::Text(t) = block {
+                                                texts.push(t);
+                                            }
                                         }
                                         due.push((c.account_id.0, ReminderNotification {
                                             message: QualifiedMessageId {
@@ -1734,7 +1748,7 @@ fn main() {
                                                     unique: crate::subsystems::messages::i64_to_u64(e.root_unique),
                                                 },
                                             },
-                                            text: e.event.text.clone(),
+                                            text: texts.join("\n\n"),
                                             start: start,
                                         }));
                                     }
@@ -1746,7 +1760,7 @@ fn main() {
                                     .map_err(|e| loga::err(e.to_string()))?;
                             good_ormning::sqlite::good_query!(
                                 db,
-                                r#"delete from reminder_sent where occurrence_start < ${time_ms_t = &DbTimeMs(prune_before)}"#;
+                                r#"delete from reminder_log where occurrence_start < ${time_ms_t = &DbTimeMs(prune_before)}"#;
                                 db_tx
                             ).map_err(|e| loga::err(e.0))?;
                             return Ok(due);
@@ -3040,7 +3054,6 @@ fn main() {
                                                                                 account,
                                                                                 &req.channel,
                                                                                 local.page_size,
-                                                                                local.latest_seq,
                                                                                 req.month,
                                                                                 req.page,
                                                                                 req.token
@@ -3051,6 +3064,7 @@ fn main() {
                                                                             ::Stale,
                                                                             CalendarLocalPage::Page {
                                                                                 token,
+                                                                                latest_seq,
                                                                                 roots,
                                                                                 last
                                                                             } => {
@@ -3066,6 +3080,7 @@ fn main() {
                                                                                 CalendarPulledRes::Page(
                                                                                     CalendarPulledPage {
                                                                                         token: token,
+                                                                                        latest_seq: latest_seq,
                                                                                         messages: messages,
                                                                                         last: last,
                                                                                     }
@@ -9265,7 +9280,6 @@ fn main() {
                                                                                             ctx.account,
                                                                                             &ctx.channel,
                                                                                             local.page_size,
-                                                                                            local.latest_seq,
                                                                                             req.month,
                                                                                             req.page,
                                                                                             req.token
@@ -9276,6 +9290,7 @@ fn main() {
                                                                                         ::Stale,
                                                                                         CalendarLocalPage::Page {
                                                                                             token,
+                                                                                            latest_seq,
                                                                                             roots,
                                                                                             last
                                                                                         } => {
@@ -9306,16 +9321,14 @@ fn main() {
                                                                                             }
                                                                                             CalendarPageRes::Page(
                                                                                                 CalendarPage {
-                                                                                                    latest_activity: token
-                                                                                                        .latest
-                                                                                                        .map(
-                                                                                                            |
-                                                                                                                s
-                                                                                                            | activity_page_offset_pos(
-                                                                                                                s,
-                                                                                                                local.page_size
-                                                                                                            )
-                                                                                                        ),
+                                                                                                    latest_activity: latest_seq.map(
+                                                                                                        |
+                                                                                                            s
+                                                                                                        | activity_page_offset_pos(
+                                                                                                            s,
+                                                                                                            local.page_size
+                                                                                                        )
+                                                                                                    ),
                                                                                                     token: token,
                                                                                                     messages: messages,
                                                                                                     last: last,
@@ -9462,8 +9475,7 @@ fn main() {
                                                                                 }
                                                                                 let out = CalendarPage {
                                                                                     latest_activity: page
-                                                                                        .token
-                                                                                        .latest
+                                                                                        .latest_seq
                                                                                         .map(
                                                                                             |
                                                                                                 s

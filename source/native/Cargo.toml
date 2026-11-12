@@ -31,7 +31,7 @@ shared = { path = "../shared" }
 openidconnect = { version = "4", default-features = false }
 cookie = { version = "0.18" }
 ts-rs = { version = "12", features = ["serde-json-impl"] }
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12", features = ["future", "sync"] }
 http-serde = "2"
 serde_urlencoded = "0.7"
 hyper-tungstenite = { version = "0.30" }

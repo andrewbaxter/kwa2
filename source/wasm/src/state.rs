@@ -377,7 +377,7 @@ pub struct State_ {
     pub identity_portraits: RefCell<HashMap<Identity, WeakHistPrim<Option<FileRef>>>>,
     pub top: lunk::List<LocalCocg>,
     pub current_chat: RefCell<Option<CurrentChat>>,
-    pub current_calendar: RefCell<Option<std::rc::Weak<crate::calendar::Calendar_>>>,
+    pub calendars: RefCell<Vec<std::rc::Weak<crate::calendar::Calendar_>>>,
     pub bg_pushing: RefCell<Option<oneshot::Receiver<()>>>,
     pub bg_pushing_dirty: Cell<bool>,
     pub bg_pulling_interval: RefCell<Option<Interval>>,

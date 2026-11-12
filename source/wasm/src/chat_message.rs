@@ -293,10 +293,11 @@ pub fn build_message_body(body_el: &El, blocks: &[ViewBlock]) {
             Ok(t) => t,
             Err(e) => format!("Invalid event time: {}", e),
         };
-        body_el.ref_push(style_export::leaf_chat_entry_message_event(style_export::LeafChatEntryMessageEventArgs {
-            timeline: timeline,
-            content: malarkdowney::build_readonly(&event.text),
-        }).root);
+        body_el.ref_push(
+            style_export::leaf_chat_entry_message_event(
+                style_export::LeafChatEntryMessageEventArgs { timeline: timeline },
+            ).root,
+        );
     }
     if !ordered.media.is_empty() {
         let mut squares = vec![];

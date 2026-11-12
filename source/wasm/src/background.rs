@@ -286,12 +286,15 @@ pub fn handle_notification(eg: &EventGraph, notifications: Vec<(QualifiedChannel
             }
         }
     }
-    if matches!(&*state.ministate.borrow(), Ministate::ChannelCalendar(..) | Ministate::ChannelGroupCalendar(..)) {
-        if let Some(cal) = state.current_calendar.borrow().as_ref().and_then(|c| c.upgrade()) {
-            let cal = crate::calendar::Calendar(cal);
-            for (channel, offset) in &notifications {
-                cal.notify(channel, *offset);
-            }
+    let calendars = {
+        let mut calendars = state.calendars.borrow_mut();
+        calendars.retain(|c| c.strong_count() > 0);
+        calendars.iter().filter_map(|c| c.upgrade()).collect::<Vec<_>>()
+    };
+    for cal in calendars {
+        let cal = crate::calendar::Calendar(cal);
+        for (channel, offset) in &notifications {
+            cal.notify(channel, *offset);
         }
     }
     if !matches!(&*state.ministate.borrow(), Ministate::Channel(..) | Ministate::ChannelGroup(..)) || !has_feed {

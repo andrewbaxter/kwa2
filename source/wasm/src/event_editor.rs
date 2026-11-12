@@ -179,7 +179,6 @@ pub fn default_event() -> Result<MessageBlockEvent, String> {
             .checked_add(1.hour())
             .map_err(|e| e.to_string())?;
     return Ok(MessageBlockEvent {
-        text: String::new(),
         range: EventRange::Timed(EventRangeTimed {
             start: start,
             end: start.checked_add(1.hour()).map_err(|e| e.to_string())?,
@@ -446,31 +445,42 @@ struct EventForm_ {
     repeat: FormRepeat,
 }
 
+fn to_local(dt: DateTime, from: &TimeZone, local: &TimeZone) -> Result<DateTime, String> {
+    return Ok(dt.to_zoned(from.clone()).map_err(|e| e.to_string())?.with_time_zone(local.clone()).datetime());
+}
+
 pub fn open_event_editor(channel: CalChannel, initial: &MessageBlockEvent, on_done: Rc<dyn Fn(MessageBlockEvent)>) {
-    let tz = match &initial.range {
-        EventRange::Timed(r) => r.tz.clone(),
-        EventRange::AllDay(_) => match local_tz().iana_name() {
-            Some(n) => n.to_string(),
-            None => {
-                state().log.log("Browser time zone has no IANA name, can't edit events");
-                return;
-            },
+    let local = local_tz();
+    let Some(tz) = local.iana_name().map(|n| n.to_string()) else {
+        state().log.log("Browser time zone has no IANA name, can't edit events");
+        return;
+    };
+    let range = match &initial.range {
+        EventRange::Timed(r) => {
+            let converted = TimeZone::get(&r.tz).map_err(|e| e.to_string()).and_then(|event_tz| {
+                return Ok((to_local(r.start, &event_tz, &local)?, to_local(r.end, &event_tz, &local)?));
+            });
+            match converted {
+                Ok((start, end)) => FormRange::Timed(FormRangeTimed {
+                    start_date: FormPickDate(start.date()),
+                    start_time: FormTime(start.time()),
+                    end_date: FormPickDate(end.date()),
+                    end_time: FormTime(end.time()),
+                }),
+                Err(e) => {
+                    state().log.log(&format!("Can't convert event time zone [{}] to local: {}", r.tz, e));
+                    return;
+                },
+            }
         },
+        EventRange::AllDay(r) => FormRange::AllDay(FormRangeAllDay {
+            start: FormPickDate(r.start),
+            end: FormPickDate(r.end),
+        }),
     };
     PICKER_CHANNEL.with(|c| *c.borrow_mut() = Some(channel));
     let from = EventForm_ {
-        range: match &initial.range {
-            EventRange::Timed(r) => FormRange::Timed(FormRangeTimed {
-                start_date: FormPickDate(r.start.date()),
-                start_time: FormTime(r.start.time()),
-                end_date: FormPickDate(r.end.date()),
-                end_time: FormTime(r.end.time()),
-            }),
-            EventRange::AllDay(r) => FormRange::AllDay(FormRangeAllDay {
-                start: FormPickDate(r.start),
-                end: FormPickDate(r.end),
-            }),
-        },
+        range: range,
         repeat: match &initial.repeat {
             None => FormRepeat::None,
             Some(repeat) => {
@@ -526,7 +536,6 @@ pub fn open_event_editor(channel: CalChannel, initial: &MessageBlockEvent, on_do
         move || handle.close()
     });
     form.errors.ref_extend(form_els.error.into_iter().collect());
-    let text = initial.text.clone();
     form.body.ref_push(build_form_inner(&form.submit, form.errors, form_els.elements, {
         let handle = handle.clone();
         let form_state = Rc::new(form_state);
@@ -539,19 +548,23 @@ pub fn open_event_editor(channel: CalChannel, initial: &MessageBlockEvent, on_do
                 FormRepeatEnd::Until(d) => EventRepeatEnd::Until(d.0),
                 FormRepeatEnd::Count(c) => EventRepeatEnd::Count(c),
             };
+            let range = match v.range {
+                FormRange::Timed(r) => EventRange::Timed(EventRangeTimed {
+                    start: DateTime::from_parts(r.start_date.0, r.start_time.0),
+                    end: DateTime::from_parts(r.end_date.0, r.end_time.0),
+                    tz: tz.clone(),
+                }),
+                FormRange::AllDay(r) => EventRange::AllDay(EventRangeAllDay {
+                    start: r.start.0,
+                    end: r.end.0,
+                }),
+            };
+            let start_weekday = match &range {
+                EventRange::Timed(r) => r.start.weekday(),
+                EventRange::AllDay(r) => r.start.weekday(),
+            };
             let event = MessageBlockEvent {
-                text: text.clone(),
-                range: match v.range {
-                    FormRange::Timed(r) => EventRange::Timed(EventRangeTimed {
-                        start: DateTime::from_parts(r.start_date.0, r.start_time.0),
-                        end: DateTime::from_parts(r.end_date.0, r.end_time.0),
-                        tz: tz.clone(),
-                    }),
-                    FormRange::AllDay(r) => EventRange::AllDay(EventRangeAllDay {
-                        start: r.start.0,
-                        end: r.end.0,
-                    }),
-                },
+                range: range,
                 repeat: match v.repeat {
                     FormRepeat::None => None,
                     FormRepeat::Days(r) => Some(EventRepeat {
@@ -559,11 +572,15 @@ pub fn open_event_editor(channel: CalChannel, initial: &MessageBlockEvent, on_do
                         rule: EventRepeatRule::Days,
                         end: end_of(r.end),
                     }),
-                    FormRepeat::Weeks(r) => Some(EventRepeat {
-                        interval: r.interval,
-                        rule: EventRepeatRule::Weeks(r.days.0.into_iter().collect()),
-                        end: end_of(r.end),
-                    }),
+                    FormRepeat::Weeks(r) => {
+                        let mut days = r.days.0;
+                        days.insert(weekday_from_jiff(start_weekday));
+                        Some(EventRepeat {
+                            interval: r.interval,
+                            rule: EventRepeatRule::Weeks(days.into_iter().collect()),
+                            end: end_of(r.end),
+                        })
+                    },
                     FormRepeat::Months(r) => Some(EventRepeat {
                         interval: r.interval,
                         rule: EventRepeatRule::Months(match r.by {

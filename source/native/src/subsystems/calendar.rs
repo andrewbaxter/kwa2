@@ -51,7 +51,7 @@ use {
 };
 
 pub type CalendarCacheKey = (AccountId, QualifiedChannelId, CalendarMonth, CalendarToken);
-pub type CalendarCache = moka::future::Cache<CalendarCacheKey, Arc<Vec<(Identity, i64)>>>;
+pub type CalendarCache = moka::sync::Cache<CalendarCacheKey, Arc<Vec<(Identity, i64)>>>;
 pub type CalendarPageCache =
     moka::future::Cache<(AccountId, QualifiedChannelId, CalendarMonth, usize, CalendarToken), CalendarPage>;
 
@@ -62,18 +62,19 @@ pub fn message_event_reindex(
     channel: &DbChannelId,
     root_sender: DbIdentity,
     root_unique: i64,
-) -> Result<(), loga::Error> {
+) -> Result<bool, loga::Error> {
     good_ormning::sqlite::good_query!(
         db,
         r#"delete from message_event where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and root_sender = ${identity_id_t = &root_sender} and root_unique = ${i64 = root_unique}"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?;
+    let mut changed = db_tx.0.changes() > 0;
     let Some(original) = good_ormning::sqlite::good_query_opt!(
         db,
         r#"select seq, blocks from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and sender = ${identity_id_t = &root_sender} and sender_unique = ${i64 = root_unique} and (rel_type is null or rel_type = ${string = REL_REPLY_TO})"#;
         db_tx
     ).map_err(|e| loga::err(e.0))? else {
-        return Ok(());
+        return Ok(changed);
     };
     let edit = good_ormning::sqlite::good_query_opt!(
         db,
@@ -96,14 +97,15 @@ pub fn message_event_reindex(
             r#"insert into message_event (account_id, identity, channel, root_sender, root_unique, block_index, version_seq, envelope_start, envelope_end, event) values (${account_id_t = &account}, ${identity_id_t = &owner}, ${channel_id_t = channel}, ${identity_id_t = &root_sender}, ${i64 = root_unique}, ${i64 = block_index}, ${i64 = version_seq}, ${time_ms_t = &DbTimeMs(envelope_start)}, ${opt time_ms_t = envelope_end.map(DbTimeMs).as_ref()}, ${string = event_json.as_str()})"#;
             db_tx
         ).map_err(|e| loga::err(e.0))?;
+        changed = true;
     }
-    return Ok(());
+    return Ok(changed);
 }
 
 pub struct EventRow {
     pub root_sender: Identity,
     pub root_unique: i64,
-    pub block_index: i64,
+    pub version_seq: i64,
     pub event: MessageBlockEvent,
 }
 
@@ -117,7 +119,7 @@ pub fn events_overlapping(
 ) -> Result<Vec<EventRow>, loga::Error> {
     let rows = good_ormning::sqlite::good_query_many!(
         db,
-        r#"select root_sender, root_unique, block_index, event from message_event where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and envelope_start < ${time_ms_t = &DbTimeMs(end)} and (envelope_end is null or envelope_end > ${time_ms_t = &DbTimeMs(start)})"#;
+        r#"select root_sender, root_unique, version_seq, event from message_event where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and envelope_start < ${time_ms_t = &DbTimeMs(end)} and (envelope_end is null or envelope_end > ${time_ms_t = &DbTimeMs(start)})"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?;
     let mut out = Vec::with_capacity(rows.len());
@@ -125,7 +127,7 @@ pub fn events_overlapping(
         out.push(EventRow {
             root_sender: r.root_sender.0,
             root_unique: r.root_unique,
-            block_index: r.block_index,
+            version_seq: r.version_seq,
             event: serde_json::from_str(&r.event).context("Stored event was not valid JSON")?,
         });
     }
@@ -141,6 +143,7 @@ pub enum CalendarLocalPage {
     Stale,
     Page {
         token: CalendarToken,
+        latest_seq: Option<u64>,
         roots: Vec<CalendarRoot>,
         last: bool,
     },
@@ -151,89 +154,85 @@ pub async fn calendar_local_page(
     account: DbAccountId,
     channel: &QualifiedChannelId,
     page_size: usize,
-    latest_seq: Option<i64>,
     month: CalendarMonth,
     page: usize,
     want_token: Option<CalendarToken>,
 ) -> Result<CalendarLocalPage, loga::Error> {
     let db_owner = DbIdentity(channel.identity);
     let db_channel_id = DbChannelId(channel.channel.clone());
-    let token = tx(&state.db, {
-        let db_channel_id = db_channel_id.clone();
-        move |db_tx| {
-            let floor = good_ormning::sqlite::good_query_opt!(
-                db,
-                r#"select seq from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} order by seq asc limit ${i64 = 1}"#;
-                db_tx
-            ).map_err(|e| loga::err(e.0))?;
-            return Ok(CalendarToken {
-                latest: latest_seq.map(i64_to_u64),
-                floor: floor.map(i64_to_u64),
-            });
+    let cache = state.calendar_cache.clone();
+    let channel = channel.clone();
+    return tx(&state.db, move |db_tx| {
+        let channel_row = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select latest_seq, calendar_seq from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id} and deleted is null"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?.context("Channel missing while computing calendar page")?;
+        let floor = good_ormning::sqlite::good_query_opt!(
+            db,
+            r#"select seq from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} order by seq asc limit ${i64 = 1}"#;
+            db_tx
+        ).map_err(|e| loga::err(e.0))?;
+        let token = CalendarToken {
+            latest: channel_row.calendar_seq.map(i64_to_u64),
+            floor: floor.map(i64_to_u64),
+        };
+        if let Some(want) = want_token {
+            if want != token {
+                return Ok(CalendarLocalPage::Stale);
+            }
         }
-    }).await.context("Error computing calendar token")?;
-    if let Some(want) = want_token {
-        if want != token {
-            return Ok(CalendarLocalPage::Stale);
-        }
-    }
-    let cache_key = (account.0, channel.clone(), month, token);
-    let roots = match state.calendar_cache.get(&cache_key).await {
-        Some(r) => r,
-        None => {
-            let window = month_window_utc(month.year, month.month).map_err(loga::err)?;
-            let events = tx(&state.db, {
-                let db_channel_id = db_channel_id.clone();
-                move |db_tx| events_overlapping(db_tx, account, db_owner, &db_channel_id, window.start, window.end)
-            }).await.context("Error querying calendar events")?;
-            let mut keyed = vec![];
-            for e in events {
-                let occurrences = event_occurrences(&e.event, &window).map_err(loga::err)?;
-                let mut first = None;
-                for o in occurrences {
-                    let start = match o {
-                        Occurrence::AllDay { start, .. } => utc_midnight(start).map_err(loga::err)?,
-                        Occurrence::Timed { start, .. } => start,
+        let cache_key = (account.0, channel, month, token);
+        let roots = match cache.get(&cache_key) {
+            Some(r) => r,
+            None => {
+                let window = month_window_utc(month.year, month.month).map_err(loga::err)?;
+                let events = events_overlapping(db_tx, account, db_owner, &db_channel_id, window.start, window.end)?;
+                let mut keyed = vec![];
+                for e in events {
+                    let occurrences = event_occurrences(&e.event, &window).map_err(loga::err)?;
+                    let mut first = None;
+                    for o in occurrences {
+                        let start = match o {
+                            Occurrence::AllDay { start, .. } => utc_midnight(start).map_err(loga::err)?,
+                            Occurrence::Timed { start, .. } => start,
+                        };
+                        if first.map(|f| start < f).unwrap_or(true) {
+                            first = Some(start);
+                        }
+                    }
+                    let Some(first) = first else {
+                        continue;
                     };
-                    if first.map(|f| start < f).unwrap_or(true) {
-                        first = Some(start);
+                    keyed.push((first, e.root_sender, e.root_unique));
+                }
+                keyed.sort();
+                let mut seen = std::collections::HashSet::new();
+                let mut roots = vec![];
+                for (_, sender, unique) in keyed {
+                    if seen.insert((sender, unique)) {
+                        roots.push((sender, unique));
                     }
                 }
-                let Some(first) = first else {
-                    continue;
-                };
-                keyed.push((first, e.root_sender, e.root_unique));
-            }
-            keyed.sort();
-            let mut seen = std::collections::HashSet::new();
-            let mut roots = vec![];
-            for (_, sender, unique) in keyed {
-                if seen.insert((sender, unique)) {
-                    roots.push((sender, unique));
-                }
-            }
-            let roots = Arc::new(roots);
-            state.calendar_cache.insert(cache_key, roots.clone()).await;
-            roots
-        },
-    };
-    let start = page * page_size;
-    let page_roots = roots.iter().skip(start).take(page_size).cloned().collect::<Vec<_>>();
-    let last = start + page_size >= roots.len();
-    let Some(rows) = tx(&state.db, move |db_tx| {
+                let roots = Arc::new(roots);
+                cache.insert(cache_key, roots.clone());
+                roots
+            },
+        };
+        let start = page * page_size;
+        let last = start + page_size >= roots.len();
         let mut out = vec![];
-        for (sender, unique) in page_roots {
-            let db_sender = DbIdentity(sender);
-            let Some(r) = good_ormning::sqlite::good_query_opt!(
+        for (sender, unique) in roots.iter().skip(start).take(page_size) {
+            let sender = DbIdentity(*sender);
+            let unique = *unique;
+            let r = good_ormning::sqlite::good_query_opt!(
                 db,
-                r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, blocks, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &db_sender} and sender_unique = ${i64 = unique}"#;
+                r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, blocks, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &sender} and sender_unique = ${i64 = unique}"#;
                 db_tx
-            ).map_err(|e| loga::err(e.0))? else {
-                return Ok(None);
-            };
+            ).map_err(|e| loga::err(e.0))?.context("Indexed calendar root missing from message table")?;
             let edit = good_ormning::sqlite::good_query_opt!(
                 db,
-                r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, blocks, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and rel_type = ${string = REL_EDIT_OF} and rel_target_sender = ${identity_id_t = &db_sender} and rel_target_unique = ${i64 = unique} order by seq desc limit ${i64 = 1}"#;
+                r#"select sender, sender_unique, seq, snap_offset, receive_time, client_id, raw, blocks, rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and rel_type = ${string = REL_EDIT_OF} and rel_target_sender = ${identity_id_t = &sender} and rel_target_unique = ${i64 = unique} order by seq desc limit ${i64 = 1}"#;
                 db_tx
             ).map_err(|e| loga::err(e.0))?;
             out.push(CalendarRoot {
@@ -265,15 +264,13 @@ pub async fn calendar_local_page(
                 }),
             });
         }
-        return Ok(Some(out));
-    }).await.context("Error reading calendar messages")? else {
-        return Ok(CalendarLocalPage::Stale);
-    };
-    return Ok(CalendarLocalPage::Page {
-        token: token,
-        roots: rows,
-        last: last,
-    });
+        return Ok(CalendarLocalPage::Page {
+            token: token,
+            latest_seq: channel_row.latest_seq.map(i64_to_u64),
+            roots: out,
+            last: last,
+        });
+    }).await.context("Error computing calendar page");
 }
 
 pub fn calendar_message(

@@ -569,6 +569,7 @@ pub mod s2sv1t {
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub struct CalendarPulledPage {
         pub token: CalendarToken,
+        pub latest_seq: Option<u64>,
         pub messages: Vec<PulledMessage>,
         pub last: bool,
     }

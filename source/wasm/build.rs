@@ -574,7 +574,7 @@ fn main() {
         },
         Func {
             name: "leafChatEntryMessageEvent",
-            args: vec![("timeline", &string_), ("content", &el_)],
+            args: vec![("timeline", &string_)],
             returns: vec![("root", &el_)],
         },
         Func {
@@ -584,8 +584,8 @@ fn main() {
         },
         Func {
             name: "leafChatEditorEvent",
-            args: vec![("timeline", &string_), ("editor", &el_)],
-            returns: vec![("root", &el_), ("timeline", &el_)],
+            args: vec![("timeline", &string_)],
+            returns: vec![("root", &el_)],
         },
         Func {
             name: "contCalendarMonth",

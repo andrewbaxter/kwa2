@@ -226,7 +226,6 @@ pub struct EventRepeat {
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct MessageBlockEvent {
-    pub text: String,
     pub range: EventRange,
     pub repeat: Option<EventRepeat>,
 }

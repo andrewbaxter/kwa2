@@ -23,6 +23,7 @@ use {
 };
 
 pub const TZ_MARGIN: SignedDuration = SignedDuration::from_hours(14);
+pub const MAX_REPEATING_LENGTH_DAYS: i64 = 366;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CalendarWindow {
@@ -184,12 +185,16 @@ pub fn validate_event(event: &MessageBlockEvent) -> Result<(), String> {
     if repeat.interval == 0 {
         return Err(format!("Event repeat interval must be at least 1"));
     }
-    let start_date = shape(&event.range)?.start_date;
+    let shape = shape(&event.range)?;
+    let start_date = shape.start_date;
+    if shape.length_days > MAX_REPEATING_LENGTH_DAYS {
+        return Err(format!("Repeating events can't be longer than {} days", MAX_REPEATING_LENGTH_DAYS));
+    }
     match &repeat.rule {
         EventRepeatRule::Days | EventRepeatRule::Years => { },
         EventRepeatRule::Weeks(days) => {
-            if days.is_empty() {
-                return Err(format!("Weekly event repeat needs at least one weekday"));
+            if !days.contains(&weekday_from_jiff(start_date.weekday())) {
+                return Err(format!("Weekly event repeat must include the weekday the event starts on"));
             }
         },
         EventRepeatRule::Months(m) => match m {
@@ -343,10 +348,7 @@ pub fn event_occurrences(event: &MessageBlockEvent, window: &CalendarWindow) -> 
     let mut out = vec![];
     loop {
         let dates = period_dates(shape.start_date, repeat, p)?;
-        let Some((_, first)) = dates.first() else {
-            p += 1;
-            continue;
-        };
+        let (_, first) = dates.first().unwrap();
         if *first > frame_end {
             break;
         }
@@ -400,12 +402,18 @@ pub fn event_envelope(event: &MessageBlockEvent) -> Result<(Timestamp, Option<Ti
     match &repeat.end {
         EventRepeatEnd::Never => return Ok((start, None)),
         EventRepeatEnd::Until(until) => {
-            let p = period_containing(shape.start_date, repeat, *until) + 1;
-            let mut last = first;
-            for (index, date) in period_dates(shape.start_date, repeat, p)? {
-                last = make_occurrence(&shape, index, date)?;
+            let mut p = period_containing(shape.start_date, repeat, *until);
+            loop {
+                let last =
+                    period_dates(shape.start_date, repeat, p)?
+                        .into_iter()
+                        .filter(|(_, date)| *date <= *until)
+                        .last();
+                if let Some((index, date)) = last {
+                    return Ok((start, Some(widen_end(&make_occurrence(&shape, index, date)?)?)));
+                }
+                p -= 1;
             }
-            return Ok((start, Some(widen_end(&last)?)));
         },
         EventRepeatEnd::Count(c) => {
             let target = *c as u64 - 1;
@@ -446,7 +454,6 @@ mod tests {
 
     fn ev(range: EventRange, repeat: Option<EventRepeat>) -> MessageBlockEvent {
         return MessageBlockEvent {
-            text: String::new(),
             range: range,
             repeat: repeat,
         };
@@ -513,6 +520,46 @@ mod tests {
         }));
         let w = month_window_utc(2026, 12).unwrap();
         assert_eq!(starts(&event_occurrences(&e, &w).unwrap()), vec![date(2026, 12, 31)]);
+    }
+
+    #[test]
+    fn until_envelope_exact() {
+        let e = ev(all_day(date(2026, 1, 2), date(2026, 1, 2)), Some(EventRepeat {
+            interval: 1,
+            rule: EventRepeatRule::Weeks(vec![EventWeekday::Friday]),
+            end: EventRepeatEnd::Until(date(2026, 1, 19)),
+        }));
+        let (_, end) = event_envelope(&e).unwrap();
+        assert_eq!(end.unwrap(), utc_midnight(date(2026, 1, 17)).unwrap().checked_add(TZ_MARGIN).unwrap());
+        let e = ev(all_day(date(2026, 1, 2), date(2026, 1, 2)), Some(EventRepeat {
+            interval: 10,
+            rule: EventRepeatRule::Years,
+            end: EventRepeatEnd::Until(date(2030, 1, 1)),
+        }));
+        let (_, end) = event_envelope(&e).unwrap();
+        assert_eq!(end.unwrap(), utc_midnight(date(2026, 1, 3)).unwrap().checked_add(TZ_MARGIN).unwrap());
+    }
+
+    #[test]
+    fn validate_rules() {
+        let ok = ev(all_day(date(2026, 1, 2), date(2026, 1, 2)), Some(EventRepeat {
+            interval: 1,
+            rule: EventRepeatRule::Weeks(vec![EventWeekday::Friday]),
+            end: EventRepeatEnd::Never,
+        }));
+        assert!(validate_event(&ok).is_ok());
+        let bad = ev(all_day(date(2026, 1, 2), date(2026, 1, 2)), Some(EventRepeat {
+            interval: 1,
+            rule: EventRepeatRule::Weeks(vec![EventWeekday::Monday]),
+            end: EventRepeatEnd::Never,
+        }));
+        assert!(validate_event(&bad).is_err());
+        let long = ev(all_day(date(2026, 1, 2), date(2028, 1, 2)), Some(EventRepeat {
+            interval: 1,
+            rule: EventRepeatRule::Years,
+            end: EventRepeatEnd::Never,
+        }));
+        assert!(validate_event(&long).is_err());
     }
 
     #[test]

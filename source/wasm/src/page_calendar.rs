@@ -35,7 +35,6 @@ use {
         scope_any,
     },
     shared::interface::shared::ChannelGroupId,
-    std::rc::Rc,
 };
 
 fn assemble(
@@ -49,7 +48,6 @@ fn assemble(
         build_calendar(pc, DayLayer::Page(stack.clone()), channels, DayAction::GoTo, Zoned::now().date());
     inf.padding_pre_el().ref_push(head_bar);
     stack.ref_push(inf.el());
-    *state().current_calendar.borrow_mut() = Some(Rc::downgrade(&cal.0));
     stack.ref_own(|_| (cal, inf, own));
     return stack;
 }

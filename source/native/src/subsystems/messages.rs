@@ -634,8 +634,10 @@ pub fn message_store(
     let sender = DbIdentity(body.id.identity);
     let sender_unique = u64_to_i64(body.id.unique);
     let source;
+    let mut message_seq = None;
     match stored {
         StoredMessage::Message { seq, snap_offset, receive_time } => {
+            message_seq = Some(seq);
             let rel = rel_cols(&body.rel);
             let client_id = body.client_id.as_ref().map(|c| c.0.clone());
             let blocks = serde_json::to_string(&body.blocks).unwrap();
@@ -664,7 +666,23 @@ pub fn message_store(
             MessageRel::EditOf(target) => (DbIdentity(target.identity), u64_to_i64(target.unique)),
             MessageRel::None | MessageRel::ReplyTo(_) => (sender, sender_unique),
         };
-        crate::subsystems::calendar::message_event_reindex(db_tx, account, owner, channel, root_sender, root_unique)?;
+        let changed =
+            crate::subsystems::calendar::message_event_reindex(
+                db_tx,
+                account,
+                owner,
+                channel,
+                root_sender,
+                root_unique,
+            )?;
+        if changed {
+            let seq = message_seq.unwrap();
+            good_ormning::sqlite::good_query!(
+                db,
+                r#"update channel set calendar_seq = ${opt i64 = Some(seq)} where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel}"#;
+                db_tx
+            ).map_err(|e| loga::err(e.0))?;
+        }
     }
     for block in &body.blocks {
         let MessageBlock::File(file) = block else {

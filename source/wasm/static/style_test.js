@@ -629,21 +629,14 @@
                 middle: presentation.leafChatEditorText({ editor: editor }).root,
               }).root,
             );
-            for (const [timeline, text] of [
-              ["Tue 3 Mar 2026 9:00 - 10:00, every week on Tue, Thu, until Tue 30 Jun 2026", "Standup in the **big** room"],
-              ["Sat 7 Mar 2026 - Mon 9 Mar 2026", ""],
+            for (const timeline of [
+              "Tue 3 Mar 2026 9:00 - 10:00, every week on Tue, Thu, until Tue 30 Jun 2026",
+              "Sat 7 Mar 2026 - Mon 9 Mar 2026",
             ]) {
-              const eventEditor = document.createElement("div");
-              eventEditor.classList.add("malarkdowney");
-              eventEditor.contentEditable = "true";
-              eventEditor.textContent = text;
               controls.rows.appendChild(
                 presentation.contChatEditorRow({
                   left: [presentation.leafChatEditorButtonDelete({}).root],
-                  middle: presentation.leafChatEditorEvent({
-                    timeline: timeline,
-                    editor: eventEditor,
-                  }).root,
+                  middle: presentation.leafChatEditorEvent({ timeline: timeline }).root,
                 }).root,
               );
             }
@@ -910,31 +903,20 @@
       message.portrait.appendChild(
         presentation.leafChatEntryPortrait({ image: "testportrait.jpg" }).root,
       );
-      const intro = document.createElement("div");
-      intro.classList.add("malarkdowney");
-      intro.textContent = "Two things coming up:";
+      const text = document.createElement("div");
+      text.classList.add("malarkdowney");
+      text.textContent =
+        "Standup in the big room, then the camping trip. A long description that should wrap onto several lines without breaking the layout of the message bubble.";
       message.body.appendChild(
-        presentation.leafChatEntryMessageText({ content: intro }).root,
+        presentation.leafChatEntryMessageText({ content: text }).root,
       );
-      for (const [timeline, text] of [
-        [
-          "Tue 3 Mar 2026 9:00 - 10:00, every 2 weeks on Tue, Thu, until Tue 30 Jun 2026",
-          "Standup in the big room. Bring the slides.",
-        ],
-        [
-          "Sat 7 Mar 2026 - Mon 9 Mar 2026, every year",
-          "Camping trip, a very long description that should wrap onto several lines without breaking the layout of the message bubble.",
-        ],
-        ["Fri 13 Mar 2026 22:00 - Sat 14 Mar 2026 2:00", ""],
+      for (const timeline of [
+        "Tue 3 Mar 2026 9:00 - 10:00, every 2 weeks on Tue, Thu, until Tue 30 Jun 2026",
+        "Sat 7 Mar 2026 - Mon 9 Mar 2026, every year",
+        "Fri 13 Mar 2026 22:00 - Sat 14 Mar 2026 2:00",
       ]) {
-        const content = document.createElement("div");
-        content.classList.add("malarkdowney");
-        content.textContent = text;
         message.body.appendChild(
-          presentation.leafChatEntryMessageEvent({
-            timeline: timeline,
-            content: content,
-          }).root,
+          presentation.leafChatEntryMessageEvent({ timeline: timeline }).root,
         );
       }
       return message.root;

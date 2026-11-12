@@ -3730,30 +3730,17 @@ svg.spinner4 path {
   presentation.leafChatEntryMessageEvent =
     /** @type { Presentation["leafChatEntryMessageEvent"] } */ (args) => {
       return {
-        root: e(
-          "div",
-          {},
-          {
-            styles_: [
-              contVboxStyle,
-              s("leaf_chat_entry_message_event", {
-                "": (s) => {
-                  s.gap = "0.1cm";
-                  s.minWidth = "0";
-                  s.alignSelf = "stretch";
-                  s.pointerEvents = "initial";
-                },
-              }),
-            ],
-            children_: [
-              e("div", {}, {
-                styles_: [eventTimelineStyle],
-                children_: eventTimelineChildren(args.timeline),
-              }),
-              args.content,
-            ],
-          },
-        ),
+        root: e("div", {}, {
+          styles_: [
+            eventTimelineStyle,
+            s("leaf_chat_entry_message_event", {
+              "": (s) => {
+                s.pointerEvents = "initial";
+              },
+            }),
+          ],
+          children_: eventTimelineChildren(args.timeline),
+        }),
       };
     };
 
@@ -3764,35 +3751,15 @@ svg.spinner4 path {
 
   presentation.leafChatEditorEvent =
     /** @type { Presentation["leafChatEditorEvent"] } */ (args) => {
-      const timeline = e(
-        "div",
-        { title: "Edit event time", tabIndex: 0, role: "button" },
-        {
-          styles_: [eventTimelineStyle, onwhiteSelectableStyle],
-          children_: eventTimelineChildren(args.timeline),
-        },
-      );
       return {
         root: e(
           "div",
-          {},
+          { title: "Edit event time", tabIndex: 0, role: "button" },
           {
-            styles_: [
-              contVboxStyle,
-              s("leaf_chat_editor_event", {
-                "": (s) => {
-                  s.gap = "0.1cm";
-                  s.minWidth = "0";
-                },
-              }),
-            ],
-            children_: [
-              timeline,
-              e("div", {}, { styles_: [chatEditorTextStyle], children_: [args.editor] }),
-            ],
+            styles_: [eventTimelineStyle, onwhiteSelectableStyle],
+            children_: eventTimelineChildren(args.timeline),
           },
         ),
-        timeline: timeline,
       };
     };
 
@@ -3849,14 +3816,14 @@ svg.spinner4 path {
           "": (s) => {
             s.position = "relative";
             s.aspectRatio = "3 / 4";
-            s.border = `${varLVeryThin} solid ${varCForegroundUltraLight}`;
+            s.border = `${varLVeryThin} solid ${varCForeground}`;
             s.overflow = "hidden";
             s.display = "grid";
             s.justifyItems = "center";
             s.alignItems = "center";
             s.fontSize = varFMenu;
             s.fontWeight = varWHead;
-            s.color = varCForegroundUltraLight;
+            s.color = varCForeground;
             s.pointerEvents = "initial";
             s.cursor = "pointer";
           },
@@ -3905,9 +3872,9 @@ svg.spinner4 path {
                   "": (s) => {
                     s.position = "absolute";
                     s.left = "0";
+                    s.right = "0";
                     s.top = "0";
-                    s.bottom = "0";
-                    s.width = `calc(${varSCalendarMark} / 2)`;
+                    s.height = `calc(${varSCalendarMark} / 2)`;
                     s.backgroundColor = varCNotifyBright;
                   },
                 }),
@@ -3927,7 +3894,7 @@ svg.spinner4 path {
                   "": (s) => {
                     s.position = "absolute";
                     s.right = varPIconButton;
-                    s.top = varPIconButton;
+                    s.bottom = varPIconButton;
                     s.width = varSCalendarMark;
                     s.height = varSCalendarMark;
                     s.borderRadius = "999cm";
