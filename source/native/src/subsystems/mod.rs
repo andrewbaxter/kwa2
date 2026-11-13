@@ -4,6 +4,7 @@ pub mod c2s_get;
 pub mod calendar;
 pub mod files;
 pub mod messages;
+pub mod moderation;
 pub mod oidc;
 pub mod pull_scheduler;
 pub mod push;

@@ -475,7 +475,13 @@ impl Feed<ChatEntry> for ChannelFeed {
                         PagePosition::Last => SnapPage(offset.page.0 + 1),
                         _ => offset.page,
                     }, Some(offset.offset_pos.offset)),
-                    ChatTimeId::None | ChatTimeId::Outbox(_) | ChatTimeId::ServerOutbox(_) => (SnapPage(0), None),
+                    ChatTimeId::None |
+                    ChatTimeId::Outbox(_) |
+                    ChatTimeId::ServerOutbox(_) |
+                    ChatTimeId::Moderation(_) => (
+                        SnapPage(0),
+                        None,
+                    ),
                 };
                 let Some(mut resp): Option<c2s::SnapPageRes> = req_get_retry(c2s::GetSnapPage {
                     channel: self1.0.id.clone(),

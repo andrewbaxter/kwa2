@@ -334,6 +334,11 @@ fn main() {
             returns: vec![("root", &el_)],
         },
         Func {
+            name: "leafChatEntryModerationState",
+            args: vec![("text", &string_)],
+            returns: vec![("root", &el_)],
+        },
+        Func {
             name: "leafChatEntryMessageButtonHistory",
             args: vec![("link", &string_)],
             returns: vec![("root", &el_)],
@@ -381,6 +386,16 @@ fn main() {
         },
         Func {
             name: "leafChatControlsBarModeMenuButtonNewMessage",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatControlsBarModeMenuButtonApprove",
+            args: vec![],
+            returns: vec![("root", &el_)],
+        },
+        Func {
+            name: "leafChatControlsBarModeMenuButtonReject",
             args: vec![],
             returns: vec![("root", &el_)],
         },

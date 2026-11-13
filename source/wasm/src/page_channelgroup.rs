@@ -18,6 +18,10 @@ use {
         chat_feed_channel::ChannelFeed,
         chat_controls::build_controls,
         chat_feed_controls::FeedControls,
+        chat_feed_moderation::{
+            start_level_polling,
+            ModerationFeed,
+        },
         chat_feed_outbox::OutboxFeed,
         chat_feed_server_outbox::ServerOutboxFeed,
         infinite::{
@@ -170,10 +174,13 @@ fn populate(
             inf.add_feed(ChatFeedId::ServerOutbox((ident.ident.clone(), channel.clone())), f_so.clone());
             f_sos.insert(ident.ident.clone(), f_so);
         }
+        let f_m = ModerationFeed::new(chat_state.clone(), channel.clone());
+        inf.add_feed(ChatFeedId::Moderation(channel.clone()), f_m.clone());
         chat_state2.channel_lookup.borrow_mut().insert(channel.clone(), ChannelFeeds {
             channel: f_c,
             outboxes: RefCell::new(f_os),
             server_outboxes: RefCell::new(f_sos),
+            moderation: f_m,
         });
     }
     chat_state.channels_meta.set(pc, channels_meta);
@@ -249,6 +256,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannelGroup) -> El {
 
         // Populate/extend feeds
         let mut own = vec![];
+        own.push(start_level_polling(pc.eg(), chat_state2.clone()));
         if let PopulateResult::TooMany =
             populate(
                 pc,

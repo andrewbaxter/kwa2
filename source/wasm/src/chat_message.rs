@@ -42,6 +42,7 @@ use {
     by_address::ByAddress,
     flowcontrol::shed,
     rooting::El,
+    shared::interface::shared::ModerationState,
     std::rc::Rc,
 };
 
@@ -128,6 +129,24 @@ pub fn build_chat_entry_message(pc: &mut ProcessingContext, m: &ChatEntryMessage
                                 }).unwrap();
                             }
                         });
+                        if let Some(moderation) =
+                            message_id.as_ref().and_then(|id| chat_state.moderation_states.borrow().get(id).cloned()) {
+                            let label =
+                                style_export::leaf_chat_entry_moderation_state(
+                                    style_export::LeafChatEntryModerationStateArgs { text: String::new() },
+                                ).root;
+                            label.ref_own(
+                                |label| link!((_pc = pc), (moderation = moderation), (), (label = label.weak()) {
+                                    let label = label.upgrade()?;
+                                    label.ref_text(match *moderation.borrow() {
+                                        ModerationState::Pending => "Pending",
+                                        ModerationState::Approved => "Approved",
+                                        ModerationState::Rejected => "Rejected",
+                                    });
+                                })
+                            );
+                            m_el.actions.ref_push(label);
+                        }
                         shed!{
                             let Some(message_id) = message_id else {
                                 break;

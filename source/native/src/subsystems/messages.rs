@@ -12,12 +12,22 @@ use {
                 ChannelInfoRes,
                 GetActivity,
                 GetChannelInfo,
+                PulledEntry,
                 PulledMessage,
                 SnapLookupBy,
                 SnapLookupRes,
             },
         },
         subsystems::{
+            moderation::{
+                effective_level,
+                level_from_db,
+                level_from_db_opt,
+                level_to_db,
+                publish_moderation_change,
+                reindex_root,
+                MOD_STATE_PENDING,
+            },
             pull_scheduler::PullKey,
             s2s_client::Signer,
             s2s_error::{
@@ -36,6 +46,7 @@ use {
     shared::interface::{
         shared::{
             AccountId,
+            Level,
             MessageBlock,
             MessageBody,
             MessageId,
@@ -164,8 +175,9 @@ pub struct LocalChannel {
     pub local_identity: Identity,
     pub page_size: usize,
     pub authenticated: bool,
-    pub public_read: bool,
-    pub public_post: bool,
+    pub default_level: Option<Level>,
+    pub level: Option<Level>,
+    pub moderation_seq: Option<i64>,
     pub retention: ChannelRetention,
     pub latest_seq: Option<i64>,
     pub latest_snap_offset: Option<i64>,
@@ -177,6 +189,10 @@ impl LocalChannel {
     pub fn is_owner(&self, owner: Identity) -> bool {
         return self.local_identity == owner;
     }
+
+    pub fn public_read(&self) -> bool {
+        return self.default_level.is_some();
+    }
 }
 
 pub fn local_channel_get(
@@ -187,15 +203,19 @@ pub fn local_channel_get(
 ) -> Result<Option<LocalChannel>, loga::Error> {
     let row = good_ormning::sqlite::good_query_opt!(
         db,
-        r#"select local_identity, page_size, authenticated, public_read, public_post, retention_secs, retention_mode, latest_seq, latest_snap_offset, floor_snap_offset, backfill_done from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
+        r#"select local_identity, page_size, authenticated, default_level, level, moderation_seq, retention_secs, retention_mode, latest_seq, latest_snap_offset, floor_snap_offset, backfill_done from channel where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel} and deleted is null"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?;
-    return Ok(row.map(|r| LocalChannel {
+    let Some(r) = row else {
+        return Ok(None);
+    };
+    return Ok(Some(LocalChannel {
         local_identity: r.local_identity.0,
         page_size: r.page_size.max(1) as usize,
         authenticated: r.authenticated,
-        public_read: r.public_read,
-        public_post: r.public_post,
+        default_level: level_from_db_opt(r.default_level)?,
+        level: level_from_db_opt(r.level)?,
+        moderation_seq: r.moderation_seq,
         retention: retention_from_db(&r.retention_mode, r.retention_secs),
         latest_seq: r.latest_seq,
         latest_snap_offset: r.latest_snap_offset,
@@ -232,18 +252,16 @@ pub fn owner_channel_get(
     return Ok(Some((account, local)));
 }
 
-pub fn member_can_post(
+pub fn sender_level(
     db_tx: &mut db::Db<Transaction<'_>>,
     account: DbAccountId,
     owner: DbIdentity,
     channel: &DbChannelId,
-    member: DbIdentity,
-) -> Result<bool, loga::Error> {
-    return Ok(good_ormning::sqlite::good_query_opt!(
-        db,
-        r#"select can_post from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and member = ${identity_id_t = &member}"#;
-        db_tx
-    ).map_err(|e| loga::err(e.0))?.unwrap_or(false));
+    local: &LocalChannel,
+    sender: Identity,
+) -> Result<Option<Level>, loga::Error> {
+    let level = effective_level(db_tx, account, owner, channel, local, Some(sender))?;
+    return Ok(level.filter(|l| l.can_post()));
 }
 
 pub fn channel_members(
@@ -267,7 +285,7 @@ pub fn check_read_access(
     local: &LocalChannel,
     caller: Option<Identity>,
 ) -> Result<(), S2sError> {
-    if local.public_read {
+    if local.public_read() {
         return Ok(());
     }
     let Some(caller) = caller else {
@@ -467,6 +485,7 @@ pub fn snap_position_by_id(
             row.rel_target_sender.context("edit_of row missing rel_target_sender")?,
             row.rel_target_unique.context("edit_of row missing rel_target_unique")?,
         ),
+        Some(crate::subsystems::moderation::REL_DELETED) => return Ok(None),
         _ => (db_sender, sender_unique),
     };
     let Some(origin) = good_ormning::sqlite::good_query_opt!(
@@ -476,12 +495,15 @@ pub fn snap_position_by_id(
     ).map_err(|e| loga::err(e.0))? else {
         return Ok(None);
     };
+    let Some(snap_offset) = origin.snap_offset else {
+        return Ok(None);
+    };
     return Ok(Some(SnapPosition {
         original_id: MessageId {
             identity: origin_sender.0,
             unique: i64_to_u64(origin_unique),
         },
-        snap_offset: origin.snap_offset.context("Edit target is itself an edit")?,
+        snap_offset: snap_offset,
         receive_time: origin.receive_time.0,
     }));
 }
@@ -607,6 +629,7 @@ pub fn store_remote_message(
 
 pub const MESSAGE_FILE_SOURCE_MESSAGE: &str = "message";
 pub const MESSAGE_FILE_SOURCE_OUTBOX: &str = "outbox";
+pub const MESSAGE_FILE_SOURCE_MODERATION: &str = "moderation";
 
 pub fn parse_blocks(blocks: &str) -> Result<Vec<MessageBlock>, loga::Error> {
     return Ok(serde_json::from_str(blocks).context("Stored message blocks were not valid JSON")?);
@@ -771,7 +794,7 @@ pub async fn publish_local_notification(
         deleted: deleted,
     };
     state.ws_bus.publish(account_id, WsEvent::Activity(notification.clone())).await;
-    if web_push {
+    if web_push && !deleted {
         let state = state.clone();
         tokio::spawn(async move {
             let payload = serde_json::to_vec(&PushPayload::Activity(notification)).unwrap();
@@ -988,12 +1011,23 @@ pub fn channel_info_res(
     owner: DbIdentity,
     channel: &DbChannelId,
     local: &LocalChannel,
+    caller: Option<Identity>,
 ) -> Result<ChannelInfoRes, loga::Error> {
+    let level =
+        effective_level(
+            db_tx,
+            account,
+            owner,
+            channel,
+            local,
+            caller,
+        )?.expect("Caller passed the read access check but has no level");
     return Ok(ChannelInfoRes {
         page_size: u32::try_from(local.page_size).unwrap_or(u32::MAX),
         latest_seq: local.latest_seq.map(i64_to_u64),
         latest_snap_offset: local.latest_snap_offset.map(i64_to_u64),
         earliest_snap_offset: earliest_snap_offset(db_tx, account, owner, channel)?.map(i64_to_u64),
+        level: level,
     });
 }
 
@@ -1012,6 +1046,7 @@ pub struct PullContext {
     pub local: LocalChannel,
     pub mode: PullMode,
     pub cursor: Option<u64>,
+    pub moderated: bool,
 }
 
 pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOutcome, loga::Error> {
@@ -1032,9 +1067,9 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
                 return Ok(None);
             };
             if local.is_owner(owner) {
-                if !member_can_post(db_tx, account, db_owner, &db_channel_id, db_source)? && !local.public_post {
+                let Some(level) = sender_level(db_tx, account, db_owner, &db_channel_id, &local, source)? else {
                     return Ok(None);
-                }
+                };
                 let cursor = good_ormning::sqlite::good_query_opt!(
                     db,
                     r#"select cursor_seq from channel_pull_cursor where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and source = ${identity_id_t = &db_source}"#;
@@ -1044,6 +1079,7 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
                     cursor: cursor.map(i64_to_u64),
                     local: local,
                     mode: PullMode::OwnerPullsMember,
+                    moderated: level.moderated(),
                 }));
             } else {
                 if source != owner {
@@ -1053,6 +1089,7 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
                     cursor: local.latest_seq.map(i64_to_u64),
                     local: local,
                     mode: PullMode::MemberPullsOwner,
+                    moderated: false,
                 }));
             }
         }
@@ -1063,6 +1100,7 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
     let local = context.local;
     let local_identity = local.local_identity;
     let retention = local.retention;
+    let moderated = context.moderated;
     let mut cursor = context.cursor;
     let signer = match context.mode {
         PullMode::OwnerPullsMember => Some(load_signer(state, key.account_id, local_identity).await?),
@@ -1098,19 +1136,42 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
                     return s2s_client.post_authed(target, signer, &s2sv1::Req::PullOutbox(req)).await;
                 }.await;
                 ret
-            }?,
+            }?.messages.into_iter().map(PulledEntry::Message).collect::<Vec<_>>(),
             PullMode::MemberPullsOwner => state.s2s_client.get_activity(source, signer.as_ref(), GetActivity {
                 channel: qualified_channel.clone(),
                 start: cursor.map(|c| c + 1).unwrap_or(0),
                 limit: PULL_BATCH_LIMIT,
-            }).await?,
+            }).await?.entries,
         };
-        let Some(batch_max_seq) = res.messages.iter().map(|m| m.seq).max() else {
+        let Some(batch_max_seq) = res.iter().map(|m| match m {
+            PulledEntry::Message(m) => m.seq,
+            PulledEntry::Deleted(d) => d.seq,
+        }).max() else {
             break;
         };
-        let batch_len = res.messages.len();
+        let batch_len = res.len();
         let is_owner_mode = matches!(context.mode, PullMode::OwnerPullsMember);
-        let mut verified = verify_pulled(state, &qualified_channel, res.messages, only_sender).await?;
+        let mut messages = Vec::with_capacity(res.len());
+        let mut deleted = vec![];
+        for e in res {
+            match e {
+                PulledEntry::Message(m) => messages.push(m),
+                PulledEntry::Deleted(d) => {
+                    if is_owner_mode {
+                        state
+                            .log
+                            .log_with(
+                                loga::WARN,
+                                "Refusing pulled outbox entry: members can't publish deletions",
+                                ea!(sender = source),
+                            );
+                        continue;
+                    }
+                    deleted.push(d);
+                },
+            }
+        }
+        let mut verified = verify_pulled(state, &qualified_channel, messages, only_sender).await?;
         if is_owner_mode {
             verified.retain(|v| {
                 let own = match &v.body.rel {
@@ -1216,14 +1277,49 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
         if let Some(s) = batch_snap_max {
             latest_snap_offset = Some(latest_snap_offset.map(|l| l.max(s)).unwrap_or(s));
         }
-        let ingested = tx(&state.db, {
+        let (ingested, queued) = tx(&state.db, {
             let db_channel_id = db_channel_id.clone();
             let cursor_seq = u64_to_i64(batch_max_seq);
             move |db_tx| {
                 let mut ingested: Vec<(u64, Vec<MessageBlock>)> = vec![];
+                let mut queued = false;
                 if is_owner_mode {
                     for v in &verified {
-                        if let Some(seq) =
+                        if moderated {
+                            let Some(local) = local_channel_get(db_tx, account, db_owner, &db_channel_id)? else {
+                                continue;
+                            };
+                            let seq = local.moderation_seq.map(|s| s + 1).unwrap_or(0);
+                            let sender = DbIdentity(v.body.id.identity);
+                            let sender_unique = u64_to_i64(v.body.id.unique);
+                            let rel = rel_cols(&v.body.rel);
+                            let client_id = v.body.client_id.as_ref().map(|c| c.0.clone());
+                            let blocks = serde_json::to_string(&v.body.blocks).unwrap();
+                            good_ormning::sqlite::good_query!(
+                                db,
+                                r#"insert into moderation (account_id, identity, channel, sender, sender_unique, seq, receive_time, client_id, raw, blocks, rel_type, rel_target_sender, rel_target_unique, state) values (${account_id_t = &account}, ${identity_id_t = &db_owner}, ${channel_id_t = &db_channel_id}, ${identity_id_t = &sender}, ${i64 = sender_unique}, ${i64 = seq}, ${time_ms_t = &crate::interface::db::DbTimeMs(Timestamp::now())}, ${opt string = client_id.as_deref()}, ${string = v.raw.as_str()}, ${string = blocks.as_str()}, ${opt string = rel.rel_type.as_deref()}, ${opt identity_id_t = rel.rel_target_sender.as_ref()}, ${opt i64 = rel.rel_target_unique}, ${string = MOD_STATE_PENDING}) on conflict do nothing"#;
+                                db_tx
+                            ).map_err(|e| loga::err(e.0))?;
+                            if db_tx.0.changes() == 0 {
+                                continue;
+                            }
+                            good_ormning::sqlite::good_query!(
+                                db,
+                                r#"update channel set moderation_seq = ${opt i64 = Some(seq)} where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id}"#;
+                                db_tx
+                            ).map_err(|e| loga::err(e.0))?;
+                            for block in &v.body.blocks {
+                                let MessageBlock::File(file) = block else {
+                                    continue;
+                                };
+                                good_ormning::sqlite::good_query!(
+                                    db,
+                                    r#"insert into message_file (account_id, identity, channel, source, sender, sender_unique, hash) values (${account_id_t = &account}, ${identity_id_t = &db_owner}, ${channel_id_t = &db_channel_id}, ${string = MESSAGE_FILE_SOURCE_MODERATION}, ${identity_id_t = &sender}, ${i64 = sender_unique}, ${string = file.file.hash.0.as_str()}) on conflict do nothing"#;
+                                    db_tx
+                                ).map_err(|e| loga::err(e.0))?;
+                            }
+                            queued = true;
+                        } else if let Some(seq) =
                             ingest_message(db_tx, account, db_owner, &db_channel_id, &v.raw, &v.body)? {
                             ingested.push((seq, v.body.blocks.clone()));
                         }
@@ -1245,16 +1341,66 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
                             ingested.push((v.seq, v.body.blocks.clone()));
                         }
                     }
+                    for d in &deleted {
+                        let sender = DbIdentity(d.id.identity);
+                        let sender_unique = u64_to_i64(d.id.unique);
+                        let Some(row) = good_ormning::sqlite::good_query_opt!(
+                            db,
+                            r#"select rel_type, rel_target_sender, rel_target_unique from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &sender} and sender_unique = ${i64 = sender_unique}"#;
+                            db_tx
+                        ).map_err(|e| loga::err(e.0))? else {
+                            continue;
+                        };
+                        good_ormning::sqlite::good_query!(
+                            db,
+                            r#"delete from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and sender = ${identity_id_t = &sender} and sender_unique = ${i64 = sender_unique}"#;
+                            db_tx
+                        ).map_err(|e| loga::err(e.0))?;
+                        good_ormning::sqlite::good_query!(
+                            db,
+                            r#"delete from message_file where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and source = ${string = MESSAGE_FILE_SOURCE_MESSAGE} and sender = ${identity_id_t = &sender} and sender_unique = ${i64 = sender_unique}"#;
+                            db_tx
+                        ).map_err(|e| loga::err(e.0))?;
+                        reindex_root(
+                            db_tx,
+                            account,
+                            db_owner,
+                            &db_channel_id,
+                            sender,
+                            sender_unique,
+                            row.rel_type.as_deref(),
+                            row.rel_target_sender,
+                            row.rel_target_unique,
+                            u64_to_i64(d.seq),
+                        )?;
+                        ingested.push((d.seq, vec![]));
+                    }
                     good_ormning::sqlite::good_query!(
                         db,
                         r#"update channel set latest_seq = ${opt i64 = Some(cursor_seq)}, latest_snap_offset = ${opt i64 = latest_snap_offset} where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id}"#;
                         db_tx
                     ).map_err(|e| loga::err(e.0))?;
                 }
-                return Ok(ingested);
+                return Ok((ingested, queued));
             }
         }).await.context("Error storing pulled messages")?;
         cursor = Some(batch_max_seq);
+        if queued {
+            had_new = true;
+            publish_moderation_change(state, account, &qualified_channel).await;
+            let moderators = tx(&state.db, {
+                let db_channel_id = db_channel_id.clone();
+                move |db_tx| {
+                    let level = level_to_db(Level::Moderator);
+                    return Ok(good_ormning::sqlite::good_query_many!(
+                        db,
+                        r#"select member from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and level = ${string = level}"#;
+                        db_tx
+                    ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| r.0).collect::<Vec<_>>());
+                }
+            }).await.context("Error listing channel moderators for notification")?;
+            notify_remotes(state, key.account_id, local_identity, qualified_channel.clone(), moderators).await;
+        }
         if let Some((seq, body)) = ingested.last().cloned() {
             had_new = true;
             publish_local_notification(state, key.account_id, qualified_channel.clone(), seq, body, true).await;
@@ -1277,6 +1423,9 @@ pub async fn pull_and_store(state: &Arc<State>, key: &PullKey) -> Result<PullOut
         if (batch_len as u32) < PULL_BATCH_LIMIT {
             break;
         }
+    }
+    if !matches!(context.mode, PullMode::OwnerPullsMember) && local.level == Some(Level::Moderator) {
+        publish_moderation_change(state, account, &qualified_channel).await;
     }
     if had_new {
         return Ok(PullOutcome::New);
@@ -1371,9 +1520,10 @@ pub fn store_channel_info(
     } else {
         local.latest_seq
     };
+    let level = level_to_db(info.level);
     good_ormning::sqlite::good_query!(
         db,
-        r#"update channel set floor_snap_offset = ${opt i64 = floor}, latest_snap_offset = ${opt i64 = latest_snap_offset}, latest_seq = ${opt i64 = latest_seq} where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel}"#;
+        r#"update channel set floor_snap_offset = ${opt i64 = floor}, latest_snap_offset = ${opt i64 = latest_snap_offset}, latest_seq = ${opt i64 = latest_seq}, level = ${opt string = Some(level)} where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and id = ${channel_id_t = channel}"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?;
     return Ok(());
@@ -1432,7 +1582,7 @@ pub async fn store_fetched(
 pub struct ChannelInviteLookup {
     pub account_id: DbAccountId,
     pub owner: DbIdentity,
-    pub can_post: bool,
+    pub level: Level,
     pub used_count: i64,
     pub shown_name: Option<String>,
     pub shown_description: Option<String>,
@@ -1445,7 +1595,7 @@ pub fn lookup_channel_invite(
 ) -> Result<ChannelInviteLookup, S2sError> {
     let invite_row = not_found(good_ormning::sqlite::good_query_opt!(
         db,
-        r#"select account_id, identity, single_use, expiry, used_count, can_post, shown_name, shown_description from channel_invite where channel = ${channel_id_t = channel} and token = ${string = token}"#;
+        r#"select account_id, identity, single_use, expiry, used_count, level, shown_name, shown_description from channel_invite where channel = ${channel_id_t = channel} and token = ${string = token}"#;
         db_tx
     ).map_err(|e| loga::err(e.0))?, "Invitation not recognized")?;
     if let Some(exp) = invite_row.expiry {
@@ -1459,7 +1609,7 @@ pub fn lookup_channel_invite(
     return Ok(ChannelInviteLookup {
         account_id: invite_row.account_id,
         owner: invite_row.identity,
-        can_post: invite_row.can_post,
+        level: level_from_db(&invite_row.level)?,
         used_count: invite_row.used_count,
         shown_name: invite_row.shown_name,
         shown_description: invite_row.shown_description,

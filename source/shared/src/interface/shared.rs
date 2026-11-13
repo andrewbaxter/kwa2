@@ -110,6 +110,33 @@ pub struct QualifiedChannelId {
     pub channel: ChannelId,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Level {
+    ReadOnly,
+    Probational,
+    Writer,
+    Moderator,
+}
+
+impl Level {
+    pub fn can_post(self) -> bool {
+        return self >= Level::Probational;
+    }
+
+    pub fn moderated(self) -> bool {
+        return self == Level::Probational;
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ModerationState {
+    Pending,
+    Approved,
+    Rejected,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
 pub struct MessageClientId(pub String);
 

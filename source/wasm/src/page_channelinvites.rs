@@ -35,11 +35,7 @@ use {
 
 pub fn build(channel: &QualifiedChannelId) -> El {
     let inv_elements = style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
-    let old_invites =
-        get_stored_api_channelinvites(None)
-            .into_iter()
-            .filter(|x| x.res.token.channel == *channel)
-            .collect::<Vec<_>>();
+    let old_invites = get_stored_api_channelinvites(channel, None);
     let lookup_el_invites = Rc::new(RefCell::new(HashMap::new()));
 
     // Build the immediately available options
@@ -65,12 +61,7 @@ pub fn build(channel: &QualifiedChannelId) -> El {
         let channel = channel.clone();
         async move {
             ta_return!(Vec < El >, String);
-            let new_invites =
-                req_api_channelinvites(None)
-                    .await?
-                    .into_iter()
-                    .filter(|x| x.res.token.channel == channel)
-                    .collect::<Vec<_>>();
+            let new_invites = req_api_channelinvites(&channel, None).await?;
 
             // Diff level 1 identities
             let mut new_els1 = vec![];

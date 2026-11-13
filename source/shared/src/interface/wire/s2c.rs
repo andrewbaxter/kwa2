@@ -35,9 +35,16 @@ pub struct OutboxChange {
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ModerationChange {
+    pub channel: QualifiedChannelId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum WsEvent {
     Activity(Notification),
     Outbox(OutboxChange),
+    Moderation(ModerationChange),
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]

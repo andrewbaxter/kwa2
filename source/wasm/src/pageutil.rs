@@ -45,6 +45,7 @@ use {
         shared::{
             ChannelGroupId,
             FileRef,
+            Level,
             Portrait,
         },
         wire::{
@@ -392,6 +393,128 @@ impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormOwnerRetention {
             new_form_retention(
                 &[(RETENTION_KIND_ALL, "Everything"), (RETENTION_KIND_DAYS, "A number of days")],
                 from.map(|x| x.0).unwrap_or(ChannelRetention::All),
+            );
+        return (els, Box::new(state));
+    }
+}
+
+const LEVEL_KIND_NONE: &str = "";
+const LEVEL_KIND_READ_ONLY: &str = "read_only";
+const LEVEL_KIND_PROBATIONAL: &str = "probational";
+const LEVEL_KIND_WRITER: &str = "writer";
+const LEVEL_KIND_MODERATOR: &str = "moderator";
+
+struct FormLevelState {
+    err_el: El,
+    select_el: El,
+}
+
+impl FormLevelState {
+    fn parse(&self) -> Result<Option<Level>, ()> {
+        self.err_el.ref_clear();
+        let kind = self.select_el.raw().dyn_into::<HtmlSelectElement>().unwrap().value();
+        match kind.as_str() {
+            LEVEL_KIND_NONE => return Ok(None),
+            LEVEL_KIND_READ_ONLY => return Ok(Some(Level::ReadOnly)),
+            LEVEL_KIND_PROBATIONAL => return Ok(Some(Level::Probational)),
+            LEVEL_KIND_WRITER => return Ok(Some(Level::Writer)),
+            LEVEL_KIND_MODERATOR => return Ok(Some(Level::Moderator)),
+            other => {
+                self.err_el.ref_text(&format!("Unknown level [{}]", other));
+                return Err(());
+            },
+        }
+    }
+}
+
+fn new_form_level(
+    options: &[(&'static str, &'static str)],
+    from: Option<Level>,
+) -> (rooting_forms::FormElements, FormLevelState) {
+    let err_el = err_el();
+    let select_el = el("select");
+    let current = match from {
+        None => LEVEL_KIND_NONE,
+        Some(Level::ReadOnly) => LEVEL_KIND_READ_ONLY,
+        Some(Level::Probational) => LEVEL_KIND_PROBATIONAL,
+        Some(Level::Writer) => LEVEL_KIND_WRITER,
+        Some(Level::Moderator) => LEVEL_KIND_MODERATOR,
+    };
+    for (kind, label) in options {
+        let option_el = el("option").attr("value", kind).text(label);
+        if *kind == current {
+            option_el.ref_attr("selected", "");
+        }
+        select_el.ref_push(option_el);
+    }
+    return (rooting_forms::FormElements {
+        error: Some(err_el.clone()),
+        elements: vec![select_el.clone()],
+    }, FormLevelState {
+        err_el: err_el,
+        select_el: select_el,
+    });
+}
+
+#[derive(Clone)]
+pub struct FormLevel(pub Level);
+
+impl rooting_forms::FormState<FormLevel> for FormLevelState {
+    fn parse(&self) -> Result<FormLevel, ()> {
+        let Some(level) = FormLevelState::parse(self)? else {
+            self.err_el.ref_text("Select a level");
+            return Err(());
+        };
+        return Ok(FormLevel(level));
+    }
+}
+
+impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormLevel {
+    fn new_form_with_(
+        _context: &C,
+        _field: &str,
+        from: Option<&Self>,
+        _depth: usize,
+    ) -> (rooting_forms::FormElements, Box<dyn rooting_forms::FormState<Self>>) {
+        let (els, state) =
+            new_form_level(
+                &[
+                    (LEVEL_KIND_MODERATOR, "Moderator"),
+                    (LEVEL_KIND_WRITER, "Writer"),
+                    (LEVEL_KIND_PROBATIONAL, "Probational writer"),
+                    (LEVEL_KIND_READ_ONLY, "Read only"),
+                ],
+                Some(from.map(|x| x.0).unwrap_or(Level::Writer)),
+            );
+        return (els, Box::new(state));
+    }
+}
+
+#[derive(Clone)]
+pub struct FormDefaultLevel(pub Option<Level>);
+
+impl rooting_forms::FormState<FormDefaultLevel> for FormLevelState {
+    fn parse(&self) -> Result<FormDefaultLevel, ()> {
+        return Ok(FormDefaultLevel(FormLevelState::parse(self)?));
+    }
+}
+
+impl<C: 'static + Clone> rooting_forms::FormWith<C> for FormDefaultLevel {
+    fn new_form_with_(
+        _context: &C,
+        _field: &str,
+        from: Option<&Self>,
+        _depth: usize,
+    ) -> (rooting_forms::FormElements, Box<dyn rooting_forms::FormState<Self>>) {
+        let (els, state) =
+            new_form_level(
+                &[
+                    (LEVEL_KIND_NONE, "Members only"),
+                    (LEVEL_KIND_READ_ONLY, "Anyone can read"),
+                    (LEVEL_KIND_PROBATIONAL, "Anyone can read, post with moderation"),
+                    (LEVEL_KIND_WRITER, "Anyone can read and post"),
+                ],
+                from.and_then(|x| x.0),
             );
         return (els, Box::new(state));
     }

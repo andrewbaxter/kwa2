@@ -11,7 +11,7 @@ use {
             Identify,
             IdentifyChallenge,
             IdentifyRes,
-            PulledMessages,
+            PulledActivity,
             S2sErrorBody,
             SpaghRecord,
             SPAGH_RECORD_KEY,
@@ -391,7 +391,7 @@ impl S2sClient {
         target: Identity,
         signer: Option<&Signer>,
         req: GetActivity,
-    ) -> Result<PulledMessages, loga::Error> {
+    ) -> Result<PulledActivity, loga::Error> {
         return self.get_opt_authed(target, signer, &req).await;
     }
 }

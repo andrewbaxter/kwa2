@@ -4,7 +4,10 @@ use {
         localdata::{
             self,
         },
-        pageutil::build_form,
+        pageutil::{
+            FormLevel,
+            build_form,
+        },
         state::{
             Ministate,
             MinistateChannelInvite,
@@ -19,6 +22,7 @@ use {
     rooting::El,
     rooting_forms::Form,
     shared::interface::{
+        shared::Level,
         wire::c2s::{
             self,
         },
@@ -41,8 +45,8 @@ struct Form_ {
     single_use: bool,
     #[title("Expiry")]
     expiry: Option<Timestamp>,
-    #[title("Joiners can post")]
-    can_post: bool,
+    #[title("Joiner level")]
+    level: FormLevel,
 }
 
 pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelInviteNew) -> El {
@@ -55,7 +59,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelInviteNew) -> El {
         shown_description: None,
         single_use: false,
         expiry: None,
-        can_post: true,
+        level: FormLevel(Level::Writer),
     }));
     let form_state = Rc::new(form_state);
     return build_form(
@@ -83,7 +87,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelInviteNew) -> El {
                     shown_description: new_values.shown_description,
                     single_use: new_values.single_use,
                     expiry: new_values.expiry,
-                    can_post: new_values.can_post,
+                    level: new_values.level.0,
                 }).await?;
                 localdata::ensure_channelinvite(res.clone()).await;
                 eg.event(|pc| {

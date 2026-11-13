@@ -961,11 +961,17 @@ fn main() {
                                         let (db_tx, account, owner, channel):
                                             (&mut db::Db<Transaction<'_>>, DbAccountId, DbIdentity, &DbChannelId) =
                                             (db_tx, c.account_id, c.identity, &c.id);
-                                        return Ok(good_ormning::sqlite::good_query_many!(
+                                        let mut out = vec![];
+                                        for r in good_ormning::sqlite::good_query_many!(
                                             db,
-                                            r#"select member from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and can_post = ${bool = true}"#;
+                                            r#"select member, level from channel_member where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel}"#;
                                             db_tx
-                                        ).map_err(|e| loga::err(e.0))?.into_iter().map(|r| r.0).collect());
+                                        ).map_err(|e| loga::err(e.0))? {
+                                            if crate::subsystems::moderation::level_from_db(&r.level)?.can_post() {
+                                                out.push(r.member.0);
+                                            }
+                                        }
+                                        return Ok(out);
                                     })()
                                 }? {
                                     keys.push(PullKey {
@@ -1382,6 +1388,16 @@ fn main() {
                                                 root_unique,
                                             )?;
                                         }
+                                        good_ormning::sqlite::good_query!(
+                                            db,
+                                            r#"delete from message_file where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and source = ${string = MESSAGE_FILE_SOURCE_MODERATION} and exists (select 1 from moderation where moderation.account_id = message_file.account_id and moderation.identity = message_file.identity and moderation.channel = message_file.channel and moderation.sender = message_file.sender and moderation.sender_unique = message_file.sender_unique and moderation.receive_time < ${time_ms_t = &crate::interface::db::DbTimeMs(cutoff)})"#;
+                                            db_tx
+                                        ).map_err(|e| loga::err(e.0))?;
+                                        good_ormning::sqlite::good_query!(
+                                            db,
+                                            r#"delete from moderation where account_id = ${account_id_t = &c.account_id} and identity = ${identity_id_t = &c.identity} and channel = ${channel_id_t = &c.id} and receive_time < ${time_ms_t = &crate::interface::db::DbTimeMs(cutoff)}"#;
+                                            db_tx
+                                        ).map_err(|e| loga::err(e.0))?;
                                     }
                                     return Ok(());
                                 }).await {
@@ -1406,6 +1422,28 @@ fn main() {
                                                     m.identity.0,
                                                     m.channel.0.clone(),
                                                     MESSAGE_FILE_SOURCE_MESSAGE.to_string(),
+                                                    m.sender.0,
+                                                    m.sender_unique,
+                                                    f.file.hash.0,
+                                                ),
+                                            );
+                                        }
+                                    }
+                                    for m in good_ormning::sqlite::good_query_many!(
+                                        db,
+                                        r#"select account_id, identity, channel, sender, sender_unique, blocks from moderation"#;
+                                        db_tx
+                                    ).map_err(|e| loga::err(e.0))? {
+                                        for block in parse_blocks(&m.blocks)? {
+                                            let MessageBlock::File(f) = block else {
+                                                continue;
+                                            };
+                                            expected.insert(
+                                                (
+                                                    m.account_id.0,
+                                                    m.identity.0,
+                                                    m.channel.0.clone(),
+                                                    MESSAGE_FILE_SOURCE_MODERATION.to_string(),
                                                     m.sender.0,
                                                     m.sender_unique,
                                                     f.file.hash.0,
@@ -2091,7 +2129,7 @@ fn main() {
                                                                                         ::sqlite
                                                                                         ::good_query_many!(
                                                                                             db,
-                                                                                            r#"select account_id, local_identity, public_post from channel where identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id} and deleted is null"#;
+                                                                                            r#"select account_id, local_identity from channel where identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id} and deleted is null"#;
                                                                                             db_tx
                                                                                         ).map_err(|e| loga::err(e.0))?
                                                                                     );
@@ -2188,15 +2226,36 @@ fn main() {
                                                                                         };
                                                                                         if row.local_identity.0 ==
                                                                                             owner {
-                                                                                            if member_can_post(
+                                                                                            let Some(local) =
+                                                                                                local_channel_get(
+                                                                                                    db_tx,
+                                                                                                    row.account_id,
+                                                                                                    db_owner,
+                                                                                                    &db_channel_id
+                                                                                                )? else {
+                                                                                                    continue;
+                                                                                                };
+                                                                                            if crate
+                                                                                            ::subsystems
+                                                                                            ::moderation
+                                                                                            ::member_level(
                                                                                                 db_tx,
                                                                                                 row.account_id,
                                                                                                 db_owner,
                                                                                                 &db_channel_id,
                                                                                                 DbIdentity(signer)
-                                                                                            )? {
+                                                                                            )?
+                                                                                                .map(|l| l.can_post())
+                                                                                                .unwrap_or(false) {
                                                                                                 scheduled.push(key);
-                                                                                            } else if row.public_post {
+                                                                                            } else if sender_level(
+                                                                                                db_tx,
+                                                                                                row.account_id,
+                                                                                                db_owner,
+                                                                                                &db_channel_id,
+                                                                                                &local,
+                                                                                                signer
+                                                                                            )?.is_some() {
                                                                                                 one_shot.push(key);
                                                                                             }
                                                                                         } else if signer == owner {
@@ -2340,7 +2399,7 @@ fn main() {
                                                                                             ::sqlite
                                                                                             ::good_query!(
                                                                                                 db,
-                                                                                                r#"insert into channel_member (account_id, identity, channel, member, confirmed, can_post, memo_short, memo_long) values (${account_id_t = &account_id}, ${identity_id_t = &owner}, ${channel_id_t = &db_channel_id}, ${identity_id_t = &db_caller}, ${bool = true}, ${bool = invite_row.can_post}, ${string = ""}, ${string = ""}) on conflict (account_id, identity, channel, member) do update set confirmed = true"#;
+                                                                                                r#"insert into channel_member (account_id, identity, channel, member, confirmed, level, memo_short, memo_long) values (${account_id_t = &account_id}, ${identity_id_t = &owner}, ${channel_id_t = &db_channel_id}, ${identity_id_t = &db_caller}, ${bool = true}, ${string = crate::subsystems::moderation::level_to_db(invite_row.level)}, ${string = ""}, ${string = ""}) on conflict (account_id, identity, channel, member) do update set confirmed = true"#;
                                                                                                 db_tx
                                                                                             ).map_err(
                                                                                                 |e| loga::err(e.0)
@@ -2363,7 +2422,8 @@ fn main() {
                                                                                                     account_id,
                                                                                                     owner,
                                                                                                     &db_channel_id,
-                                                                                                    &local
+                                                                                                    &local,
+                                                                                                    Some(caller)
                                                                                                 )?;
                                                                                             return Ok(
                                                                                                 (
@@ -2468,7 +2528,7 @@ fn main() {
                                                                                             ::sqlite
                                                                                             ::good_query!(
                                                                                                 db,
-                                                                                                r#"insert into channel_member (account_id, identity, channel, member, confirmed, can_post, memo_short, memo_long) values (${account_id_t = &account_id}, ${identity_id_t = &db_identity}, ${channel_id_t = &db_dm_channel_id}, ${identity_id_t = &db_caller}, ${bool = true}, ${bool = true}, ${string = ""}, ${string = ""})"#;
+                                                                                                r#"insert into channel_member (account_id, identity, channel, member, confirmed, level, memo_short, memo_long) values (${account_id_t = &account_id}, ${identity_id_t = &db_identity}, ${channel_id_t = &db_dm_channel_id}, ${identity_id_t = &db_caller}, ${bool = true}, ${string = crate::subsystems::moderation::level_to_db(shared::interface::shared::Level::Writer)}, ${string = ""}, ${string = ""})"#;
                                                                                                 db_tx
                                                                                             ).map_err(
                                                                                                 |e| loga::err(e.0)
@@ -2504,6 +2564,11 @@ fn main() {
                                                                                             latest_seq: None,
                                                                                             latest_snap_offset: None,
                                                                                             earliest_snap_offset: None,
+                                                                                            level: shared
+                                                                                            ::interface
+                                                                                            ::shared
+                                                                                            ::Level
+                                                                                            ::Writer,
                                                                                         },
                                                                                     }
                                                                                 );
@@ -2515,6 +2580,67 @@ fn main() {
                                                                             ),
                                                                         }
                                                                     }.await;
+                                                                ret
+                                                            }));
+                                                        },
+                                                        s2sv1::Req::Moderate(r) => {
+                                                            return Ok(s2s_respond::<Moderate>(state, {
+                                                                use {
+                                                                    crate::{
+                                                                        interface::{
+                                                                            db::{
+                                                                                DbChannelId,
+                                                                                DbIdentity,
+                                                                            },
+                                                                            s2s::{
+                                                                                Moderate,
+                                                                                ModerateRes,
+                                                                            },
+                                                                        },
+                                                                        subsystems::s2s_error::{
+                                                                            not_found,
+                                                                            s2s_tx,
+                                                                            S2sError,
+                                                                        },
+                                                                        State,
+                                                                    },
+                                                                    std::sync::Arc,
+                                                                };
+                                                                use crate::subsystems::messages::*;
+
+                                                                let ret: Result<ModerateRes, S2sError> = async {
+                                                                    let (state, token, req,):
+                                                                        (&Arc<State>, &str, Moderate,) =
+                                                                        (state, &auth_token, r,);
+                                                                    let caller = require_caller(state, token).await?;
+                                                                    let db_owner = DbIdentity(req.channel.identity);
+                                                                    let db_channel_id =
+                                                                        DbChannelId(req.channel.channel.clone());
+                                                                    let account =
+                                                                        s2s_tx(
+                                                                            &state.db,
+                                                                            "looking up moderated channel",
+                                                                            move |db_tx| {
+                                                                                let (account, _) =
+                                                                                    not_found(
+                                                                                        owner_channel_get(
+                                                                                            db_tx,
+                                                                                            db_owner,
+                                                                                            &db_channel_id
+                                                                                        )?,
+                                                                                        "Channel not found on this server"
+                                                                                    )?;
+                                                                                return Ok(account);
+                                                                            }
+                                                                        ).await?;
+                                                                    return crate::subsystems::moderation::moderate(
+                                                                        state,
+                                                                        account,
+                                                                        &req.channel,
+                                                                        caller,
+                                                                        req.req
+                                                                    ).await;
+                                                                }.await;
                                                                 ret
                                                             }));
                                                         },
@@ -2716,7 +2842,8 @@ fn main() {
                                                                                             account,
                                                                                             db_owner,
                                                                                             &db_channel_id,
-                                                                                            &local
+                                                                                            &local,
+                                                                                            caller
                                                                                         )?
                                                                                     )
                                                                                 );
@@ -2749,8 +2876,10 @@ fn main() {
                                                                             },
                                                                             s2s::{
                                                                                 GetActivity,
+                                                                                PulledActivity,
+                                                                                PulledDeleted,
+                                                                                PulledEntry,
                                                                                 PulledMessage,
-                                                                                PulledMessages,
                                                                             },
                                                                         },
                                                                         subsystems::s2s_error::{
@@ -2767,7 +2896,7 @@ fn main() {
                                                                 };
                                                                 use crate::subsystems::messages::*;
 
-                                                                let ret: Result<Cached<PulledMessages>, S2sError> =
+                                                                let ret: Result<Cached<PulledActivity>, S2sError> =
                                                                     async {
                                                                         let (state, token, req,):
                                                                             (&Arc<State>, &str, GetActivity,) =
@@ -2806,35 +2935,70 @@ fn main() {
                                                                                     ::sqlite
                                                                                     ::good_query_many!(
                                                                                         db,
-                                                                                        r#"select seq, snap_offset, receive_time, raw from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and seq >= ${i64 = start} order by seq limit ${i64 = limit as i64}"#;
+                                                                                        r#"select seq, snap_offset, receive_time, raw, sender, sender_unique, rel_type from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and seq >= ${i64 = start} order by seq limit ${i64 = limit as i64}"#;
                                                                                         db_tx
                                                                                     ).map_err(|e| loga::err(e.0))?;
-                                                                                let mut messages =
+                                                                                let mut entries =
                                                                                     Vec::with_capacity(rows.len());
                                                                                 for r in rows {
-                                                                                    messages.push(PulledMessage {
-                                                                                        seq: i64_to_u64(r.seq),
-                                                                                        snap_offset: r
-                                                                                            .snap_offset
-                                                                                            .map(i64_to_u64),
-                                                                                        receive_time: r.receive_time.0,
-                                                                                        message: serde_json::from_str(
-                                                                                            &r.raw
-                                                                                        ).context(
-                                                                                            "Stored message was not valid JSON"
-                                                                                        )?,
-                                                                                    });
+                                                                                    let seq = i64_to_u64(r.seq);
+                                                                                    if r.rel_type.as_deref() ==
+                                                                                        Some(
+                                                                                            crate
+                                                                                            ::subsystems
+                                                                                            ::moderation
+                                                                                            ::REL_DELETED
+                                                                                        ) {
+                                                                                        entries.push(
+                                                                                            PulledEntry::Deleted(
+                                                                                                PulledDeleted {
+                                                                                                    seq: seq,
+                                                                                                    id: shared
+                                                                                                    ::interface
+                                                                                                    ::shared
+                                                                                                    ::MessageId {
+                                                                                                        identity: r
+                                                                                                            .sender
+                                                                                                            .0,
+                                                                                                        unique: i64_to_u64(
+                                                                                                            r.sender_unique
+                                                                                                        ),
+                                                                                                    },
+                                                                                                }
+                                                                                            )
+                                                                                        );
+                                                                                        continue;
+                                                                                    }
+                                                                                    entries.push(
+                                                                                        PulledEntry::Message(
+                                                                                            PulledMessage {
+                                                                                                seq: seq,
+                                                                                                snap_offset: r
+                                                                                                    .snap_offset
+                                                                                                    .map(i64_to_u64),
+                                                                                                receive_time: r
+                                                                                                    .receive_time
+                                                                                                    .0,
+                                                                                                message: serde_json
+                                                                                                ::from_str(
+                                                                                                    &r.raw
+                                                                                                ).context(
+                                                                                                    "Stored message was not valid JSON"
+                                                                                                )?,
+                                                                                            }
+                                                                                        )
+                                                                                    );
                                                                                 }
                                                                                 let full =
-                                                                                    messages.len() as u32 == limit &&
+                                                                                    entries.len() as u32 == limit &&
                                                                                         limit > 0;
                                                                                 return Ok(Cached {
-                                                                                    value: PulledMessages {
-                                                                                        messages: messages
+                                                                                    value: PulledActivity {
+                                                                                        entries: entries
                                                                                     },
                                                                                     policy: CachePolicy
                                                                                     ::Immutable.only_if(
-                                                                                        local.public_read && full
+                                                                                        local.public_read() && full
                                                                                     ),
                                                                                 });
                                                                             }
@@ -2945,7 +3109,7 @@ fn main() {
                                                                                     ),
                                                                                     policy: CachePolicy::MaxAge(
                                                                                         SNAP_PAGE_MAX_AGE_SECS
-                                                                                    ).only_if(local.public_read),
+                                                                                    ).only_if(local.public_read()),
                                                                                 });
                                                                             }
                                                                         ).await;
@@ -3082,7 +3246,7 @@ fn main() {
                                                                             value: Some(value),
                                                                             policy: CachePolicy::MaxAge(
                                                                                 SNAP_PAGE_MAX_AGE_SECS
-                                                                            ).only_if(local.public_read),
+                                                                            ).only_if(local.public_read()),
                                                                         });
                                                                     }.await;
                                                                 ret
@@ -3286,7 +3450,7 @@ fn main() {
                                                                                     }),
                                                                                     policy: CachePolicy
                                                                                     ::Immutable.only_if(
-                                                                                        local.public_read && found
+                                                                                        local.public_read() && found
                                                                                     ),
                                                                                 });
                                                                             }
@@ -3714,6 +3878,276 @@ fn main() {
                                                                 ret
                                                             });
                                                         },
+                                                        GET_PREFIX_MODERATION => {
+                                                            let req =
+                                                                match <GetModeration as c2s
+                                                                ::PathReqTrait>::deserialize_path(
+                                                                    rest
+                                                                ) {
+                                                                    Ok(r) => r,
+                                                                    Err(e) => return s2s_error_response(
+                                                                        state,
+                                                                        S2sError::BadRequest(e)
+                                                                    ),
+                                                                };
+                                                            return s2s_respond_get::<GetModeration>(state, {
+                                                                use {
+                                                                    crate::{
+                                                                        interface::{
+                                                                            db::{
+                                                                                DbChannelId,
+                                                                                DbIdentity,
+                                                                            },
+                                                                            s2s::GetModeration,
+                                                                        },
+                                                                        subsystems::s2s_error::{
+                                                                            not_found,
+                                                                            s2s_tx,
+                                                                            Cached,
+                                                                            S2sError,
+                                                                        },
+                                                                        State,
+                                                                    },
+                                                                    shared::interface::wire::c2s::ModerationEntry,
+                                                                    std::sync::Arc,
+                                                                };
+                                                                use crate::subsystems::messages::*;
+
+                                                                let ret:
+                                                                    Result<Cached<Vec<ModerationEntry>>, S2sError> =
+                                                                    async {
+                                                                        let (state, token, req,):
+                                                                            (&Arc<State>, &str, GetModeration,) =
+                                                                            (state, &auth_token, req,);
+                                                                        let caller =
+                                                                            require_caller(state, token).await?;
+                                                                        let db_owner =
+                                                                            DbIdentity(req.channel.identity);
+                                                                        let db_channel_id =
+                                                                            DbChannelId(req.channel.channel);
+                                                                        return s2s_tx(
+                                                                            &state.db,
+                                                                            "reading moderation queue",
+                                                                            move |db_tx| {
+                                                                                let (account, local) =
+                                                                                    not_found(
+                                                                                        owner_channel_get(
+                                                                                            db_tx,
+                                                                                            db_owner,
+                                                                                            &db_channel_id
+                                                                                        )?,
+                                                                                        "Channel not found on this server"
+                                                                                    )?;
+                                                                                crate
+                                                                                ::subsystems
+                                                                                ::moderation
+                                                                                ::require_moderator(
+                                                                                    db_tx,
+                                                                                    account,
+                                                                                    db_owner,
+                                                                                    &db_channel_id,
+                                                                                    &local,
+                                                                                    caller
+                                                                                )?;
+                                                                                return Ok(
+                                                                                    Cached::no_store(
+                                                                                        crate
+                                                                                        ::subsystems
+                                                                                        ::moderation
+                                                                                        ::moderation_entries(
+                                                                                            db_tx,
+                                                                                            account,
+                                                                                            db_owner,
+                                                                                            &db_channel_id,
+                                                                                            req.cursor,
+                                                                                        )?,
+                                                                                    ),
+                                                                                );
+                                                                            }
+                                                                        ).await;
+                                                                    }.await;
+                                                                ret
+                                                            });
+                                                        },
+                                                        GET_PREFIX_MEMBERS => {
+                                                            let req =
+                                                                match <GetMembers as c2s
+                                                                ::PathReqTrait>::deserialize_path(
+                                                                    rest
+                                                                ) {
+                                                                    Ok(r) => r,
+                                                                    Err(e) => return s2s_error_response(
+                                                                        state,
+                                                                        S2sError::BadRequest(e)
+                                                                    ),
+                                                                };
+                                                            return s2s_respond_get::<GetMembers>(state, {
+                                                                use {
+                                                                    crate::{
+                                                                        interface::{
+                                                                            db::{
+                                                                                DbChannelId,
+                                                                                DbIdentity,
+                                                                            },
+                                                                            s2s::GetMembers,
+                                                                        },
+                                                                        subsystems::s2s_error::{
+                                                                            not_found,
+                                                                            s2s_tx,
+                                                                            Cached,
+                                                                            S2sError,
+                                                                        },
+                                                                        State,
+                                                                    },
+                                                                    shared::interface::wire::c2s::ChannelMemberRes,
+                                                                    std::sync::Arc,
+                                                                };
+                                                                use crate::subsystems::messages::*;
+
+                                                                let ret:
+                                                                    Result<Cached<Vec<ChannelMemberRes>>, S2sError> =
+                                                                    async {
+                                                                        let (state, token, req,):
+                                                                            (&Arc<State>, &str, GetMembers,) =
+                                                                            (state, &auth_token, req,);
+                                                                        let caller =
+                                                                            require_caller(state, token).await?;
+                                                                        let db_owner =
+                                                                            DbIdentity(req.channel.identity);
+                                                                        let db_channel_id =
+                                                                            DbChannelId(req.channel.channel);
+                                                                        return s2s_tx(
+                                                                            &state.db,
+                                                                            "reading members",
+                                                                            move |db_tx| {
+                                                                                let (account, local) =
+                                                                                    not_found(
+                                                                                        owner_channel_get(
+                                                                                            db_tx,
+                                                                                            db_owner,
+                                                                                            &db_channel_id
+                                                                                        )?,
+                                                                                        "Channel not found on this server"
+                                                                                    )?;
+                                                                                crate
+                                                                                ::subsystems
+                                                                                ::moderation
+                                                                                ::require_moderator(
+                                                                                    db_tx,
+                                                                                    account,
+                                                                                    db_owner,
+                                                                                    &db_channel_id,
+                                                                                    &local,
+                                                                                    caller
+                                                                                )?;
+                                                                                return Ok(
+                                                                                    Cached::no_store(
+                                                                                        crate
+                                                                                        ::subsystems
+                                                                                        ::moderation
+                                                                                        ::members_list(
+                                                                                            db_tx,
+                                                                                            account,
+                                                                                            db_owner,
+                                                                                            &db_channel_id
+                                                                                        )?,
+                                                                                    ),
+                                                                                );
+                                                                            }
+                                                                        ).await;
+                                                                    }.await;
+                                                                ret
+                                                            });
+                                                        },
+                                                        GET_PREFIX_INVITES => {
+                                                            let req =
+                                                                match <GetInvites as c2s
+                                                                ::PathReqTrait>::deserialize_path(
+                                                                    rest
+                                                                ) {
+                                                                    Ok(r) => r,
+                                                                    Err(e) => return s2s_error_response(
+                                                                        state,
+                                                                        S2sError::BadRequest(e)
+                                                                    ),
+                                                                };
+                                                            return s2s_respond_get::<GetInvites>(state, {
+                                                                use {
+                                                                    crate::{
+                                                                        interface::{
+                                                                            db::{
+                                                                                DbChannelId,
+                                                                                DbIdentity,
+                                                                            },
+                                                                            s2s::GetInvites,
+                                                                        },
+                                                                        subsystems::s2s_error::{
+                                                                            not_found,
+                                                                            s2s_tx,
+                                                                            Cached,
+                                                                            S2sError,
+                                                                        },
+                                                                        State,
+                                                                    },
+                                                                    shared::interface::wire::c2s::ChannelInviteRes,
+                                                                    std::sync::Arc,
+                                                                };
+                                                                use crate::subsystems::messages::*;
+
+                                                                let ret:
+                                                                    Result<Cached<Vec<ChannelInviteRes>>, S2sError> =
+                                                                    async {
+                                                                        let (state, token, req,):
+                                                                            (&Arc<State>, &str, GetInvites,) =
+                                                                            (state, &auth_token, req,);
+                                                                        let caller =
+                                                                            require_caller(state, token).await?;
+                                                                        let db_owner =
+                                                                            DbIdentity(req.channel.identity);
+                                                                        let db_channel_id =
+                                                                            DbChannelId(req.channel.channel.clone());
+                                                                        return s2s_tx(
+                                                                            &state.db,
+                                                                            "reading invites",
+                                                                            move |db_tx| {
+                                                                                let (account, local) =
+                                                                                    not_found(
+                                                                                        owner_channel_get(
+                                                                                            db_tx,
+                                                                                            db_owner,
+                                                                                            &db_channel_id
+                                                                                        )?,
+                                                                                        "Channel not found on this server"
+                                                                                    )?;
+                                                                                crate
+                                                                                ::subsystems
+                                                                                ::moderation
+                                                                                ::require_moderator(
+                                                                                    db_tx,
+                                                                                    account,
+                                                                                    db_owner,
+                                                                                    &db_channel_id,
+                                                                                    &local,
+                                                                                    caller
+                                                                                )?;
+                                                                                return Ok(
+                                                                                    Cached::no_store(
+                                                                                        crate
+                                                                                        ::subsystems
+                                                                                        ::moderation
+                                                                                        ::invites_list(
+                                                                                            db_tx,
+                                                                                            account,
+                                                                                            Some(&req.channel)
+                                                                                        )?,
+                                                                                    ),
+                                                                                );
+                                                                            }
+                                                                        ).await;
+                                                                    }.await;
+                                                                ret
+                                                            });
+                                                        },
                                                         GET_PREFIX_FILE => {
                                                             let req =
                                                                 match <GetFile as c2s::PathReqTrait>::deserialize_path(
@@ -3886,7 +4320,48 @@ fn main() {
                                                                                                     &local,
                                                                                                     caller
                                                                                                 ).is_ok() {
-                                                                                                return Ok(account);
+                                                                                                let public =
+                                                                                                    good_ormning
+                                                                                                    ::sqlite
+                                                                                                    ::good_query_opt!(
+                                                                                                        db,
+                                                                                                        r#"select 1 as x from message_file where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and hash = ${string = hash.0.as_str()} and source != ${string = MESSAGE_FILE_SOURCE_MODERATION} limit ${i64 = 1}"#;
+                                                                                                        db_tx
+                                                                                                    )
+                                                                                                        .map_err(
+                                                                                                            |e| loga
+                                                                                                            ::err(
+                                                                                                                e.0
+                                                                                                            )
+                                                                                                        )?
+                                                                                                        .is_some();
+                                                                                                if public {
+                                                                                                    return Ok(
+                                                                                                        account
+                                                                                                    );
+                                                                                                }
+                                                                                                if crate
+                                                                                                ::subsystems
+                                                                                                ::moderation
+                                                                                                ::effective_level(
+                                                                                                    db_tx,
+                                                                                                    account,
+                                                                                                    db_owner,
+                                                                                                    &db_channel_id,
+                                                                                                    &local,
+                                                                                                    caller
+                                                                                                )? ==
+                                                                                                    Some(
+                                                                                                        shared
+                                                                                                        ::interface
+                                                                                                        ::shared
+                                                                                                        ::Level
+                                                                                                        ::Moderator
+                                                                                                    ) {
+                                                                                                    return Ok(
+                                                                                                        account
+                                                                                                    );
+                                                                                                }
                                                                                             }
                                                                                         }
                                                                                         if let Some((account, local)) =
@@ -7245,29 +7720,39 @@ fn main() {
                                                                                     db_tx
                                                                                 ).map_err(|e| loga::err(e.0))?;
                                                                             }
-                                                                            if let Some(v) = req.public_read {
+                                                                            if let Some(m) = &req.default_level {
                                                                                 require_owned_channel(
                                                                                     db_tx,
                                                                                     account_id,
                                                                                     db_owner,
                                                                                     &db_channel_id
                                                                                 )?;
+                                                                                if m.value ==
+                                                                                    Some(
+                                                                                        shared
+                                                                                        ::interface
+                                                                                        ::shared
+                                                                                        ::Level
+                                                                                        ::Moderator
+                                                                                    ) {
+                                                                                    return Err(
+                                                                                        loga::err(
+                                                                                            "The default level can't be moderator"
+                                                                                        )
+                                                                                    );
+                                                                                }
+                                                                                let v =
+                                                                                    m
+                                                                                        .value
+                                                                                        .map(
+                                                                                            crate
+                                                                                            ::subsystems
+                                                                                            ::moderation
+                                                                                            ::level_to_db
+                                                                                        );
                                                                                 good_ormning::sqlite::good_query!(
                                                                                     db,
-                                                                                    r#"update channel set public_read = ${bool = v} where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id}"#;
-                                                                                    db_tx
-                                                                                ).map_err(|e| loga::err(e.0))?;
-                                                                            }
-                                                                            if let Some(v) = req.public_post {
-                                                                                require_owned_channel(
-                                                                                    db_tx,
-                                                                                    account_id,
-                                                                                    db_owner,
-                                                                                    &db_channel_id
-                                                                                )?;
-                                                                                good_ormning::sqlite::good_query!(
-                                                                                    db,
-                                                                                    r#"update channel set public_post = ${bool = v} where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id}"#;
+                                                                                    r#"update channel set default_level = ${opt string = v} where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and id = ${channel_id_t = &db_channel_id}"#;
                                                                                     db_tx
                                                                                 ).map_err(|e| loga::err(e.0))?;
                                                                             }
@@ -7427,7 +7912,7 @@ fn main() {
                                                                                         ::sqlite
                                                                                         ::good_query_many!(
                                                                                             db,
-                                                                                            r#"select identity, id, local_identity, idem, channel_group, name, description, shown_name, shown_description, portrait, retention_secs, retention_mode, public_read, public_post, reminders, reminder_lead_minutes from channel where account_id = ${account_id_t = &account_id} and deleted is null order by identity, id"#;
+                                                                                            r#"select identity, id, local_identity, idem, channel_group, name, description, shown_name, shown_description, portrait, retention_secs, retention_mode, default_level, level, reminders, reminder_lead_minutes from channel where account_id = ${account_id_t = &account_id} and deleted is null order by identity, id"#;
                                                                                             db_tx
                                                                                         ).map_err(|e| loga::err(e.0))?;
                                                                                     let mut out = vec![];
@@ -7455,8 +7940,25 @@ fn main() {
                                                                                                 &r.retention_mode,
                                                                                                 r.retention_secs
                                                                                             ),
-                                                                                            public_read: r.public_read,
-                                                                                            public_post: r.public_post,
+                                                                                            default_level: crate
+                                                                                            ::subsystems
+                                                                                            ::moderation
+                                                                                            ::level_from_db_opt(
+                                                                                                r.default_level
+                                                                                            )?,
+                                                                                            level: crate
+                                                                                            ::subsystems
+                                                                                            ::moderation
+                                                                                            ::own_level(
+                                                                                                r.local_identity.0,
+                                                                                                r.identity.0,
+                                                                                                crate
+                                                                                                ::subsystems
+                                                                                                ::moderation
+                                                                                                ::level_from_db_opt(
+                                                                                                    r.level
+                                                                                                )?
+                                                                                            ),
                                                                                             reminders: r.reminders,
                                                                                             reminder_lead_minutes: r.reminder_lead_minutes,
                                                                                         });
@@ -7481,16 +7983,14 @@ fn main() {
                                                                 return api_resp(state, {
                                                                     use {
                                                                         crate::{
-                                                                            db,
-                                                                            dbutil::tx,
-                                                                            interface::db::{
-                                                                                DbAccountId,
-                                                                                DbChannelId,
-                                                                                DbIdentity,
+                                                                            interface::db::DbAccountId,
+                                                                            subsystems::moderation::{
+                                                                                c2s_channel,
+                                                                                c2s_signer,
+                                                                                members_list,
                                                                             },
                                                                             State,
                                                                         },
-                                                                        loga::ResultContext,
                                                                         shared::interface::{
                                                                             shared::AccountId,
                                                                             wire::c2s::{
@@ -7498,6 +7998,7 @@ fn main() {
                                                                                 ChannelMemberRes,
                                                                             },
                                                                         },
+                                                                        std::sync::Arc,
                                                                     };
 
                                                                     let ret:
@@ -7505,45 +8006,63 @@ fn main() {
                                                                         async {
                                                                             let (state, account, req,):
                                                                                 (
-                                                                                    &State,
+                                                                                    &Arc<State>,
                                                                                     AccountId,
                                                                                     ChannelMemberList,
                                                                                 ) =
                                                                                 (state, account, r,);
-                                                                            let account_id = DbAccountId(account);
-                                                                            let db_owner =
-                                                                                DbIdentity(req.channel.identity);
-                                                                            let db_channel_id =
-                                                                                DbChannelId(req.channel.channel);
-                                                                            let mut members =
-                                                                                tx(&state.db, move |db_tx| {
-                                                                                    return Ok(
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query_many!(
-                                                                                            db,
-                                                                                            r#"select member, can_post from channel_member where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id}"#;
-                                                                                            db_tx
-                                                                                        )
-                                                                                            .map_err(
-                                                                                                |e| loga::err(e.0)
-                                                                                            )?
-                                                                                            .into_iter()
-                                                                                            .map(|r| ChannelMemberRes {
-                                                                                                identity: r.member.0,
-                                                                                                can_post: r.can_post,
-                                                                                            })
-                                                                                            .collect::<Vec<_>>()
+                                                                            let account = DbAccountId(account);
+                                                                            let channel = req.channel;
+                                                                            let local =
+                                                                                c2s_channel(
+                                                                                    state,
+                                                                                    account,
+                                                                                    &channel
+                                                                                ).await?;
+                                                                            if local.is_owner(channel.identity) {
+                                                                                let db_owner =
+                                                                                    crate::interface::db::DbIdentity(
+                                                                                        channel.identity
                                                                                     );
-                                                                                })
+                                                                                let db_channel_id =
+                                                                                    crate::interface::db::DbChannelId(
+                                                                                        channel.channel.clone()
+                                                                                    );
+                                                                                return crate::dbutil::tx(
+                                                                                    &state.db,
+                                                                                    move |db_tx| {
+                                                                                        return members_list(
+                                                                                            db_tx,
+                                                                                            account,
+                                                                                            db_owner,
+                                                                                            &db_channel_id
+                                                                                        );
+                                                                                    }
+                                                                                )
                                                                                     .await
                                                                                     .context(
                                                                                         "Error listing channel members"
-                                                                                    )?;
-                                                                            members.sort_by(
-                                                                                |a, b| a.identity.cmp(&b.identity)
-                                                                            );
-                                                                            return Ok(members);
+                                                                                    );
+                                                                            }
+                                                                            let signer =
+                                                                                c2s_signer(
+                                                                                    state,
+                                                                                    account,
+                                                                                    &local
+                                                                                ).await?;
+                                                                            return state
+                                                                                .s2s_client
+                                                                                .get_opt_authed(
+                                                                                    channel.identity,
+                                                                                    Some(&signer),
+                                                                                    &crate
+                                                                                    ::interface
+                                                                                    ::s2s
+                                                                                    ::GetMembers {
+                                                                                        channel: channel.clone()
+                                                                                    }
+                                                                                )
+                                                                                .await;
                                                                         }.await;
                                                                     ret
                                                                 });
@@ -7552,14 +8071,11 @@ fn main() {
                                                                 return api_resp(state, {
                                                                     use {
                                                                         crate::{
-                                                                            db,
-                                                                            dbutil::tx,
-                                                                            interface::db::{
-                                                                                DbAccountId,
-                                                                                DbChannelId,
-                                                                                DbIdentity,
+                                                                            interface::{
+                                                                                db::DbAccountId,
+                                                                                s2s::ModerateReq,
                                                                             },
-                                                                            subsystems::pull_scheduler::PullKey,
+                                                                            subsystems::moderation::c2s_moderate,
                                                                             State,
                                                                         },
                                                                         loga::ResultContext,
@@ -7567,68 +8083,30 @@ fn main() {
                                                                             shared::AccountId,
                                                                             wire::c2s::ChannelMemberModify,
                                                                         },
+                                                                        std::sync::Arc,
                                                                     };
-                                                                    use crate::subsystems::c2s::*;
 
                                                                     let ret: Result<(), loga::Error> = async {
                                                                         let (state, account, req,):
-                                                                            (&State, AccountId, ChannelMemberModify,) =
+                                                                            (
+                                                                                &Arc<State>,
+                                                                                AccountId,
+                                                                                ChannelMemberModify,
+                                                                            ) =
                                                                             (state, account, r,);
-                                                                        let account_id = DbAccountId(account);
-                                                                        let db_owner =
-                                                                            DbIdentity(req.channel.identity);
-                                                                        let db_channel_id =
-                                                                            DbChannelId(req.channel.channel.clone());
-                                                                        let db_member = DbIdentity(req.member);
-                                                                        let changed =
-                                                                            tx(&state.db, move |db_tx| {
-                                                                                require_owned_channel(
-                                                                                    db_tx,
-                                                                                    account_id,
-                                                                                    db_owner,
-                                                                                    &db_channel_id
-                                                                                )?;
-                                                                                let mut changed = false;
-                                                                                if let Some(v) = req.can_post {
-                                                                                    good_ormning::sqlite::good_query!(
-                                                                                        db,
-                                                                                        r#"update channel_member set can_post = ${bool = v} where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and member = ${identity_id_t = &db_member}"#;
-                                                                                        db_tx
-                                                                                    ).map_err(|e| loga::err(e.0))?;
-                                                                                    if db_tx.0.changes() == 0 {
-                                                                                        return Err(
-                                                                                            loga::err(
-                                                                                                "No such channel member"
-                                                                                            )
-                                                                                        );
-                                                                                    }
-                                                                                    changed = true;
-                                                                                }
-                                                                                return Ok(changed);
-                                                                            })
-                                                                                .await
-                                                                                .context(
-                                                                                    "Error modifying channel member"
-                                                                                )?;
-                                                                        if changed {
-                                                                            let key = PullKey {
-                                                                                account_id: account,
-                                                                                owner: req.channel.identity,
-                                                                                channel: req.channel.channel,
-                                                                                source: req.member,
-                                                                            };
-                                                                            match req.can_post {
-                                                                                Some(true) => state
-                                                                                    .pull_scheduler
-                                                                                    .add_or_reset(key)
-                                                                                    .await,
-                                                                                Some(false) => state
-                                                                                    .pull_scheduler
-                                                                                    .remove(&key)
-                                                                                    .await,
-                                                                                None => { },
+                                                                        let level =
+                                                                            req
+                                                                                .level
+                                                                                .context("No changes requested")?;
+                                                                        c2s_moderate(
+                                                                            state,
+                                                                            DbAccountId(account),
+                                                                            &req.channel,
+                                                                            ModerateReq::MemberSet {
+                                                                                member: req.member,
+                                                                                level: level,
                                                                             }
-                                                                        }
+                                                                        ).await?;
                                                                         return Ok(());
                                                                     }.await;
                                                                     ret
@@ -7638,49 +8116,36 @@ fn main() {
                                                                 return api_resp(state, {
                                                                     use {
                                                                         crate::{
-                                                                            db,
-                                                                            dbutil::tx,
-                                                                            interface::db::{
-                                                                                DbAccountId,
-                                                                                DbChannelId,
-                                                                                DbIdentity,
+                                                                            interface::{
+                                                                                db::DbAccountId,
+                                                                                s2s::ModerateReq,
                                                                             },
-                                                                            subsystems::pull_scheduler::PullKey,
+                                                                            subsystems::moderation::c2s_moderate,
                                                                             State,
                                                                         },
-                                                                        loga::ResultContext,
                                                                         shared::interface::{
                                                                             shared::AccountId,
                                                                             wire::c2s::ChannelMemberDelete,
                                                                         },
+                                                                        std::sync::Arc,
                                                                     };
 
                                                                     let ret: Result<(), loga::Error> = async {
                                                                         let (state, account, req,):
-                                                                            (&State, AccountId, ChannelMemberDelete,) =
+                                                                            (
+                                                                                &Arc<State>,
+                                                                                AccountId,
+                                                                                ChannelMemberDelete,
+                                                                            ) =
                                                                             (state, account, r,);
-                                                                        let account_id = DbAccountId(account);
-                                                                        let db_owner =
-                                                                            DbIdentity(req.channel.identity);
-                                                                        let db_channel_id =
-                                                                            DbChannelId(req.channel.channel.clone());
-                                                                        let db_member = DbIdentity(req.member);
-                                                                        tx(&state.db, move |db_tx| {
-                                                                            good_ormning::sqlite::good_query!(
-                                                                                db,
-                                                                                r#"delete from channel_member where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and member = ${identity_id_t = &db_member}"#;
-                                                                                db_tx
-                                                                            ).map_err(|e| loga::err(e.0))?;
-                                                                            return Ok(());
-                                                                        })
-                                                                            .await
-                                                                            .context("Error deleting channel member")?;
-                                                                        state.pull_scheduler.remove(&PullKey {
-                                                                            account_id: account,
-                                                                            owner: req.channel.identity,
-                                                                            channel: req.channel.channel,
-                                                                            source: req.member,
-                                                                        }).await;
+                                                                        c2s_moderate(
+                                                                            state,
+                                                                            DbAccountId(account),
+                                                                            &req.channel,
+                                                                            ModerateReq::MemberRemove {
+                                                                                member: req.member
+                                                                            },
+                                                                        ).await?;
                                                                         return Ok(());
                                                                     }.await;
                                                                     ret
@@ -7690,129 +8155,49 @@ fn main() {
                                                                 return api_resp(state, {
                                                                     use {
                                                                         crate::{
-                                                                            db,
-                                                                            dbutil::tx,
-                                                                            interface::db::{
-                                                                                DbAccountId,
-                                                                                DbChannelId,
-                                                                                DbIdentity,
+                                                                            interface::{
+                                                                                db::DbAccountId,
+                                                                                s2s::{
+                                                                                    ModerateReq,
+                                                                                    ModerateRes,
+                                                                                },
                                                                             },
-                                                                            subsystems::messages::i64_to_u64,
+                                                                            subsystems::moderation::c2s_moderate,
                                                                             State,
                                                                         },
-                                                                        loga::ResultContext,
                                                                         shared::interface::{
-                                                                            shared::{
-                                                                                AccountId,
-                                                                                ChannelInviteId,
-                                                                                ChannelInviteToken,
-                                                                                QualifiedChannelInviteToken,
-                                                                            },
+                                                                            shared::AccountId,
                                                                             wire::c2s::{
                                                                                 ChannelInviteCreate,
                                                                                 ChannelInviteRes,
                                                                             },
                                                                         },
+                                                                        std::sync::Arc,
                                                                     };
-                                                                    use crate::subsystems::c2s::*;
 
                                                                     let ret: Result<ChannelInviteRes, loga::Error> =
                                                                         async {
                                                                             let (state, account, req,):
                                                                                 (
-                                                                                    &State,
+                                                                                    &Arc<State>,
                                                                                     AccountId,
                                                                                     ChannelInviteCreate,
                                                                                 ) =
                                                                                 (state, account, r,);
-                                                                            let account_id = DbAccountId(account);
                                                                             let channel = req.channel.clone();
-                                                                            let db_owner =
-                                                                                DbIdentity(channel.identity);
-                                                                            let db_channel_id =
-                                                                                DbChannelId(channel.channel.clone());
-                                                                            let idem =
-                                                                                req.idem.clone().unwrap_or_default();
-                                                                            let token = random_token();
-                                                                            return Ok(
-                                                                                tx(&state.db, move |db_tx| {
-                                                                                    require_owned_channel(
-                                                                                        db_tx,
-                                                                                        account_id,
-                                                                                        db_owner,
-                                                                                        &db_channel_id
-                                                                                    )?;
-                                                                                    if !idem.is_empty() {
-                                                                                        let existing =
-                                                                                            good_ormning
-                                                                                            ::sqlite
-                                                                                            ::good_query_opt!(
-                                                                                                db,
-                                                                                                r#"select rowid, token, name, description, shown_name, shown_description, single_use, expiry, can_post from channel_invite where account_id = ${account_id_t = &account_id} and identity = ${identity_id_t = &db_owner} and channel = ${channel_id_t = &db_channel_id} and idem = ${string = idem.as_str()}"#;
-                                                                                                db_tx
-                                                                                            ).map_err(
-                                                                                                |e| loga::err(e.0)
-                                                                                            )?;
-                                                                                        if let Some(e) = existing {
-                                                                                            return Ok(
-                                                                                                ChannelInviteRes {
-                                                                                                    id: ChannelInviteId(
-                                                                                                        i64_to_u64(
-                                                                                                            e.rowid
-                                                                                                        )
-                                                                                                    ),
-                                                                                                    token: QualifiedChannelInviteToken {
-                                                                                                        channel: channel,
-                                                                                                        token: ChannelInviteToken(
-                                                                                                            e.token
-                                                                                                        ),
-                                                                                                    },
-                                                                                                    name: e.name,
-                                                                                                    description: e.description,
-                                                                                                    shown_name: e.shown_name,
-                                                                                                    shown_description: e.shown_description,
-                                                                                                    single_use: e.single_use,
-                                                                                                    expiry: e
-                                                                                                        .expiry
-                                                                                                        .map(|t| t.0),
-                                                                                                    can_post: e.can_post,
-                                                                                                }
-                                                                                            );
-                                                                                        }
-                                                                                    }
-                                                                                    good_ormning::sqlite::good_query!(
-                                                                                        db,
-                                                                                        r#"insert into channel_invite (account_id, identity, channel, idem, token, name, description, shown_name, shown_description, single_use, expiry, used_count, can_post) values (${account_id_t = &account_id}, ${identity_id_t = &db_owner}, ${channel_id_t = &db_channel_id}, ${string = idem.as_str()}, ${string = token.as_str()}, ${string = req.name.as_str()}, ${string = req.description.as_str()}, ${opt string = req.shown_name.as_deref()}, ${opt string = req.shown_description.as_deref()}, ${bool = req.single_use}, ${opt time_ms_t = req.expiry.map(crate::interface::db::DbTimeMs).as_ref()}, ${i64 = 0}, ${bool = req.can_post})"#;
-                                                                                        db_tx
-                                                                                    ).map_err(|e| loga::err(e.0))?;
-                                                                                    return Ok(ChannelInviteRes {
-                                                                                        id: ChannelInviteId(
-                                                                                            i64_to_u64(
-                                                                                                db_tx
-                                                                                                    .0
-                                                                                                    .last_insert_rowid()
-                                                                                            )
-                                                                                        ),
-                                                                                        token: QualifiedChannelInviteToken {
-                                                                                            channel: channel,
-                                                                                            token: ChannelInviteToken(
-                                                                                                token
-                                                                                            ),
-                                                                                        },
-                                                                                        name: req.name,
-                                                                                        description: req.description,
-                                                                                        shown_name: req.shown_name,
-                                                                                        shown_description: req.shown_description,
-                                                                                        single_use: req.single_use,
-                                                                                        expiry: req.expiry,
-                                                                                        can_post: req.can_post,
-                                                                                    });
-                                                                                })
-                                                                                    .await
-                                                                                    .context(
-                                                                                        "Error inserting channel invite"
-                                                                                    )?
-                                                                            );
+                                                                            match c2s_moderate(
+                                                                                state,
+                                                                                DbAccountId(account),
+                                                                                &channel,
+                                                                                ModerateReq::InviteCreate(req)
+                                                                            ).await? {
+                                                                                ModerateRes::Invite(i) => return Ok(i),
+                                                                                ModerateRes::None => return Err(
+                                                                                    loga::err(
+                                                                                        "Owner returned no invite"
+                                                                                    )
+                                                                                ),
+                                                                            }
                                                                         }.await;
                                                                     ret
                                                                 });
@@ -7821,153 +8206,49 @@ fn main() {
                                                                 return api_resp(state, {
                                                                     use {
                                                                         crate::{
-                                                                            db,
-                                                                            dbutil::tx,
-                                                                            interface::db::DbAccountId,
-                                                                            subsystems::messages::i64_to_u64,
+                                                                            interface::{
+                                                                                db::DbAccountId,
+                                                                                s2s::{
+                                                                                    ModerateReq,
+                                                                                    ModerateRes,
+                                                                                },
+                                                                            },
+                                                                            subsystems::moderation::c2s_moderate,
                                                                             State,
                                                                         },
-                                                                        loga::ResultContext,
                                                                         shared::interface::{
-                                                                            shared::{
-                                                                                AccountId,
-                                                                                ChannelInviteId,
-                                                                                ChannelInviteToken,
-                                                                                QualifiedChannelId,
-                                                                                QualifiedChannelInviteToken,
-                                                                            },
+                                                                            shared::AccountId,
                                                                             wire::c2s::{
                                                                                 ChannelInviteModify,
                                                                                 ChannelInviteRes,
                                                                             },
                                                                         },
+                                                                        std::sync::Arc,
                                                                     };
 
                                                                     let ret: Result<ChannelInviteRes, loga::Error> =
                                                                         async {
                                                                             let (state, account, req,):
                                                                                 (
-                                                                                    &State,
+                                                                                    &Arc<State>,
                                                                                     AccountId,
                                                                                     ChannelInviteModify,
                                                                                 ) =
                                                                                 (state, account, r,);
-                                                                            let account_id = DbAccountId(account);
-                                                                            let rowid =
-                                                                                crate
-                                                                                ::subsystems
-                                                                                ::messages
-                                                                                ::u64_to_i64(
-                                                                                    req.id.0
-                                                                                );
-                                                                            let row =
-                                                                                tx(&state.db, move |db_tx| {
-                                                                                    if let Some(v) = &req.name {
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query!(
-                                                                                            db,
-                                                                                            r#"update channel_invite set name = ${string = v.as_str()} where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                                                                                            db_tx
-                                                                                        ).map_err(|e| loga::err(e.0))?;
-                                                                                    }
-                                                                                    if let Some(v) = &req.description {
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query!(
-                                                                                            db,
-                                                                                            r#"update channel_invite set description = ${string = v.as_str()} where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                                                                                            db_tx
-                                                                                        ).map_err(|e| loga::err(e.0))?;
-                                                                                    }
-                                                                                    if let Some(m) = &req.shown_name {
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query!(
-                                                                                            db,
-                                                                                            r#"update channel_invite set shown_name = ${opt string = m.value.as_deref()} where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                                                                                            db_tx
-                                                                                        ).map_err(|e| loga::err(e.0))?;
-                                                                                    }
-                                                                                    if let Some(m) =
-                                                                                        &req.shown_description {
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query!(
-                                                                                            db,
-                                                                                            r#"update channel_invite set shown_description = ${opt string = m.value.as_deref()} where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                                                                                            db_tx
-                                                                                        ).map_err(|e| loga::err(e.0))?;
-                                                                                    }
-                                                                                    if let Some(v) = req.single_use {
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query!(
-                                                                                            db,
-                                                                                            r#"update channel_invite set single_use = ${bool = v} where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                                                                                            db_tx
-                                                                                        ).map_err(|e| loga::err(e.0))?;
-                                                                                    }
-                                                                                    if let Some(m) = req.expiry {
-                                                                                        let v = m.value;
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query!(
-                                                                                            db,
-                                                                                            r#"update channel_invite set expiry = ${opt time_ms_t = v.map(crate::interface::db::DbTimeMs).as_ref()} where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                                                                                            db_tx
-                                                                                        ).map_err(|e| loga::err(e.0))?;
-                                                                                    }
-                                                                                    if let Some(v) = req.can_post {
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query!(
-                                                                                            db,
-                                                                                            r#"update channel_invite set can_post = ${bool = v} where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                                                                                            db_tx
-                                                                                        ).map_err(|e| loga::err(e.0))?;
-                                                                                    }
-                                                                                    return Ok(
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query_opt!(
-                                                                                            db,
-                                                                                            r#"select rowid, identity, channel, token, name, description, shown_name, shown_description, single_use, expiry, can_post from channel_invite where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                                                                                            db_tx
-                                                                                        )
-                                                                                            .map_err(
-                                                                                                |e| loga::err(e.0)
-                                                                                            )?
-                                                                                            .context(
-                                                                                                "No such channel invite"
-                                                                                            )?
-                                                                                    );
-                                                                                })
-                                                                                    .await
-                                                                                    .context(
-                                                                                        "Error modifying channel invite"
-                                                                                    )?;
-                                                                            return Ok(ChannelInviteRes {
-                                                                                id: ChannelInviteId(
-                                                                                    i64_to_u64(row.rowid)
+                                                                            let channel = req.channel.clone();
+                                                                            match c2s_moderate(
+                                                                                state,
+                                                                                DbAccountId(account),
+                                                                                &channel,
+                                                                                ModerateReq::InviteModify(req)
+                                                                            ).await? {
+                                                                                ModerateRes::Invite(i) => return Ok(i),
+                                                                                ModerateRes::None => return Err(
+                                                                                    loga::err(
+                                                                                        "Owner returned no invite"
+                                                                                    )
                                                                                 ),
-                                                                                token: QualifiedChannelInviteToken {
-                                                                                    channel: QualifiedChannelId {
-                                                                                        identity: row.identity.0,
-                                                                                        channel: row.channel.0,
-                                                                                    },
-                                                                                    token: ChannelInviteToken(
-                                                                                        row.token
-                                                                                    ),
-                                                                                },
-                                                                                name: row.name,
-                                                                                description: row.description,
-                                                                                shown_name: row.shown_name,
-                                                                                shown_description: row.shown_description,
-                                                                                single_use: row.single_use,
-                                                                                expiry: row.expiry.map(|t| t.0),
-                                                                                can_post: row.can_post,
-                                                                            });
+                                                                            }
                                                                         }.await;
                                                                     ret
                                                                 });
@@ -7976,37 +8257,35 @@ fn main() {
                                                                 return api_resp(state, {
                                                                     use {
                                                                         crate::{
-                                                                            db,
-                                                                            dbutil::tx,
-                                                                            interface::db::DbAccountId,
+                                                                            interface::{
+                                                                                db::DbAccountId,
+                                                                                s2s::ModerateReq,
+                                                                            },
+                                                                            subsystems::moderation::c2s_moderate,
                                                                             State,
                                                                         },
-                                                                        loga::ResultContext,
                                                                         shared::interface::{
                                                                             shared::AccountId,
                                                                             wire::c2s::ChannelInviteDelete,
                                                                         },
+                                                                        std::sync::Arc,
                                                                     };
 
                                                                     let ret: Result<(), loga::Error> = async {
                                                                         let (state, account, req,):
-                                                                            (&State, AccountId, ChannelInviteDelete,) =
+                                                                            (
+                                                                                &Arc<State>,
+                                                                                AccountId,
+                                                                                ChannelInviteDelete,
+                                                                            ) =
                                                                             (state, account, r,);
-                                                                        let account_id = DbAccountId(account);
-                                                                        let rowid =
-                                                                            crate::subsystems::messages::u64_to_i64(
-                                                                                req.id.0
-                                                                            );
-                                                                        tx(&state.db, move |db_tx| {
-                                                                            good_ormning::sqlite::good_query!(
-                                                                                db,
-                                                                                r#"delete from channel_invite where account_id = ${account_id_t = &account_id} and rowid = ${i64 = rowid}"#;
-                                                                                db_tx
-                                                                            ).map_err(|e| loga::err(e.0))?;
-                                                                            return Ok(());
-                                                                        })
-                                                                            .await
-                                                                            .context("Error deleting channel invite")?;
+                                                                        let channel = req.channel.clone();
+                                                                        c2s_moderate(
+                                                                            state,
+                                                                            DbAccountId(account),
+                                                                            &channel,
+                                                                            ModerateReq::InviteDelete(req)
+                                                                        ).await?;
                                                                         return Ok(());
                                                                     }.await;
                                                                     ret
@@ -8016,82 +8295,184 @@ fn main() {
                                                                 return api_resp(state, {
                                                                     use {
                                                                         crate::{
-                                                                            db,
-                                                                            dbutil::tx,
                                                                             interface::db::DbAccountId,
-                                                                            subsystems::messages::i64_to_u64,
+                                                                            subsystems::moderation::{
+                                                                                c2s_channel,
+                                                                                c2s_signer,
+                                                                                invites_list,
+                                                                            },
                                                                             State,
                                                                         },
-                                                                        loga::ResultContext,
                                                                         shared::interface::{
-                                                                            shared::{
-                                                                                AccountId,
-                                                                                ChannelInviteId,
-                                                                                ChannelInviteToken,
-                                                                                QualifiedChannelId,
-                                                                                QualifiedChannelInviteToken,
-                                                                            },
+                                                                            shared::AccountId,
                                                                             wire::c2s::{
                                                                                 ChannelInviteList,
                                                                                 ChannelInviteRes,
                                                                             },
                                                                         },
+                                                                        std::sync::Arc,
                                                                     };
 
                                                                     let ret:
                                                                         Result<Vec<ChannelInviteRes>, loga::Error> =
                                                                         async {
-                                                                            let (state, account, _req,):
+                                                                            let (state, account, req,):
                                                                                 (
-                                                                                    &State,
+                                                                                    &Arc<State>,
                                                                                     AccountId,
                                                                                     ChannelInviteList,
                                                                                 ) =
                                                                                 (state, account, r,);
-                                                                            let account_id = DbAccountId(account);
-                                                                            let rows =
-                                                                                tx(&state.db, move |db_tx| {
-                                                                                    return Ok(
-                                                                                        good_ormning
-                                                                                        ::sqlite
-                                                                                        ::good_query_many!(
-                                                                                            db,
-                                                                                            r#"select rowid, identity, channel, token, name, description, shown_name, shown_description, single_use, expiry, can_post from channel_invite where account_id = ${account_id_t = &account_id} order by rowid"#;
-                                                                                            db_tx
-                                                                                        ).map_err(|e| loga::err(e.0))?
-                                                                                    );
-                                                                                })
+                                                                            let account = DbAccountId(account);
+                                                                            let Some(channel) = req.channel else {
+                                                                                return crate::dbutil::tx(
+                                                                                    &state.db,
+                                                                                    move |db_tx| {
+                                                                                        return invites_list(
+                                                                                            db_tx,
+                                                                                            account,
+                                                                                            None
+                                                                                        );
+                                                                                    }
+                                                                                )
                                                                                     .await
                                                                                     .context(
                                                                                         "Error listing channel invites"
-                                                                                    )?;
-                                                                            return Ok(
-                                                                                rows
-                                                                                    .into_iter()
-                                                                                    .map(|r| ChannelInviteRes {
-                                                                                        id: ChannelInviteId(
-                                                                                            i64_to_u64(r.rowid)
-                                                                                        ),
-                                                                                        token: QualifiedChannelInviteToken {
-                                                                                            channel: QualifiedChannelId {
-                                                                                                identity: r.identity.0,
-                                                                                                channel: r.channel.0,
-                                                                                            },
-                                                                                            token: ChannelInviteToken(
-                                                                                                r.token
-                                                                                            ),
-                                                                                        },
-                                                                                        name: r.name,
-                                                                                        description: r.description,
-                                                                                        shown_name: r.shown_name,
-                                                                                        shown_description: r.shown_description,
-                                                                                        single_use: r.single_use,
-                                                                                        expiry: r.expiry.map(|t| t.0),
-                                                                                        can_post: r.can_post,
-                                                                                    })
-                                                                                    .collect()
-                                                                            );
+                                                                                    );
+                                                                            };
+                                                                            let local =
+                                                                                c2s_channel(
+                                                                                    state,
+                                                                                    account,
+                                                                                    &channel
+                                                                                ).await?;
+                                                                            if local.is_owner(channel.identity) {
+                                                                                return crate::dbutil::tx(
+                                                                                    &state.db,
+                                                                                    move |db_tx| {
+                                                                                        return invites_list(
+                                                                                            db_tx,
+                                                                                            account,
+                                                                                            Some(&channel)
+                                                                                        );
+                                                                                    }
+                                                                                )
+                                                                                    .await
+                                                                                    .context(
+                                                                                        "Error listing channel invites"
+                                                                                    );
+                                                                            }
+                                                                            let signer =
+                                                                                c2s_signer(
+                                                                                    state,
+                                                                                    account,
+                                                                                    &local
+                                                                                ).await?;
+                                                                            return state
+                                                                                .s2s_client
+                                                                                .get_opt_authed(
+                                                                                    channel.identity,
+                                                                                    Some(&signer),
+                                                                                    &crate
+                                                                                    ::interface
+                                                                                    ::s2s
+                                                                                    ::GetInvites {
+                                                                                        channel: channel.clone()
+                                                                                    }
+                                                                                )
+                                                                                .await;
                                                                         }.await;
+                                                                    ret
+                                                                });
+                                                            },
+                                                            c2s::proto::ServerReq::ChannelRefreshLevel(_, r) => {
+                                                                return api_resp(state, {
+                                                                    use {
+                                                                        crate::{
+                                                                            interface::db::DbAccountId,
+                                                                            subsystems::moderation::c2s_channel,
+                                                                            State,
+                                                                        },
+                                                                        shared::interface::{
+                                                                            shared::{
+                                                                                AccountId,
+                                                                                Level,
+                                                                            },
+                                                                            wire::c2s::ChannelRefreshLevel,
+                                                                        },
+                                                                        std::sync::Arc,
+                                                                    };
+
+                                                                    let ret: Result<Level, loga::Error> = async {
+                                                                        let (state, account, req,):
+                                                                            (
+                                                                                &Arc<State>,
+                                                                                AccountId,
+                                                                                ChannelRefreshLevel,
+                                                                            ) =
+                                                                            (state, account, r,);
+                                                                        let account = DbAccountId(account);
+                                                                        let local =
+                                                                            c2s_channel(
+                                                                                state,
+                                                                                account,
+                                                                                &req.channel
+                                                                            ).await?;
+                                                                        if local.is_owner(req.channel.identity) {
+                                                                            return Ok(Level::Moderator);
+                                                                        }
+                                                                        let info =
+                                                                            crate
+                                                                            ::subsystems
+                                                                            ::messages
+                                                                            ::member_refresh_info(
+                                                                                state,
+                                                                                account.0,
+                                                                                &req.channel,
+                                                                                &local
+                                                                            ).await?;
+                                                                        return Ok(info.level);
+                                                                    }.await;
+                                                                    ret
+                                                                });
+                                                            },
+                                                            c2s::proto::ServerReq::ModerationDecide(_, r) => {
+                                                                return api_resp(state, {
+                                                                    use {
+                                                                        crate::{
+                                                                            interface::{
+                                                                                db::DbAccountId,
+                                                                                s2s::ModerateReq,
+                                                                            },
+                                                                            subsystems::moderation::c2s_moderate,
+                                                                            State,
+                                                                        },
+                                                                        shared::interface::{
+                                                                            shared::AccountId,
+                                                                            wire::c2s::ModerationDecide,
+                                                                        },
+                                                                        std::sync::Arc,
+                                                                    };
+
+                                                                    let ret: Result<(), loga::Error> = async {
+                                                                        let (state, account, req,):
+                                                                            (
+                                                                                &Arc<State>,
+                                                                                AccountId,
+                                                                                ModerationDecide,
+                                                                            ) =
+                                                                            (state, account, r,);
+                                                                        c2s_moderate(
+                                                                            state,
+                                                                            DbAccountId(account),
+                                                                            &req.channel,
+                                                                            ModerateReq::Decide {
+                                                                                message: req.message,
+                                                                                approve: req.approve,
+                                                                            }
+                                                                        ).await?;
+                                                                        return Ok(());
+                                                                    }.await;
                                                                     ret
                                                                 });
                                                             },
@@ -8736,6 +9117,8 @@ fn main() {
                                                                     ContactPost,
                                                                     ContactPostsRes,
                                                                     GetChannelMemberInfo,
+                                                                    GetModeration,
+                                                                    ModerationEntry,
                                                                     GetContactChannels,
                                                                     GetContactPosts,
                                                                     MemberInfoRes,
@@ -9150,7 +9533,7 @@ fn main() {
                                                                                                         ::sqlite
                                                                                                         ::good_query_many!(
                                                                                                             db,
-                                                                                                            r#"select seq, raw from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and seq >= ${i64 = start} and seq < ${i64 = end} order by seq"#;
+                                                                                                            r#"select seq, raw from message where account_id = ${account_id_t = &account} and identity = ${identity_id_t = &owner} and channel = ${channel_id_t = channel} and seq >= ${i64 = start} and seq < ${i64 = end} and (rel_type is null or rel_type != ${string = crate::subsystems::moderation::REL_DELETED}) order by seq"#;
                                                                                                             db_tx
                                                                                                         )
                                                                                                             .map_err(
@@ -9287,33 +9670,58 @@ fn main() {
                                                                                                             .context(
                                                                                                                 "Error fetching activity range from channel owner"
                                                                                                             )?;
+                                                                                                    let entries =
+                                                                                                        res.entries;
                                                                                                     let batch_len =
-                                                                                                        res
-                                                                                                            .messages
-                                                                                                            .len();
+                                                                                                        entries.len();
                                                                                                     let Some(
                                                                                                         batch_max
                                                                                                     ) =
-                                                                                                        res
-                                                                                                            .messages
+                                                                                                        entries
                                                                                                             .iter()
                                                                                                             .map(
                                                                                                                 |
-                                                                                                                    m
-                                                                                                                | m.seq
+                                                                                                                    e
+                                                                                                                | match e {
+                                                                                                                    crate
+                                                                                                                    ::interface
+                                                                                                                    ::s2s
+                                                                                                                    ::PulledEntry
+                                                                                                                    ::Message(
+                                                                                                                        m
+                                                                                                                    ) => m.seq,
+                                                                                                                    crate
+                                                                                                                    ::interface
+                                                                                                                    ::s2s
+                                                                                                                    ::PulledEntry
+                                                                                                                    ::Deleted(
+                                                                                                                        d
+                                                                                                                    ) => d.seq,
+                                                                                                                }
                                                                                                             )
                                                                                                             .max() else {
                                                                                                             break;
                                                                                                         };
                                                                                                     messages.extend(
-                                                                                                        res
-                                                                                                            .messages
+                                                                                                        entries
                                                                                                             .into_iter()
-                                                                                                            .filter(
+                                                                                                            .filter_map(
                                                                                                                 |
-                                                                                                                    m
-                                                                                                                | m.seq <
-                                                                                                                    end
+                                                                                                                    e
+                                                                                                                | match e {
+                                                                                                                    crate
+                                                                                                                    ::interface
+                                                                                                                    ::s2s
+                                                                                                                    ::PulledEntry
+                                                                                                                    ::Message(
+                                                                                                                        m
+                                                                                                                    ) if
+                                                                                                                        m.seq <
+                                                                                                                            end => Some(
+                                                                                                                        m
+                                                                                                                    ),
+                                                                                                                    _ => None,
+                                                                                                                }
                                                                                                             )
                                                                                                     );
                                                                                                     if batch_max + 1 >=
@@ -9395,7 +9803,7 @@ fn main() {
                                                                                     value: value,
                                                                                     policy: CachePolicy
                                                                                     ::Immutable.only_if(
-                                                                                        local.public_read && full
+                                                                                        local.public_read() && full
                                                                                     ),
                                                                                 });
                                                                             }.await;
@@ -10091,7 +10499,7 @@ fn main() {
                                                                                     value: value,
                                                                                     policy: CachePolicy::MaxAge(
                                                                                         SNAP_PAGE_MAX_AGE_SECS
-                                                                                    ).only_if(local.public_read),
+                                                                                    ).only_if(local.public_read()),
                                                                                 });
                                                                             }.await;
                                                                         ret
@@ -10179,7 +10587,7 @@ fn main() {
                                                                                         ),
                                                                                         policy: CachePolicy
                                                                                         ::Immutable.only_if(
-                                                                                            local.public_read
+                                                                                            local.public_read()
                                                                                         ),
                                                                                     });
                                                                                 }
@@ -10214,7 +10622,7 @@ fn main() {
                                                                                     ),
                                                                                     policy: CachePolicy
                                                                                     ::Immutable.only_if(
-                                                                                        local.public_read
+                                                                                        local.public_read()
                                                                                     ),
                                                                                 });
                                                                             }.await;
@@ -10314,7 +10722,7 @@ fn main() {
                                                                                         ),
                                                                                         policy: CachePolicy
                                                                                         ::Immutable.only_if(
-                                                                                            local.public_read
+                                                                                            local.public_read()
                                                                                         ),
                                                                                     });
                                                                                 }
@@ -10352,7 +10760,7 @@ fn main() {
                                                                                     ),
                                                                                     policy: CachePolicy
                                                                                     ::Immutable.only_if(
-                                                                                        local.public_read
+                                                                                        local.public_read()
                                                                                     ),
                                                                                 });
                                                                             }.await;
@@ -10673,6 +11081,136 @@ fn main() {
                                                                             }.await;
                                                                         ret
                                                                     }.map_err(GetErr::Local)),),);
+                                                                },
+                                                                "moderation" => {
+                                                                    let req =
+                                                                        match GetModeration::deserialize_path(
+                                                                            remainder
+                                                                        ) {
+                                                                            Ok(r) => r,
+                                                                            Err(e) => return Ok(response_400(e)),
+                                                                        };
+                                                                    return Ok(
+                                                                        json_or_err(state, "moderation", no_store({
+                                                                            let ret:
+                                                                                Result<Vec<ModerationEntry>, GetErr> =
+                                                                                async {
+                                                                                    let account =
+                                                                                        DbAccountId(account);
+                                                                                    let channel = req.channel;
+                                                                                    let cursor = req.cursor;
+                                                                                    let local =
+                                                                                        crate
+                                                                                        ::subsystems
+                                                                                        ::moderation
+                                                                                        ::c2s_channel(
+                                                                                            state,
+                                                                                            account,
+                                                                                            &channel
+                                                                                        ).await?;
+                                                                                    if local.is_owner(
+                                                                                        channel.identity
+                                                                                    ) {
+                                                                                        let db_owner =
+                                                                                            DbIdentity(
+                                                                                                channel.identity
+                                                                                            );
+                                                                                        let db_channel_id =
+                                                                                            crate
+                                                                                            ::interface
+                                                                                            ::db
+                                                                                            ::DbChannelId(
+                                                                                                channel.channel.clone()
+                                                                                            );
+                                                                                        return Ok(
+                                                                                            tx(&state.db, move |db_tx| {
+                                                                                                return crate
+                                                                                                ::subsystems
+                                                                                                ::moderation
+                                                                                                ::moderation_entries(
+                                                                                                    db_tx,
+                                                                                                    account,
+                                                                                                    db_owner,
+                                                                                                    &db_channel_id,
+                                                                                                    cursor
+                                                                                                );
+                                                                                            })
+                                                                                                .await
+                                                                                                .context(
+                                                                                                    "Error listing moderation queue"
+                                                                                                )?
+                                                                                        );
+                                                                                    }
+                                                                                    if local.level !=
+                                                                                        Some(
+                                                                                            shared
+                                                                                            ::interface
+                                                                                            ::shared
+                                                                                            ::Level
+                                                                                            ::Moderator
+                                                                                        ) {
+                                                                                        return Err(
+                                                                                            GetErr::Forbidden(
+                                                                                                "Not a moderator of this channel".to_string()
+                                                                                            )
+                                                                                        );
+                                                                                    }
+                                                                                    let signer =
+                                                                                        crate
+                                                                                        ::subsystems
+                                                                                        ::moderation
+                                                                                        ::c2s_signer(
+                                                                                            state,
+                                                                                            account,
+                                                                                            &local
+                                                                                        ).await?;
+                                                                                    let res =
+                                                                                        state
+                                                                                            .s2s_client
+                                                                                            .get_opt_authed(
+                                                                                                channel.identity,
+                                                                                                Some(&signer),
+                                                                                                &crate
+                                                                                                ::interface
+                                                                                                ::s2s
+                                                                                                ::GetModeration {
+                                                                                                    channel: channel.clone(),
+                                                                                                    cursor: cursor,
+                                                                                                }
+                                                                                            )
+                                                                                            .await;
+                                                                                    let Err(e) = res else {
+                                                                                        return remote(res);
+                                                                                    };
+                                                                                    let info =
+                                                                                        remote(
+                                                                                            crate
+                                                                                            ::subsystems
+                                                                                            ::messages
+                                                                                            ::member_refresh_info(
+                                                                                                state,
+                                                                                                account.0,
+                                                                                                &channel,
+                                                                                                &local
+                                                                                            ).await
+                                                                                        )?;
+                                                                                    if info.level !=
+                                                                                        shared
+                                                                                        ::interface
+                                                                                        ::shared
+                                                                                        ::Level
+                                                                                        ::Moderator {
+                                                                                        return Err(
+                                                                                            GetErr::Forbidden(
+                                                                                                "Not a moderator of this channel".to_string()
+                                                                                            )
+                                                                                        );
+                                                                                    }
+                                                                                    return Err(GetErr::Remote(e));
+                                                                                }.await;
+                                                                            ret
+                                                                        }))
+                                                                    );
                                                                 },
                                                                 "channel_member_info" => {
                                                                     let req =

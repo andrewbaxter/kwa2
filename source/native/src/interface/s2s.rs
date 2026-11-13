@@ -65,6 +65,7 @@ pub mod s2sv1t {
         shared::interface::{
             shared::{
                 ChannelId,
+                Level,
                 Message,
                 MessageClientId,
                 FileHash,
@@ -75,9 +76,18 @@ pub mod s2sv1t {
             wire::c2s::{
                 calendar_path_parse,
                 calendar_path_segments,
+                moderation_path_parse,
+                moderation_path_segments,
                 CalendarMonth,
                 CalendarToken,
+                ChannelInviteCreate,
+                ChannelInviteDelete,
+                ChannelInviteModify,
+                ChannelInviteRes,
+                ChannelMemberRes,
                 MemberInfoRes,
+                ModerationCursor,
+                ModerationEntry,
                 confirm_path_const,
                 confirm_path_element,
                 confirm_path_empty,
@@ -176,6 +186,7 @@ pub mod s2sv1t {
         pub latest_seq: Option<u64>,
         pub latest_snap_offset: Option<u64>,
         pub earliest_snap_offset: Option<u64>,
+        pub level: Level,
     }
 
     #[derive(Serialize, Deserialize, JsonSchema)]
@@ -211,6 +222,59 @@ pub mod s2sv1t {
 
     #[derive(Serialize, Deserialize, JsonSchema)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub struct PulledDeleted {
+        pub seq: u64,
+        pub id: MessageId,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum PulledEntry {
+        Message(PulledMessage),
+        Deleted(PulledDeleted),
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub struct PulledActivity {
+        pub entries: Vec<PulledEntry>,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum ModerateReq {
+        Decide {
+            message: MessageId,
+            approve: bool,
+        },
+        MemberSet {
+            member: Identity,
+            level: Level,
+        },
+        MemberRemove {
+            member: Identity,
+        },
+        InviteCreate(ChannelInviteCreate),
+        InviteModify(ChannelInviteModify),
+        InviteDelete(ChannelInviteDelete),
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub struct Moderate {
+        pub channel: QualifiedChannelId,
+        pub req: ModerateReq,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum ModerateRes {
+        None,
+        Invite(ChannelInviteRes),
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub struct SnapLookupRes {
         pub original_id: MessageId,
         pub snap_offset: u64,
@@ -224,6 +288,9 @@ pub mod s2sv1t {
     pub const GET_PREFIX_SNAP_LOOKUP: &str = "snap_lookup";
     pub const GET_PREFIX_MESSAGE_HISTORY: &str = "message_history";
     pub const GET_PREFIX_MEMBER_INFO: &str = "member_info";
+    pub const GET_PREFIX_MODERATION: &str = "moderation";
+    pub const GET_PREFIX_MEMBERS: &str = "members";
+    pub const GET_PREFIX_INVITES: &str = "invites";
     pub const GET_PREFIX_CALENDAR_PAGE: &str = "calendar_page";
     pub const GET_PREFIX_JOIN_PREVIEW: &str = "join_preview";
     pub const GET_PREFIX_FILE: &str = "file";
@@ -430,7 +497,7 @@ pub mod s2sv1t {
     }
 
     impl PathReqTrait for GetActivity {
-        type Resp = PulledMessages;
+        type Resp = PulledActivity;
 
         fn deserialize_path(path: &str) -> Result<Self, String> {
             let mut parts = deserialize_path(path);
@@ -644,6 +711,78 @@ pub mod s2sv1t {
         }
     }
 
+    pub struct GetModeration {
+        pub channel: QualifiedChannelId,
+        pub cursor: ModerationCursor,
+    }
+
+    impl PathReqTrait for GetModeration {
+        type Resp = Vec<ModerationEntry>;
+
+        fn deserialize_path(path: &str) -> Result<Self, String> {
+            let mut parts = deserialize_path(path);
+            confirm_path_const(&mut parts, GET_PREFIX_MODERATION)?;
+            let (channel, cursor) = moderation_path_parse(&mut parts)?;
+            confirm_path_empty(&mut parts)?;
+            return Ok(GetModeration {
+                channel: channel,
+                cursor: cursor,
+            });
+        }
+
+        fn serialize_path(&self) -> String {
+            return serialize_path(
+                [GET_PREFIX_MODERATION.to_string()]
+                    .into_iter()
+                    .chain(moderation_path_segments(&self.channel, self.cursor)),
+            );
+        }
+    }
+
+    pub struct GetMembers {
+        pub channel: QualifiedChannelId,
+    }
+
+    impl PathReqTrait for GetMembers {
+        type Resp = Vec<ChannelMemberRes>;
+
+        fn deserialize_path(path: &str) -> Result<Self, String> {
+            let mut parts = deserialize_path(path);
+            confirm_path_const(&mut parts, GET_PREFIX_MEMBERS)?;
+            let out = GetMembers { channel: channel_from_path(&mut parts)? };
+            confirm_path_empty(&mut parts)?;
+            return Ok(out);
+        }
+
+        fn serialize_path(&self) -> String {
+            return serialize_path(
+                [GET_PREFIX_MEMBERS.to_string()].into_iter().chain(channel_segments(&self.channel)),
+            );
+        }
+    }
+
+    pub struct GetInvites {
+        pub channel: QualifiedChannelId,
+    }
+
+    impl PathReqTrait for GetInvites {
+        type Resp = Vec<ChannelInviteRes>;
+
+        fn deserialize_path(path: &str) -> Result<Self, String> {
+            let mut parts = deserialize_path(path);
+            confirm_path_const(&mut parts, GET_PREFIX_INVITES)?;
+            let out = GetInvites { channel: channel_from_path(&mut parts)? };
+            confirm_path_empty(&mut parts)?;
+            return Ok(out);
+        }
+
+        fn serialize_path(&self) -> String {
+            return serialize_path(
+                [GET_PREFIX_INVITES.to_string()].into_iter().chain(channel_segments(&self.channel)),
+            );
+        }
+    }
+
     pub struct GetMessageHistory {
         pub channel: QualifiedChannelId,
         pub id: MessageId,
@@ -683,4 +822,5 @@ reqresp!(pub s2sv1 {
     Notify(s2sv1t::Notify) =>(),
     Join(s2sv1t::Join) => s2sv1t:: JoinRes,
     PullOutbox(s2sv1t::PullOutbox) => s2sv1t:: PulledMessages,
+    Moderate(s2sv1t::Moderate) => s2sv1t:: ModerateRes,
 });

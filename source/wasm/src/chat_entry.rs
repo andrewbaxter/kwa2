@@ -47,6 +47,7 @@ pub enum ChatFeedId {
     Channel(QualifiedChannelId),
     Outbox((Identity, QualifiedChannelId)),
     ServerOutbox((Identity, QualifiedChannelId)),
+    Moderation(QualifiedChannelId),
     Controls,
 }
 
@@ -55,6 +56,7 @@ pub enum ChatTimeId {
     None,
     Outbox(MessageClientId),
     ServerOutbox(u64),
+    Moderation(u64),
     Channel(SnapPageOffsetPos),
 }
 

@@ -2646,6 +2646,27 @@ svg.spinner4 path {
       },
     }),
   ];
+  presentation.leafChatEntryModerationState =
+    /** @type { Presentation["leafChatEntryModerationState"] } */ (args) => {
+      return {
+        root: e(
+          "span",
+          { textContent: args.text },
+          {
+            styles_: [
+              s("leaf_chat_entry_moderation_state", {
+                "": (s) => {
+                  s.fontSize = "9pt";
+                  s.fontWeight = "600";
+                  s.opacity = "0.7";
+                  s.alignSelf = "center";
+                },
+              }),
+            ],
+          },
+        ),
+      };
+    };
   presentation.leafChatEntryMessageButtonEdit =
     /** @type { Presentation["leafChatEntryMessageButtonEdit"] } */ (args) => {
       return {
@@ -3089,6 +3110,18 @@ svg.spinner4 path {
       args,
     ) => {
       return { root: chatControlsIconButton(svgIconMessage, "New message") };
+    };
+  presentation.leafChatControlsBarModeMenuButtonApprove =
+    /** @type { Presentation["leafChatControlsBarModeMenuButtonApprove"] } */ (
+      args,
+    ) => {
+      return { root: chatControlsIconButton(svgIconCheck, "Approve") };
+    };
+  presentation.leafChatControlsBarModeMenuButtonReject =
+    /** @type { Presentation["leafChatControlsBarModeMenuButtonReject"] } */ (
+      args,
+    ) => {
+      return { root: chatControlsIconButton(svgIconNope, "Reject") };
     };
 
   const chatEditorLeftWidth = "0.8cm";

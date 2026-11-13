@@ -49,6 +49,7 @@ pub mod infinite;
 pub mod chat;
 pub mod chat_entry;
 pub mod chat_feed_channel;
+pub mod chat_feed_moderation;
 pub mod chat_feed_outbox;
 pub mod chat_feed_server_outbox;
 pub mod chat_feed_controls;

@@ -51,7 +51,10 @@ use {
                 self,
                 ActivityOffset,
             },
-            s2c::OutboxChange,
+            s2c::{
+                ModerationChange,
+                OutboxChange,
+            },
         },
     },
     spaghettinuum::interface::identity::Identity,
@@ -76,6 +79,19 @@ pub fn handle_outbox_change(eg: &EventGraph, change: OutboxChange) {
         return;
     };
     o.notify(eg.clone());
+}
+
+pub fn handle_moderation_change(eg: &EventGraph, change: ModerationChange) {
+    let state = state();
+    let current_chat = state.current_chat.borrow();
+    let Some(c) = &*current_chat else {
+        return;
+    };
+    let cf = c.chat_state2.channel_lookup.borrow();
+    let Some(f) = cf.get(&change.channel) else {
+        return;
+    };
+    f.moderation.notify(eg.clone());
 }
 
 pub fn trigger_push() {

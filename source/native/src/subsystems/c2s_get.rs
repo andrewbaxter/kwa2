@@ -30,6 +30,7 @@ use {
     },
     htwrap::htserve::responses::{
         body_full,
+        response_403,
         response_503,
         Body,
     },
@@ -62,6 +63,7 @@ use {
 pub enum GetErr {
     Local(loga::Error),
     Remote(loga::Error),
+    Forbidden(String),
 }
 
 impl From<loga::Error> for GetErr {
@@ -93,6 +95,10 @@ pub fn json_or_err<T: Serialize>(state: &State, what: &str, r: Result<Cached<T>,
         Err(GetErr::Remote(e)) => {
             state.log.log_err(loga::DEBUG, e.context(format!("Channel owner unreachable computing {}", what)));
             return json_response(&GetResp::<T>::OwnerUnreachable, CachePolicy::NoStore);
+        },
+        Err(GetErr::Forbidden(m)) => {
+            state.log.log(loga::DEBUG, format!("Forbidden computing {}: {}", what, m));
+            return response_403();
         },
     }
 }

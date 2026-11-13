@@ -17,6 +17,10 @@ use {
         chat_feed_channel::ChannelFeed,
         chat_controls::build_controls,
         chat_feed_controls::FeedControls,
+        chat_feed_moderation::{
+            start_level_polling,
+            ModerationFeed,
+        },
         chat_feed_outbox::OutboxFeed,
         chat_feed_server_outbox::ServerOutboxFeed,
         infinite::{
@@ -151,12 +155,15 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
         inf.add_feed(ChatFeedId::Outbox((m.own_identity.clone(), m.id.clone())), f_o.clone());
         let f_so = ServerOutboxFeed::new(chat_state.clone(), m.own_identity.clone(), m.id.clone());
         inf.add_feed(ChatFeedId::ServerOutbox((m.own_identity.clone(), m.id.clone())), f_so.clone());
+        let f_m = ModerationFeed::new(chat_state.clone(), m.id.clone());
+        inf.add_feed(ChatFeedId::Moderation(m.id.clone()), f_m.clone());
         let chat_state2 = Rc::new(ChatState2 { channel_lookup: Default::default() });
         chat_state2.channel_lookup.borrow_mut().clear();
         chat_state2.channel_lookup.borrow_mut().extend([(m.id.clone(), ChannelFeeds {
             channel: f_c,
             outboxes: RefCell::new([(m.own_identity.clone(), f_o)].into_iter().collect()),
             server_outboxes: RefCell::new([(m.own_identity.clone(), f_so)].into_iter().collect()),
+            moderation: f_m,
         })].into_iter());
         *state().current_chat.borrow_mut() = Some(CurrentChat {
             source: CurrentChatSource::Channel(m.id.clone()),
@@ -164,6 +171,7 @@ pub fn build(pc: &mut ProcessingContext, m: &MinistateChannel) -> El {
             chat_state2: chat_state2.clone(),
         });
         let mut own = vec![];
+        own.push(start_level_polling(pc.eg(), chat_state2.clone()));
 
         // Restore initial state
         let reset_id = match &m.reset_id {

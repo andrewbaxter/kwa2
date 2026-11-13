@@ -34,6 +34,7 @@ use {
         async_::bg_val,
         background::{
             handle_notification,
+            handle_moderation_change,
             handle_outbox_change,
             schedule_trigger_pull,
             trigger_push,
@@ -233,6 +234,9 @@ pub fn main() {
                             },
                             s2c::WsEvent::Outbox(o) => {
                                 handle_outbox_change(&eg, o);
+                            },
+                            s2c::WsEvent::Moderation(m) => {
+                                handle_moderation_change(&eg, m);
                             },
                         }
                     }

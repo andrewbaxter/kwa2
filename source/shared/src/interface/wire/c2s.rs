@@ -4,6 +4,7 @@ use {
         ChannelId,
         ChannelInviteId,
         IdentityInviteId,
+        Level,
         Message,
         MessageBlock,
         MessageBody,
@@ -230,8 +231,8 @@ pub struct ChannelRes {
     pub shown_description: Option<String>,
     pub portrait: Option<crate::interface::shared::FileRef>,
     pub retention: ChannelRetention,
-    pub public_read: bool,
-    pub public_post: bool,
+    pub default_level: Option<Level>,
+    pub level: Level,
     pub reminders: bool,
     pub reminder_lead_minutes: u64,
 }
@@ -257,9 +258,7 @@ pub struct ChannelModify {
     #[serde(default)]
     pub retention: Option<ChannelRetention>,
     #[serde(default)]
-    pub public_read: Option<bool>,
-    #[serde(default)]
-    pub public_post: Option<bool>,
+    pub default_level: Option<ModifyOption<Level>>,
     #[serde(default)]
     pub portrait: Option<ModifyOption<crate::interface::shared::Portrait>>,
     #[serde(default)]
@@ -334,7 +333,7 @@ pub struct ChannelMemberList {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelMemberRes {
     pub identity: Identity,
-    pub can_post: bool,
+    pub level: Level,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -343,7 +342,7 @@ pub struct ChannelMemberModify {
     pub channel: QualifiedChannelId,
     pub member: Identity,
     #[serde(default)]
-    pub can_post: Option<bool>,
+    pub level: Option<Level>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -370,12 +369,7 @@ pub struct ChannelInviteCreate {
     pub single_use: bool,
     #[serde(default)]
     pub expiry: Option<Timestamp>,
-    #[serde(default = "default_true")]
-    pub can_post: bool,
-}
-
-fn default_true() -> bool {
-    return true;
+    pub level: Level,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
@@ -389,12 +383,13 @@ pub struct ChannelInviteRes {
     pub shown_description: Option<String>,
     pub single_use: bool,
     pub expiry: Option<Timestamp>,
-    pub can_post: bool,
+    pub level: Level,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelInviteModify {
+    pub channel: QualifiedChannelId,
     pub id: ChannelInviteId,
     #[serde(default)]
     pub name: Option<String>,
@@ -409,17 +404,36 @@ pub struct ChannelInviteModify {
     #[serde(default)]
     pub expiry: Option<ModifyOption<Timestamp>>,
     #[serde(default)]
-    pub can_post: Option<bool>,
+    pub level: Option<Level>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct ChannelInviteDelete {
+    pub channel: QualifiedChannelId,
     pub id: ChannelInviteId,
 }
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct ChannelInviteList;
+pub struct ChannelInviteList {
+    #[serde(default)]
+    pub channel: Option<QualifiedChannelId>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ChannelRefreshLevel {
+    pub channel: QualifiedChannelId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ModerationDecide {
+    pub channel: QualifiedChannelId,
+    pub message: MessageId,
+    pub approve: bool,
+}
 
 // Contacts
 #[derive(Serialize, Deserialize, JsonSchema, Clone)]
@@ -512,6 +526,8 @@ reqresp!(pub proto {
     ChannelInviteModify(ChannelInviteModify) => ChannelInviteRes,
     ChannelInviteDelete(ChannelInviteDelete) =>(),
     ChannelInviteList(ChannelInviteList) => Vec < ChannelInviteRes >,
+    ChannelRefreshLevel(ChannelRefreshLevel) => Level,
+    ModerationDecide(ModerationDecide) =>(),
     ContactList(ContactList) => Vec < ContactRes >,
     ContactModify(ContactModify) => ContactRes,
     ContactDelete(ContactDelete) =>(),
@@ -829,6 +845,95 @@ impl PathReqTrait for OutboxList {
     fn serialize_path(&self) -> String {
         return serialize_path(
             [PATH_PREFIX_OUTBOX.to_string(), self.channel.identity.to_string(), self.channel.channel.0.to_string()],
+        );
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ModerationEntry {
+    pub seq: u64,
+    pub state: crate::interface::shared::ModerationState,
+    pub received: Timestamp,
+    pub sender: Identity,
+    pub client_id: Option<MessageClientId>,
+    pub id: MessageId,
+    pub rel: crate::interface::shared::MessageRel,
+    pub blocks: Vec<MessageBlock>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ModerationCursor {
+    Latest,
+    Before(u64),
+    After(u64),
+}
+
+pub const MODERATION_PAGE_LIMIT: u32 = 50;
+const MODERATION_CURSOR_LATEST: &str = "latest";
+const MODERATION_CURSOR_BEFORE: &str = "before";
+const MODERATION_CURSOR_AFTER: &str = "after";
+
+pub fn moderation_path_segments(channel: &QualifiedChannelId, cursor: ModerationCursor) -> Vec<String> {
+    let mut out = vec![channel.identity.to_string(), channel.channel.0.to_string()];
+    match cursor {
+        ModerationCursor::Latest => out.push(MODERATION_CURSOR_LATEST.to_string()),
+        ModerationCursor::Before(seq) => {
+            out.push(MODERATION_CURSOR_BEFORE.to_string());
+            out.push(seq.to_string());
+        },
+        ModerationCursor::After(seq) => {
+            out.push(MODERATION_CURSOR_AFTER.to_string());
+            out.push(seq.to_string());
+        },
+    }
+    return out;
+}
+
+pub fn moderation_path_parse<
+    'a,
+>(parts: &mut dyn Iterator<Item = Cow<'a, str>>) -> Result<(QualifiedChannelId, ModerationCursor), String> {
+    let channel = QualifiedChannelId {
+        identity: confirm_path_element(parts, "channel identity")?,
+        channel: ChannelId(confirm_path_element(parts, "channel")?),
+    };
+    let kind: String = confirm_path_element(parts, "cursor kind")?;
+    let cursor = match kind.as_str() {
+        MODERATION_CURSOR_LATEST => ModerationCursor::Latest,
+        MODERATION_CURSOR_BEFORE => ModerationCursor::Before(confirm_path_element(parts, "cursor seq")?),
+        MODERATION_CURSOR_AFTER => ModerationCursor::After(confirm_path_element(parts, "cursor seq")?),
+        other => return Err(format!("Unknown moderation cursor kind [{}]", other)),
+    };
+    return Ok((channel, cursor));
+}
+
+pub struct GetModeration {
+    pub channel: QualifiedChannelId,
+    pub cursor: ModerationCursor,
+}
+
+const PATH_PREFIX_MODERATION: &str = "moderation";
+
+impl PathReqTrait for GetModeration {
+    type Resp = Vec<ModerationEntry>;
+
+    fn deserialize_path(path: &str) -> Result<Self, String> {
+        let mut parts = deserialize_path(path);
+        confirm_path_const(&mut parts, "")?;
+        confirm_path_const(&mut parts, PATH_PREFIX_MODERATION)?;
+        let (channel, cursor) = moderation_path_parse(&mut parts)?;
+        confirm_path_empty(&mut parts)?;
+        return Ok(GetModeration {
+            channel: channel,
+            cursor: cursor,
+        });
+    }
+
+    fn serialize_path(&self) -> String {
+        return serialize_path(
+            [PATH_PREFIX_MODERATION.to_string()]
+                .into_iter()
+                .chain(moderation_path_segments(&self.channel, self.cursor)),
         );
     }
 }

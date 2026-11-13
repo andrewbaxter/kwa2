@@ -395,22 +395,39 @@ pub async fn delete_channelmember(channel: &QualifiedChannelId, v: Identity) {
     set_stored_values(&k, &values);
 }
 
-// Channel invites
-const LOCALSTORAGE_CHANNEL_INVITES: &str = "channel_invites";
 pub type LocalChannelInvite = LocalValue<ChannelInviteRes>;
 
-pub fn get_stored_api_channelinvites(touch: Option<&ChannelInviteId>) -> Vec<LocalChannelInvite> {
-    return get_stored_values(LOCALSTORAGE_CHANNEL_INVITES, |x| x.id, touch);
+fn key_localstorage_channelinvites(channel: &QualifiedChannelId) -> String {
+    return format!("channel_invites__{}__{}", channel.identity.to_string(), channel.channel.0);
 }
 
-pub async fn req_api_channelinvites(touch: Option<&ChannelInviteId>) -> Result<Vec<LocalChannelInvite>, String> {
-    return req_api_values(LOCALSTORAGE_CHANNEL_INVITES, c2s::ChannelInviteList, |x| x.id, touch).await;
+pub fn get_stored_api_channelinvites(
+    channel: &QualifiedChannelId,
+    touch: Option<&ChannelInviteId>,
+) -> Vec<LocalChannelInvite> {
+    return get_stored_values(&key_localstorage_channelinvites(channel), |x| x.id, touch);
 }
 
-pub fn get_or_req_api_channelinvite(id: &ChannelInviteId, touch: bool) -> NowOrLater<LocalChannelInvite> {
+pub async fn req_api_channelinvites(
+    channel: &QualifiedChannelId,
+    touch: Option<&ChannelInviteId>,
+) -> Result<Vec<LocalChannelInvite>, String> {
+    return req_api_values(
+        &key_localstorage_channelinvites(channel),
+        c2s::ChannelInviteList { channel: Some(channel.clone()) },
+        |x| x.id,
+        touch,
+    ).await;
+}
+
+pub fn get_or_req_api_channelinvite(
+    channel: &QualifiedChannelId,
+    id: &ChannelInviteId,
+    touch: bool,
+) -> NowOrLater<LocalChannelInvite> {
     return get_or_req_api_value(
-        LOCALSTORAGE_CHANNEL_INVITES,
-        c2s::ChannelInviteList,
+        &key_localstorage_channelinvites(channel),
+        c2s::ChannelInviteList { channel: Some(channel.clone()) },
         |x| x.id.clone(),
         id.clone(),
         touch,
@@ -418,11 +435,11 @@ pub fn get_or_req_api_channelinvite(id: &ChannelInviteId, touch: bool) -> NowOrL
 }
 
 pub async fn ensure_channelinvite(v: ChannelInviteRes) {
-    ensure_api_value(LOCALSTORAGE_CHANNEL_INVITES, |x| x.id, v).await;
+    ensure_api_value(&key_localstorage_channelinvites(&v.token.channel.clone()), |x| x.id, v).await;
 }
 
 pub async fn delete_channelinvite(v: ChannelInviteRes) {
-    delete_api_value(LOCALSTORAGE_CHANNEL_INVITES, |x| x.id.clone(), v).await;
+    delete_api_value(&key_localstorage_channelinvites(&v.token.channel.clone()), |x| x.id.clone(), v).await;
 }
 
 // Contacts

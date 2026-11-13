@@ -1203,7 +1203,14 @@ impl<E: 'static + Entry> Infinite<E> {
                         f_state.early_stop = false;
                     }
                     if !f_state.early_stop && f_state.early_reserve.len() < MIN_RESERVE {
-                        let pivot = get_pivot_early(&*self.0.real.borrow(), feed_id, f_state).unwrap();
+                        let pivot =
+                            get_pivot_early(
+                                &*self.0.real.borrow(),
+                                feed_id,
+                                f_state,
+                            ).unwrap_or_else(
+                                || center.as_ref().cloned().unwrap_or_else(|| self.0.reset_time.borrow().clone()),
+                            );
                         f_state.feed.request_before(pc.eg(), pivot);
                         requesting_early = true;
                     }
@@ -1212,7 +1219,14 @@ impl<E: 'static + Entry> Infinite<E> {
                         f_state.late_stop = false;
                     }
                     if !f_state.late_stop && f_state.late_reserve.len() < MIN_RESERVE {
-                        let pivot = get_pivot_late(&*self.0.real.borrow(), feed_id, f_state).unwrap();
+                        let pivot =
+                            get_pivot_late(
+                                &*self.0.real.borrow(),
+                                feed_id,
+                                f_state,
+                            ).unwrap_or_else(
+                                || center.as_ref().cloned().unwrap_or_else(|| self.0.reset_time.borrow().clone()),
+                            );
                         f_state.feed.request_after(pc.eg(), pivot);
                         requesting_late = true;
                     }
@@ -1603,6 +1617,16 @@ impl<E: 'static + Entry> Infinite<E> {
                     };
                 }
             });
+        }
+        self.shake();
+    }
+
+    pub fn reopen(&self, feed_id: &E::FeedId) {
+        {
+            let mut feeds = self.0.feeds.borrow_mut();
+            let f_state = feeds.get_mut(feed_id).unwrap();
+            f_state.early_stop = false;
+            f_state.late_stop = false;
         }
         self.shake();
     }

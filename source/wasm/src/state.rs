@@ -104,6 +104,7 @@ use {
     },
     shared::interface::{
         shared::{
+            Level,
             ChannelGroupId,
             ChannelInviteId,
             FileRef,
@@ -357,8 +358,8 @@ pub struct LocalChannel1 {
     pub portrait: HistPrim<Option<FileRef>>,
     pub group: HistPrim<Option<ChannelGroupId>>,
     pub retention: HistPrim<ChannelRetention>,
-    pub public_read: HistPrim<bool>,
-    pub public_post: HistPrim<bool>,
+    pub default_level: HistPrim<Option<Level>>,
+    pub level: HistPrim<Level>,
     pub reminders: HistPrim<bool>,
     pub reminder_lead_minutes: HistPrim<u64>,
     pub own_identity: Identity,
@@ -724,8 +725,8 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
                 existing_c.portrait.set(pc, received_c.res.portrait.clone());
                 existing_c.group.set(pc, received_c.res.group);
                 existing_c.retention.set(pc, received_c.res.retention);
-                existing_c.public_read.set(pc, received_c.res.public_read);
-                existing_c.public_post.set(pc, received_c.res.public_post);
+                existing_c.default_level.set(pc, received_c.res.default_level);
+                existing_c.level.set(pc, received_c.res.level);
                 existing_c.reminders.set(pc, received_c.res.reminders);
                 existing_c.reminder_lead_minutes.set(pc, received_c.res.reminder_lead_minutes);
                 existing_c
@@ -744,8 +745,8 @@ pub fn merge_top(pc: &mut ProcessingContext, cs: Vec<LocalChannel>, cgs: Vec<Loc
                     portrait: HistPrim::new(pc, received_c.res.portrait.clone()),
                     group: HistPrim::new(pc, received_c.res.group.clone()),
                     retention: HistPrim::new(pc, received_c.res.retention),
-                    public_read: HistPrim::new(pc, received_c.res.public_read),
-                    public_post: HistPrim::new(pc, received_c.res.public_post),
+                    default_level: HistPrim::new(pc, received_c.res.default_level),
+                    level: HistPrim::new(pc, received_c.res.level),
                     reminders: HistPrim::new(pc, received_c.res.reminders),
                     reminder_lead_minutes: HistPrim::new(pc, received_c.res.reminder_lead_minutes),
                 })

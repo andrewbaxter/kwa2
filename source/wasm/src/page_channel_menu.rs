@@ -15,6 +15,7 @@ use {
     },
     lunk::ProcessingContext,
     rooting::El,
+    shared::interface::shared::Level,
 };
 
 pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
@@ -35,7 +36,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                 image: None,
                 generated_image: None,
             }).root);
-            if local.id.identity == sender {
+            if local.level.get() == Level::Moderator {
                 children.push(style_export::leaf_menu_link(style_export::LeafMenuLinkArgs {
                     text: format!("Members"),
                     link: ministate_octothorpe(&Ministate::ChannelMembers(local.id.clone())),

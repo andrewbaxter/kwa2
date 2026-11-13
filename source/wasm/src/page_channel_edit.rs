@@ -2,6 +2,7 @@ use {
     crate::{
         api::req_post_json,
         pageutil::{
+            FormDefaultLevel,
             FormMemberRetention,
             FormOptChannelGroup,
             FormOwnerRetention,
@@ -23,7 +24,10 @@ use {
     rooting::El,
     rooting_forms::Form,
     shared::interface::{
-        shared::ChannelGroupId,
+        shared::{
+            ChannelGroupId,
+            Level,
+        },
         wire::c2s::{
             self,
             ChannelRetention,
@@ -68,8 +72,8 @@ struct OwnerForm_ {
     group: FormOptChannelGroup,
     #[title("Keep history")]
     retention: FormOwnerRetention,
-    #[title("Public: anyone can read")]
-    public_read: bool,
+    #[title("Public access")]
+    default_level: FormDefaultLevel,
     #[title("Event reminders")]
     reminders: bool,
     #[title("Remind minutes before")]
@@ -83,7 +87,7 @@ struct Values {
     portrait: FormPortrait,
     group: Option<ChannelGroupId>,
     retention: ChannelRetention,
-    public_read: Option<bool>,
+    default_level: Option<Option<Level>>,
     reminders: bool,
     reminder_lead_minutes: u64,
 }
@@ -110,7 +114,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                             portrait: portrait.clone(),
                             group: FormOptChannelGroup(local.group.get()),
                             retention: FormOwnerRetention(local.retention.get()),
-                            public_read: local.public_read.get(),
+                            default_level: FormDefaultLevel(local.default_level.get()),
                             reminders: local.reminders.get(),
                             reminder_lead_minutes: local.reminder_lead_minutes.get(),
                         }));
@@ -123,7 +127,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                                 portrait: v.portrait,
                                 group: v.group.0,
                                 retention: v.retention.0,
-                                public_read: Some(v.public_read),
+                                default_level: Some(v.default_level.0),
                                 reminders: v.reminders,
                                 reminder_lead_minutes: v.reminder_lead_minutes,
                             });
@@ -147,7 +151,7 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                                 portrait: v.portrait,
                                 group: v.group.0,
                                 retention: v.retention.0,
-                                public_read: None,
+                                default_level: None,
                                 reminders: v.reminders,
                                 reminder_lead_minutes: v.reminder_lead_minutes,
                             });
@@ -194,11 +198,12 @@ pub fn build(pc: &mut ProcessingContext, s: &MinistateChannelSub) -> El {
                         } else {
                             Some(new_values.retention)
                         },
-                        public_read: match new_values.public_read {
-                            Some(read) if read != local.public_read.get() => Some(read),
+                        default_level: match new_values.default_level {
+                            Some(level) if level != local.default_level.get() => Some(
+                                c2s::ModifyOption { value: level },
+                            ),
                             _ => None,
                         },
-                        public_post: None,
                         portrait: new_values.portrait.into_modify().await?,
                         reminders: if new_values.reminders == local.reminders.get() {
                             None

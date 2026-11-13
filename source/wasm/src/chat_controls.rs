@@ -1,5 +1,6 @@
 use {
     crate::{
+        api::req_post_json,
         blocks::{
             format_size,
             order_blocks,
@@ -53,11 +54,15 @@ use {
         El,
         scope_any,
     },
-    shared::interface::shared::{
-        mime_is_media,
-        MessageBlockEvent,
-        MessageBlockExtension,
-        QualifiedChannelId,
+    shared::interface::{
+        shared::{
+            mime_is_media,
+            MessageBlockEvent,
+            MessageBlockExtension,
+            ModerationState,
+            QualifiedChannelId,
+        },
+        wire::c2s,
     },
     spaghettinuum::interface::identity::Identity,
     std::{
@@ -895,7 +900,108 @@ pub fn build_controls(
                         );
                         focus = Some(editor.clone());
                         controls.root.ref_own(|_| editor);
-                        inf_post_replace = vec![controls.root];
+                        let moderation_bar =
+                            style_export::cont_group(style_export::ContGroupArgs { children: vec![] }).root;
+                        moderation_bar.ref_own(
+                            |moderation_bar| link!(
+                                (pc = pc),
+                                (mode = mode.clone()),
+                                (),
+                                (
+                                    out = moderation_bar.weak(),
+                                    chat_state = chat_state.clone(),
+                                    inner = RefCell::new(None)
+                                ) {
+                                    let out = out.upgrade()?;
+                                    out.ref_clear();
+                                    *inner.borrow_mut() = None;
+                                    let Some(focus) = mode.borrow().focus() else {
+                                        return None;
+                                    };
+                                    let ChatModeReplyMessageTarget::Channel(target) = &focus.target else {
+                                        return None;
+                                    };
+                                    let Some(moderation) =
+                                        chat_state.moderation_states.borrow().get(target).cloned() else {
+                                            return None;
+                                        };
+                                    *inner.borrow_mut() =
+                                        Some(
+                                            scope_any(
+                                                link!(
+                                                    (pc = pc),
+                                                    (moderation = moderation),
+                                                    (),
+                                                    (out = out.weak(), target = target.clone()) {
+                                                        let out = out.upgrade()?;
+                                                        out.ref_clear();
+                                                        let mut children = vec![];
+                                                        let current = *moderation.borrow();
+                                                        for (
+                                                            approve,
+                                                            button
+                                                        ) in [
+                                                            (
+                                                                true,
+                                                                style_export
+                                                                ::leaf_chat_controls_bar_mode_menu_button_approve().root
+                                                            ),
+                                                            (
+                                                                false,
+                                                                style_export
+                                                                ::leaf_chat_controls_bar_mode_menu_button_reject().root
+                                                            ),
+                                                        ] {
+                                                            if (approve && current == ModerationState::Approved) ||
+                                                                (!approve && current == ModerationState::Rejected) {
+                                                                continue;
+                                                            }
+                                                            children.push(button.on("click", {
+                                                                let eg = pc.eg();
+                                                                let target = target.clone();
+                                                                let moderation = moderation.clone();
+                                                                move |_| {
+                                                                    spawn_log("Moderating message", {
+                                                                        let eg = eg.clone();
+                                                                        let target = target.clone();
+                                                                        let moderation = moderation.clone();
+                                                                        async move {
+                                                                            req_post_json(
+                                                                                &state().env.base_url,
+                                                                                c2s::ModerationDecide {
+                                                                                    channel: target.channel.clone(),
+                                                                                    message: target.message.clone(),
+                                                                                    approve: approve,
+                                                                                }
+                                                                            ).await?;
+                                                                            eg.event(|pc| {
+                                                                                moderation.set(pc, if approve {
+                                                                                    ModerationState::Approved
+                                                                                } else {
+                                                                                    ModerationState::Rejected
+                                                                                });
+                                                                            }).unwrap();
+                                                                            return Ok(());
+                                                                        }
+                                                                    });
+                                                                }
+                                                            }));
+                                                        }
+                                                        out.ref_push(
+                                                            style_export::cont_chat_controls_bar_mode_menu(
+                                                                style_export::ContChatControlsBarModeMenuArgs {
+                                                                    children: children
+                                                                },
+                                                            ).root,
+                                                        );
+                                                    }
+                                                ),
+                                            ),
+                                        );
+                                }
+                            ),
+                        );
+                        inf_post_replace = vec![moderation_bar, controls.root];
                     },
                     ChatMode::EditMessage(c) => {
                         let controls = style_export::leaf_chat_editor_mode_edit();

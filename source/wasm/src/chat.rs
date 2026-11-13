@@ -7,6 +7,7 @@ use {
             ChatTime,
         },
         chat_feed_channel::ChannelFeed,
+        chat_feed_moderation::ModerationFeed,
         chat_feed_outbox::OutboxFeed,
         chat_feed_server_outbox::ServerOutboxFeed,
         state::CurrentChatSource,
@@ -21,6 +22,7 @@ use {
     rooting::scope_any,
     shared::interface::shared::{
         MessageClientId,
+        ModerationState,
         QualifiedChannelId,
         QualifiedMessageId,
     },
@@ -111,6 +113,7 @@ pub struct ChannelFeeds {
     pub channel: ChannelFeed,
     pub outboxes: RefCell<HashMap<Identity, OutboxFeed>>,
     pub server_outboxes: RefCell<HashMap<Identity, ServerOutboxFeed>>,
+    pub moderation: ModerationFeed,
 }
 
 pub type ClientIdKey = (QualifiedChannelId, Identity, MessageClientId);
@@ -119,6 +122,7 @@ pub type ClientIdKey = (QualifiedChannelId, Identity, MessageClientId);
 pub enum CopyStage {
     Device,
     Server,
+    Moderation,
     Channel,
 }
 
@@ -130,7 +134,9 @@ pub struct ChatState {
     pub entry_channel_lookup_by_client_id: RefCell<HashMap<ClientIdKey, Weak<ChatEntry>>>,
     pub entry_server_outbox_lookup: RefCell<HashMap<ClientIdKey, Weak<ChatEntry>>>,
     pub entry_outbox_lookup: RefCell<HashMap<ClientIdKey, Weak<ChatEntry>>>,
+    pub entry_moderation_lookup: RefCell<HashMap<ClientIdKey, Weak<ChatEntry>>>,
     pub edit_overlays: RefCell<HashMap<QualifiedMessageId, EditOverlay>>,
+    pub moderation_states: RefCell<HashMap<QualifiedMessageId, Prim<ModerationState>>>,
     pub mode: HistPrim<ChatMode>,
 }
 
@@ -149,7 +155,9 @@ impl ChatState {
             entry_channel_lookup_by_client_id: Default::default(),
             entry_server_outbox_lookup: Default::default(),
             entry_outbox_lookup: Default::default(),
+            entry_moderation_lookup: Default::default(),
             edit_overlays: Default::default(),
+            moderation_states: Default::default(),
             mode: mode,
         };
     }
@@ -192,13 +200,14 @@ impl ChatState {
         match stage {
             CopyStage::Device => return &self.entry_outbox_lookup,
             CopyStage::Server => return &self.entry_server_outbox_lookup,
+            CopyStage::Moderation => return &self.entry_moderation_lookup,
             CopyStage::Channel => return &self.entry_channel_lookup_by_client_id,
         }
     }
 
     fn live_copies(&self, key: &ClientIdKey) -> Vec<Rc<ChatEntry>> {
         let mut out = vec![];
-        for stage in [CopyStage::Channel, CopyStage::Server, CopyStage::Device] {
+        for stage in [CopyStage::Channel, CopyStage::Moderation, CopyStage::Server, CopyStage::Device] {
             if let Some(e) = self.stage_lookup(stage).borrow().get(key).and_then(|e| e.upgrade()) {
                 out.push(e);
             }

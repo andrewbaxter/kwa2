@@ -5,7 +5,10 @@ use {
             self,
             get_or_req_api_channelinvite,
         },
-        pageutil::build_nol_form,
+        pageutil::{
+            FormLevel,
+            build_nol_form,
+        },
         state::{
             goto_replace_ministate,
             state,
@@ -45,15 +48,15 @@ struct Form_ {
     single_use: bool,
     #[title("Expiry")]
     expiry: Option<Timestamp>,
-    #[title("Joiners can post")]
-    can_post: bool,
+    #[title("Joiner level")]
+    level: FormLevel,
 }
 
 pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &ChannelInviteId) -> El {
     return build_nol_form(pc, &Ministate::ChannelInvite(MinistateChannelInvite {
         channel: channel.clone(),
         invite: id.clone(),
-    }), "Edit invite", get_or_req_api_channelinvite(id, true).map({
+    }), "Edit invite", get_or_req_api_channelinvite(channel, id, true).map({
         let eg = pc.eg();
         let channel = channel.clone();
         move |local| {
@@ -64,7 +67,7 @@ pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &Chan
                 shown_description: local.res.shown_description.clone(),
                 single_use: local.res.single_use.clone(),
                 expiry: local.res.expiry.clone(),
-                can_post: local.res.can_post,
+                level: FormLevel(local.res.level),
             }));
             let form_state = Rc::new(form_state);
             return (form_els.error, form_els.elements, async move |_idem| {
@@ -72,6 +75,7 @@ pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &Chan
                     return Ok(());
                 };
                 let res = req_post_json(&state().env.base_url, c2s::ChannelInviteModify {
+                    channel: channel.clone(),
                     id: local.res.id.clone(),
                     name: if new_values.name == local.res.name {
                         None
@@ -103,10 +107,10 @@ pub fn build(pc: &mut ProcessingContext, channel: &QualifiedChannelId, id: &Chan
                     } else {
                         Some(ModifyOption { value: new_values.expiry })
                     },
-                    can_post: if new_values.can_post == local.res.can_post {
+                    level: if new_values.level.0 == local.res.level {
                         None
                     } else {
-                        Some(new_values.can_post)
+                        Some(new_values.level.0)
                     },
                 }).await?;
                 localdata::ensure_channelinvite(res.clone()).await;
